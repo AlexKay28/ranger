@@ -58,6 +58,7 @@ def test_readme_links_the_reference_and_catalog():
     assert "docs/API.md" in README_TEXT          # API reference reachable
     assert "docs/commands.md" in README_TEXT     # command catalog reachable
     assert "docs/PARADIGM.md" in README_TEXT     # design backbone reachable
+    assert "docs/ARCHITECTURE.md" in README_TEXT # codebase tour reachable
     assert "backend" in API_TEXT                 # backends documented
 
 

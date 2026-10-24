@@ -99,9 +99,11 @@ name like "build"/"plan"), `title`, `thinking`. Unknown keywords raise
 
 See [docs/commands.md](docs/commands.md) for the full command catalog —
 15 methods at three maturity tiers: what's shipped, what's next, and
-what needs bigger machinery (gates, retries, safety rails) — and
+what needs bigger machinery (gates, retries, safety rails) —
 [docs/API.md](docs/API.md) for the complete, per-setting API reference
-(kept mechanically in sync with the code by the test suite).
+(kept mechanically in sync with the code by the test suite), and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a high-level tour of
+the codebase and its three architectural decisions.
 
 ## Context state (memory)
 
