@@ -1,5 +1,7 @@
 # ranger
 
+![CI](https://github.com/AlexKay28/ranger/actions/workflows/ci.yml/badge.svg)
+
 Agent-as-a-library. Run the [opencode](https://opencode.ai) coding agent headlessly
 from plain Python code — for agentic-loop prototyping. You write code, not chat.
 
