@@ -12,6 +12,7 @@ import importlib.util
 import inspect
 import py_compile
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from ranger import Ranger
 REPO = Path(__file__).resolve().parent.parent
 API_TEXT = (REPO / "docs" / "API.md").read_text()
 README_TEXT = (REPO / "README.md").read_text()
+CHEATSHEET_SOURCE = (REPO / "scripts" / "cheatsheet.py").read_text()
 
 PUBLIC_METHODS = [
     name for name, _ in inspect.getmembers(Ranger, predicate=inspect.isfunction)
@@ -60,6 +62,27 @@ def test_readme_links_the_reference_and_catalog():
     assert "docs/PARADIGM.md" in README_TEXT     # design backbone reachable
     assert "docs/ARCHITECTURE.md" in README_TEXT # codebase tour reachable
     assert "backend" in API_TEXT                 # backends documented
+
+
+def test_cheatsheet_is_embedded_and_covers_the_shipped_surface():
+    """The README image is generated data, not a stale opaque artifact."""
+    image = REPO / "docs" / "cheatsheet.png"
+    assert 'src="docs/cheatsheet.png"' in README_TEXT
+    assert image.is_file() and image.stat().st_size > 20_000
+    # PNG IHDR: dimensions remain legible on GitHub, no Pillow dependency in CI.
+    with image.open("rb") as f:
+        assert f.read(8) == b"\x89PNG\r\n\x1a\n"
+        assert f.read(4) == b"\x00\x00\x00\r" and f.read(4) == b"IHDR"
+        width, height = struct.unpack(">II", f.read(8))
+    assert width >= 1000 and height >= 1200
+    # Public commands and the extensibility seam must occur in the source
+    # data that renders the card. New API -> this gate reminds us to redraw.
+    for command in ("ask", "do", "write", "check", "search", "summarize",
+                    "gate", "until", "review", "challenge", "second_opinion",
+                    "refine_with", "debate", "register_backend"):
+        assert command in CHEATSHEET_SOURCE, (
+            f"cheatsheet misses {command} — update scripts/cheatsheet.py and redraw")
+    assert "ranger.__version__" in CHEATSHEET_SOURCE  # version is not hardcoded
 
 
 def test_examples_compile_and_are_main_guarded():

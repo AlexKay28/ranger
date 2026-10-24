@@ -12,6 +12,10 @@ check → repeat maps 1:1 onto expression, statement and condition. See
 [docs/PARADIGM.md](docs/PARADIGM.md) for the seven laws every feature is
 reviewed against.
 
+<p align="center">
+  <img src="docs/cheatsheet.png" alt="ranger command cheatsheet" width="760">
+</p>
+
 ## Install
 
 ```bash
