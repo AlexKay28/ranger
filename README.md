@@ -13,14 +13,19 @@ check → repeat maps 1:1 onto expression, statement and condition. See
 reviewed against.
 
 <p align="center">
-  <img src="docs/cheatsheet.png" alt="ranger command cheatsheet" width="760">
+  <img src="https://raw.githubusercontent.com/AlexKay28/ranger/main/docs/cheatsheet.png" alt="ranger command cheatsheet" width="760">
 </p>
 
 ## Install
 
 ```bash
-pip install -e .
+pip install rangers
 ```
+
+The distribution is named **`rangers`** on PyPI; the Python import remains
+`import ranger`. For development from a clone: `pip install -e .[dev]`.
+Maintainers: see the [publishing checklist](docs/PUBLISHING.md) before any
+release.
 
 Requires a harness CLI on PATH: [opencode](https://opencode.ai) (default
 backend) and/or [codex](https://github.com/openai/codex). On a distro-pegged

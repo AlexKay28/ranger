@@ -72,8 +72,8 @@ register) from plain Python. You write code, not chat.
 - Every feature is live-verified against real harnesses before
   shipping; the suite itself fully mocks subprocesses, so CI runs on
   any machine with no CLIs and no API keys.
-- `main` is the only branch; releases are tagged (`v0.6.0`), CI green
-  on every push.
+- `main` is the only branch; releases are tagged (current package version:
+  `0.6.1`), CI green on every push.
 
 One-liner for a stranger: *ranger turns the headless opencode/codex
 CLIs into a Python library — the agent is a function call, and the

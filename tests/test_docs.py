@@ -61,13 +61,14 @@ def test_readme_links_the_reference_and_catalog():
     assert "docs/commands.md" in README_TEXT     # command catalog reachable
     assert "docs/PARADIGM.md" in README_TEXT     # design backbone reachable
     assert "docs/ARCHITECTURE.md" in README_TEXT # codebase tour reachable
+    assert "docs/PUBLISHING.md" in README_TEXT   # release checklist reachable
     assert "backend" in API_TEXT                 # backends documented
 
 
 def test_cheatsheet_is_embedded_and_covers_the_shipped_surface():
     """The README image is generated data, not a stale opaque artifact."""
     image = REPO / "docs" / "cheatsheet.png"
-    assert 'src="docs/cheatsheet.png"' in README_TEXT
+    assert 'src="https://raw.githubusercontent.com/AlexKay28/ranger/' in README_TEXT
     assert image.is_file() and image.stat().st_size > 20_000
     # PNG IHDR: dimensions remain legible on GitHub, no Pillow dependency in CI.
     with image.open("rb") as f:

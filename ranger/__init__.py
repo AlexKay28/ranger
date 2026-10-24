@@ -44,7 +44,7 @@ from pathlib import Path
 
 __all__ = ["Ranger", "RangerError", "DEFAULT_MODEL", "register_backend",
            "backends", "debate"]
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 

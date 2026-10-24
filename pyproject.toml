@@ -1,22 +1,46 @@
 [project]
-name = "ranger"
-version = "0.6.0"
-description = "Agent-as-a-library: run the opencode harness headlessly from Python code"
+name = "rangers"
+version = "0.6.1"
+description = "Agent-as-a-library: drive headless coding-agent harnesses from Python"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
 dependencies = []
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "AlexKay28" },
+]
+keywords = ["agent", "ai", "automation", "codex", "coding-agent", "opencode"]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 
+[project.urls]
+Homepage = "https://github.com/AlexKay28/ranger"
+Documentation = "https://github.com/AlexKay28/ranger/tree/main/docs"
+Repository = "https://github.com/AlexKay28/ranger"
+Issues = "https://github.com/AlexKay28/ranger/issues"
+
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["build>=1.2", "pytest", "twine>=6.0"]
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["ranger"]
+
+[tool.setuptools.package-data]
+ranger = ["py.typed"]
