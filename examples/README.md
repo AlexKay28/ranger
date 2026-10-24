@@ -9,6 +9,7 @@ examples 2 and 3 issue **real agent runs** and cost time and tokens.
 | `quickstart.py` | The five core commands (`search`, `summarize`, `do`, `write`, `ask`) against a target directory | yes, several |
 | `model_discovery.py` | `Ranger.models()` discovery, `with_config()` copies, per-call overrides | one, tiny |
 | `agentic_loop.py` | A full autonomous loop: search → pick one → do, repeated N passes | yes, 3 per pass |
+| `controls.py` | The control surface: `gate`, `check`, `until`, stats telemetry, `mode`/`effort`, skills grants, context compaction | yes, ~6 |
 | `growth_loop.py` | The project-growth loop on any repo: personas wish → pick ONE goal → frozen contract → implement → mechanical acceptance check → append-only log | yes, ~5 per cycle |
 
 ```bash

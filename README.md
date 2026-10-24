@@ -71,7 +71,9 @@ name like "build"/"plan"), `title`, `thinking`. Unknown keywords raise
 
 See [docs/commands.md](docs/commands.md) for the full command catalog —
 15 methods at three maturity tiers: what's shipped, what's next, and
-what needs bigger machinery (gates, retries, safety rails).
+what needs bigger machinery (gates, retries, safety rails) — and
+[docs/API.md](docs/API.md) for the complete, per-setting API reference
+(kept mechanically in sync with the code by the test suite).
 
 ## Context state (memory)
 
