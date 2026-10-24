@@ -13,7 +13,26 @@ pip install -e .
 
 Requires the `opencode` CLI on PATH. On a distro-pegged pip (e.g. 22.x) an
 editable install can fail with "build backend is missing the build_editable
-hook" — fix the tool, not the package: `pip install -U pip`, then retry. Runnable applications live in
+hook" — fix the tool, not the package: `pip install -U pip`, then retry.
+
+## Quick start (no clone needed)
+
+Straight from GitHub, then a one-line sanity check in your terminal:
+
+```bash
+pip install git+https://github.com/AlexKay28/ranger
+
+python -c "import ranger; print(ranger.Ranger.models(match='claude'))"
+```
+
+The check needs no model or API budget — it just lists what your local
+opencode CLI offers. Got model ids back? You're ready:
+
+```python
+import ranger
+agent = ranger.Ranger(model="<one of the ids above>")
+print(agent.ask("say ok"))
+``` Runnable applications live in
 [examples/](examples/) — quickstart, model discovery, a full agentic loop, and
 a self-hosted project-growth loop.
 
