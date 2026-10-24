@@ -62,9 +62,9 @@ documentation + tests). This is the loop's only cross-cycle memory.
 - **Independent review:** ACCEPTED (advisory: cycle-2 log record was
   uncommitted at review time — committed separately).
 - **Delivery stages (distinct, honest):** verified_local ✅, integrated_local
-  ✅ (commit on main), delivered_main ⏸ NOT claimed — badge shows "no
-  status" until the first pushed Actions run; a green run can only be
-  recorded after the push happens and completes.
+  ✅ (commit on main), delivered_main ✅ CONFIRMED — pushed by maintainer
+  (84fa19e..15c9070); Actions run 40116968801 green in 17s on the full
+  3.9–3.13 matrix (2026-10-24). Badge claim "CI passing" is now real.
 
 ## 3-cycle pilot summary
 
