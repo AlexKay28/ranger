@@ -50,9 +50,12 @@ opencode CLI offers. Got model ids back? You're ready:
 import ranger
 agent = ranger.Ranger(model="<one of the ids above>")
 print(agent.ask("say ok"))
-``` Runnable applications live in
-[examples/](examples/) — quickstart, model discovery, a full agentic loop, and
-a self-hosted project-growth loop.
+```
+
+Runnable applications live in [examples/](examples/): quickstart, model
+discovery, a full agentic loop, a self-hosted project-growth loop, plus three
+small day-to-day recipes — repair a red test command, independently review a
+local diff before merge, and draft release notes from git history.
 
 Live progress: each command draws a morphing line on stderr while it runs
 (`⠹ search · TODO items in this repo · 00:03`) and settles as
