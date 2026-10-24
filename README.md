@@ -9,14 +9,15 @@ from plain Python code — for agentic-loop prototyping. You write code, not cha
 pip install -e .
 ```
 
-Requires the `opencode` CLI on PATH.
+Requires the `opencode` CLI on PATH. Runnable applications live in
+[examples/](examples/) — quickstart, model discovery, and a full agentic loop.
 
 ## Usage
 
 ```python
 import ranger
 
-agent = ranger.Ranger(model="eliza-glm53/glm-5-3")
+agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
 agent.summarize("notes.md")          # -> str summary of the file
 agent.write("a one-page report on X")  # -> path of the file the agent wrote
 agent.do("rename all *.txt files in data/ to *.md")  # -> report of CLI-like work
@@ -35,10 +36,10 @@ Pass `session="..."` to share context between calls, `model=` to pick any
 import ranger
 
 ranger.Ranger.models()                      # -> all model IDs
-ranger.Ranger.models(match="glm")           # -> substring filter
+ranger.Ranger.models(match="claude")           # -> substring filter
 
-smart = ranger.Ranger(model="eliza-glm53/glm-5-3")
-fast  = smart.with_config(model="opencode/glm-5.3-flash-free", agent="build")
+smart = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
+fast  = smart.with_config(model="openrouter/google/gemini-2.5-flash", agent="build")
 ```
 
 Every command method also accepts per-call overrides:
@@ -59,7 +60,7 @@ what needs bigger machinery (gates, retries, safety rails).
 ## AGI loop, the point of the whole thing
 
 ```python
-agent = ranger.Ranger(model="eliza-glm53/glm-5-3")
+agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
 
 for i in range(10):
     hits = agent.search(f"TODO and unimplemented spots, pass {i}")

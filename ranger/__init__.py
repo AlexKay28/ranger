@@ -5,7 +5,7 @@ prototyping. No chat, no interactivity: you write code, ranger runs the agent.
 
     import ranger
 
-    agent = ranger.Ranger(model="eliza-glm53/glm-5-3")
+    agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
     summary = agent.summarize("notes.md")
     path = agent.write("a one-page report on X")
     result = agent.do("rename all *.txt files in data/ to *.md")
@@ -13,10 +13,10 @@ prototyping. No chat, no interactivity: you write code, ranger runs the agent.
 
 Discover available models and configure runs:
 
-    print(ranger.Ranger.models(match="glm"))
+    print(ranger.Ranger.models(match="claude"))
 
-    fast = ranger.Ranger(model="opencode/glm-5.3-flash-free")
-    smart = ranger.Ranger(model="eliza-glm53/glm-5-3")
+    fast = ranger.Ranger(model="openrouter/google/gemini-2.5-flash")
+    smart = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
 
     fast.search("todo items", title="quick scan")       # per-call override
     smart.do("refactor auth", timeout=1800)            # longer leash
@@ -33,7 +33,7 @@ from pathlib import Path
 __all__ = ["Ranger", "RangerError"]
 __version__ = "0.1.1"
 
-DEFAULT_MODEL = "eliza-glm53/glm-5-3"
+DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 # Settings every run accepts as a per-call override.
 _RUN_KEYS = ("model", "timeout", "auto", "session", "agent", "title", "thinking")
@@ -117,7 +117,7 @@ class Ranger:
 
         Useful for keeping configured variants side by side:
 
-            smart = Ranger(model="eliza-glm53/glm-5-3")
+            smart = Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
             builder = smart.with_config(agent="build", auto=True)
         """
         for key in overrides:
