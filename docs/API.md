@@ -432,13 +432,15 @@ raises `RangerError`. Honesty about the boundary:
 
 - The CLI is spawned in its **own process group**, so its immediate
   children can be identified and torn down by the OS.
-- Harness CLIs are not always the whole story: opencode executes through a
-  background **service**, codex through local subprocesses. A timeout
-  stops the CLI client; work already queued inside the harness may still
-  complete on its side. ranger cannot cancel what the harness does not
-  expose an cancellation handle for.
-- `gate()` timeouts leave the shell command's descendants similarly
-  unaccounted for.
+- `gate()` commands run in their **own process group**: a timeout (returns
+  `False`) or an interrupt (re-raises) kills the whole group — no orphaned
+  pipeline keeps running.
+- The harness CLIs run in their own process group too, but they are not
+  always the whole story: opencode executes through a background
+  **service**, codex through local subprocesses. A stop cancels the CLI
+  client; work already queued inside the harness may still complete on
+  its side. ranger cannot cancel what the harness does not expose a
+  cancellation handle for.
 
 If you need hard cancellation, run long goals with a small `timeout` in a
 sandbox/throwaway directory, or verify outcomes mechanically afterwards
@@ -450,10 +452,14 @@ Interrupting (`KeyboardInterrupt`) stops the Python call immediately; the
 CLI client process is killed and the live progress UI prints an honest
 `✗ … interrupted by user` line and retires its spinner on **every** exit
 path (success, error, interrupt) — a cancelled call never leaves a
-ticking progress thread behind (the classic wedged-notebook symptom). The
-same descendants caveat as above applies: grandchildren already spawned
-by the harness may outlive the interrupt — `pkill -f "opencode run"`
-(or `codex exec`) cleans up strays.
+ticking progress thread behind (the classic wedged-notebook symptom).
+Long loops (`until`/`refine_with`/`challenge`) are honest about
+cancellation: nothing is claimed achieved, but the partial progress
+already paid for (steps, reviews, rounds) survives inside the
+`KeyboardInterrupt` message instead of evaporating. The remote-harness
+caveat above still applies: grandchildren already spawned may outlive
+the interrupt — `pkill -f "opencode run"` (or `codex exec`) cleans up
+strays.
 
 ## Errors
 

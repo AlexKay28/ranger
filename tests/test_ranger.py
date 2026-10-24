@@ -7,6 +7,7 @@ ranger/__init__.py, no network, no real agent calls.
 """
 
 import re
+import signal
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -25,6 +26,16 @@ def fake_run(stdout="", stderr="", returncode=0):
     ret.stderr = stderr
     ret.returncode = returncode
     return ret
+
+
+def fake_popen(returncode=0, pid=4321, communicate=None):
+    """Build a mock Popen for gate() (its own subprocess seam)."""
+    p = mock.Mock()
+    p.pid = pid
+    p.returncode = returncode
+    p.communicate = (mock.Mock(side_effect=communicate) if communicate
+                      else mock.Mock(return_value=("", "")))
+    return p
 
 
 # --------------------------------------------------------------------- #
@@ -482,7 +493,8 @@ def test_context_summarize_keeps_history():
 
 def test_gate_never_records_context():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("", returncode=0)):
+    with mock.patch("ranger.subprocess.Popen",
+                    return_value=fake_popen(returncode=0)):
         agent.gate("true")
     assert agent.context == []  # gate is model-free: not part of the transcript
 
@@ -511,11 +523,13 @@ def test_check_rejects_unparseable_verdicts():
 
 def test_gate_exit_code_booleans():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("", returncode=0)) as m:
+    with mock.patch("ranger.subprocess.Popen",
+                    return_value=fake_popen(returncode=0)) as m:
         assert agent.gate("true") is True
         assert m.call_args.args[0] == "true"
         assert m.call_args.kwargs["shell"] is True
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("", returncode=1)):
+    with mock.patch("ranger.subprocess.Popen",
+                    return_value=fake_popen(returncode=1)):
         assert agent.gate("false") is False
 
 
@@ -604,12 +618,38 @@ def test_until_exhausts_honestly():
 
 
 
-def test_gate_timeout_is_false():
+def test_gate_timeout_is_false_and_kills_the_group():
     agent = Ranger()
-    with mock.patch(
-        "ranger.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="x", timeout=5)
-    ):
+    p = fake_popen(pid=777, communicate=[
+        subprocess.TimeoutExpired(cmd="x", timeout=5), ("", "")])
+    with mock.patch("ranger.subprocess.Popen", return_value=p), \
+         mock.patch("ranger.os.killpg") as kg:
         assert agent.gate("sleep 100", timeout=1) is False
+    kg.assert_called_once_with(777, signal.SIGKILL)  # whole pg, not the shell
+
+
+def test_gate_interrupt_kills_group_and_reraises():
+    agent = Ranger()
+    p = fake_popen(pid=778, communicate=KeyboardInterrupt)
+    with mock.patch("ranger.subprocess.Popen", return_value=p), \
+         mock.patch("ranger.os.killpg") as kg:
+        with pytest.raises(KeyboardInterrupt):
+            agent.gate("sleep 100")
+    kg.assert_called_once_with(778, signal.SIGKILL)
+
+
+def test_until_interrupt_preserves_partial_steps():
+    agent = Ranger()
+    with mock.patch.object(Ranger, "ask",
+                           side_effect=["step 1", KeyboardInterrupt]), \
+         mock.patch.object(Ranger, "do",
+                           side_effect=lambda p, **kw: f"did {p}"), \
+         mock.patch.object(Ranger, "check", return_value=False):
+        with pytest.raises(KeyboardInterrupt) as ei:
+            agent.until("goal", max_iter=3)   # check-gate keeps the loop alive
+    msg = str(ei.value)
+    # cancelled honestly — but the paid-for progress survives in the note
+    assert "step 1" in msg and "achieved" in msg
 
 
 # --------------------------------------------------------------------- #

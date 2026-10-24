@@ -29,6 +29,16 @@ def fake_run(stdout="", stderr="", returncode=0):
     return ret
 
 
+def fake_popen(returncode=0, pid=4321, communicate=None):
+    """Build a mock Popen for gate() (its own subprocess seam)."""
+    p = mock.Mock()
+    p.pid = pid
+    p.returncode = returncode
+    p.communicate = (mock.Mock(side_effect=communicate) if communicate
+                      else mock.Mock(return_value=("", "")))
+    return p
+
+
 # ==================================================================== #
 # 1. check(): the verdict grammar is a truth table, not a vibe
 
@@ -176,7 +186,7 @@ def test_recording_keeps_raw_prompt_and_pairing():
     # recorded pair: raw request + the answer — not the recall-prefixed variant
     assert agent.context == [{"role": "user", "content": "original prompt"},
                              {"role": "assistant", "content": "ans"}]
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("")):
+    with mock.patch("ranger.subprocess.Popen", return_value=fake_popen(0)):
         agent.gate("true")
     assert len(agent.context) == 2   # gate never records
 
@@ -233,7 +243,8 @@ def test_until_gate_precedence_and_counting():
     def fake(cmd, **kw):
         calls.append(cmd)
         return fake_run("do a step" if len(calls) == 1 else "done report")
-    with mock.patch("ranger.subprocess.run", side_effect=fake):
+    with mock.patch("ranger.subprocess.run", side_effect=fake), \
+         mock.patch("ranger.subprocess.Popen", return_value=fake_popen(0)):
         res = agent.until("goal", max_iter=3, gate_cmd="test -f x")
     # gate_cmd path: one ask (step) + one do per iteration; gate is shell
     assert res["achieved"] is True      # mocked gate exit 0
@@ -242,9 +253,10 @@ def test_until_gate_precedence_and_counting():
     assert res["report"] == "done report"
     # honest failure when the gate never passes
     with mock.patch("ranger.subprocess.run", side_effect=[
-        fake_run("s1"), fake_run("r"), fake_run("", returncode=1),  # iter1: gate fails
-        fake_run("s2"), fake_run("r"), fake_run("", returncode=1),  # iter2
-    ]):
+        fake_run("s1"), fake_run("r"),   # iter1: ask + do
+        fake_run("s2"), fake_run("r"),   # iter2
+    ]), mock.patch("ranger.subprocess.Popen",
+                   return_value=fake_popen(1)):   # gate never passes
         res = agent.until("goal", max_iter=2, gate_cmd="false")
     assert res == {"achieved": False, "iterations": 2,
                    "steps": ["s1", "s2"], "report": "r"}
