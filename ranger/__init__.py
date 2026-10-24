@@ -3,6 +3,10 @@
 Run the opencode harness headlessly from plain Python code, for agentic-loop
 prototyping. No chat, no interactivity: you write code, ranger runs the agent.
 
+Live progress: every command prints a colored step line with a spinner and
+elapsed clock (▶ … ⠹ 00:12 … ✓) straight to stderr, so returned strings stay
+clean. Disable with Ranger(..., pretty=False) or per call (..., pretty=False).
+
     import ranger
 
     agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
@@ -27,20 +31,82 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
 __all__ = ["Ranger", "RangerError"]
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 # Settings every run accepts as a per-call override.
-_RUN_KEYS = ("model", "timeout", "auto", "session", "agent", "title", "thinking")
+_RUN_KEYS = ("model", "timeout", "auto", "session", "agent", "title", "thinking", "pretty")
 
 
 class RangerError(RuntimeError):
     """Raised when the underlying opencode run fails."""
+
+
+# ---------------------------------------------------------------------- #
+# live terminal UI (stderr only; auto-off outside a TTY; NO_COLOR honored)
+
+_NO_COLOR = bool(os.environ.get("NO_COLOR"))
+_RESET = "\033[0m"
+_COLORS = {"cyan": "\033[36m", "green": "\033[32m", "red": "\033[31m",
+           "dim": "\033[2m", "bold": "\033[1m"}
+
+
+def _c(text: str, color: str) -> str:
+    if _NO_COLOR:
+        return text
+    return f"{_COLORS.get(color, '')}{text}{_RESET if color in _COLORS else ''}"
+
+
+def _clip(text: str, width: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+class _Spinner:
+    """One morphing terminal line per command, opencode-wizard style.
+
+    While running:  `⠹ search · TODO items in this… · 00:03`
+    Stopped: the line is cleared so _run can print the final ✓/✗ line.
+    """
+
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, label: str, preview: str) -> None:
+        self._label = _c(label, "cyan")
+        self._preview = _clip(preview, 40)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+
+    def _spin(self) -> None:
+        start = time.time()
+        i = 0
+        while not self._stop.is_set():
+            mm, ss = divmod(int(time.time() - start), 60)
+            sys.stderr.write(
+                f"\r  {_c(self.FRAMES[i % len(self.FRAMES)], 'cyan')}"
+                f" {self._label} {_c('·', 'dim')} {self._preview}"
+                f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}   "
+            )
+            sys.stderr.flush()
+            self._stop.wait(0.1)
+            i += 1
+        sys.stderr.write("\r\033[K")
+        sys.stderr.flush()
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=1)
 
 
 class Ranger:
@@ -50,8 +116,9 @@ class Ranger:
     directory and returns the agent's final answer as a string.
 
     Args:
-        model: opencode model ID in "provider/model" form (see
-            `Ranger.models()`).
+        model: opencode model ID in "provider/model" form; defaults to
+            the RANGER_MODEL environment variable, then the package
+            default (see `Ranger.models()`).
         cwd: working directory for the agent (defaults to os.getcwd()).
         timeout: seconds to wait for each run (default 10 min).
         auto: auto-approve tool permissions so the agent can actually
@@ -60,6 +127,9 @@ class Ranger:
         agent: optional opencode agent name (e.g. "build", "plan", "general").
         title: optional session title for opencode runs.
         thinking: request thinking blocks in the model's output.
+        pretty: live terminal progress (spinner, colors, clocks) on stderr
+            while each command runs; off automatically when stderr is not a
+            TTY or NO_COLOR is set.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -67,7 +137,7 @@ class Ranger:
 
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         cwd: str | Path | None = None,
         timeout: float = 600.0,
         auto: bool = True,
@@ -75,8 +145,9 @@ class Ranger:
         agent: str | None = None,
         title: str | None = None,
         thinking: bool = False,
+        pretty: bool = True,
     ) -> None:
-        self.model = model
+        self.model = model or os.environ.get("RANGER_MODEL") or DEFAULT_MODEL
         self.cwd = str(Path(cwd).resolve()) if cwd else None
         self.timeout = timeout
         self.auto = auto
@@ -84,6 +155,7 @@ class Ranger:
         self.agent = agent
         self.title = title
         self.thinking = thinking
+        self.pretty = pretty
 
     # ------------------------------------------------------------------ #
     # discovery & configuration
@@ -136,17 +208,23 @@ class Ranger:
 
     def ask(self, prompt: str, **ov) -> str:
         """Send an arbitrary prompt to the agent and return its answer."""
-        return self._run(prompt, **ov)
+        return self._run(prompt, label="ask", **ov)
 
     def summarize(self, file: str | Path, **ov) -> str:
-        """Read a file and return a concise text summary of its contents."""
+        """Read a file and return a concise text summary of its contents.
+
+        Relative paths resolve against the agent's cwd, not the Python
+        process's.
+        """
         path = Path(file)
+        if not path.is_absolute():
+            path = Path(self.cwd or Path.cwd()) / path
         prompt = (
             f"Read the file at {path.resolve()}. "
             "Then reply with a concise summary of what it contains. "
             "Reply with the summary text only, no preamble."
         )
-        return self._run(prompt, **ov)
+        return self._run(prompt, label="summarize", **ov)
 
     def write(self, task: str, path: str | Path | None = None, **ov) -> str:
         """Have the agent produce a written document/answer as a file.
@@ -158,13 +236,15 @@ class Ranger:
             out = Path(self.cwd or Path.cwd()) / f"ranger_{slug}_{int(time.time())}.md"
         else:
             out = Path(path)
+            if not out.is_absolute():
+                out = Path(self.cwd or Path.cwd()) / out
         prompt = (
             f"{task}\n\n"
             f"Write your complete answer as a file at exactly: {Path(out).resolve()}\n"
             "Do not print the answer to stdout; the file IS the answer. "
             "When done, reply with the file path only."
         )
-        self._run(prompt, **ov)
+        self._run(prompt, label="write", **ov)
         if not out.exists():
             raise RangerError(f"agent did not write the expected file: {out}")
         return str(out)
@@ -181,7 +261,7 @@ class Ranger:
             "When finished, reply with a short report: what you did, "
             "which files changed, and anything that failed."
         )
-        return self._run(prompt, **ov)
+        return self._run(prompt, label="do", **ov)
 
     def search(self, goal: str, **ov) -> str:
         """Search the working directory and report where/what matches.
@@ -195,12 +275,12 @@ class Ranger:
             "`file:line` followed by the matching line or a short note. "
             "No code changes."
         )
-        return self._run(prompt, **ov)
+        return self._run(prompt, label="search", **ov)
 
     # ------------------------------------------------------------------ #
     # plumbing
 
-    def _run(self, prompt: str, **ov) -> str:
+    def _run(self, prompt: str, label: str = "run", **ov) -> str:
         opts = {k: getattr(self, k) for k in _RUN_KEYS}
         opts.update({k: v for k, v in ov.items() if k in _RUN_KEYS})
         unknown = set(ov) - set(_RUN_KEYS)
@@ -220,6 +300,27 @@ class Ranger:
             cmd.append("--thinking")
         cmd.append(prompt)
 
+        # live progress UI — stderr only; never a TTY in tests/pipes
+        use_ui = opts["pretty"] and getattr(sys.stderr, "isatty", lambda: False)()
+        spinner = None
+        t0 = time.time()
+        if use_ui:
+            spinner = _Spinner(label, prompt)
+            spinner.start()
+
+        def _finish(mark: str, color: str, note: str = "") -> None:
+            if not use_ui:
+                return
+            if spinner:
+                spinner.stop()
+            mm, ss = divmod(int(time.time() - t0), 60)
+            note_part = f" {_c('·', 'dim')} {_clip(note, 84)}" if note else ""
+            sys.stderr.write(
+                f"  {_c(mark, color)} {_c(label, color)}"
+                f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}{note_part}\n"
+            )
+            sys.stderr.flush()
+
         try:
             proc = subprocess.run(
                 cmd,
@@ -230,16 +331,21 @@ class Ranger:
                 timeout=opts["timeout"],
             )
         except FileNotFoundError:
+            _finish("✗", "red", "opencode CLI not found")
             raise RangerError(
                 "opencode CLI not found on PATH — install it from https://opencode.ai"
             ) from None
         except subprocess.TimeoutExpired:
+            _finish("✗", "red", f"timed out after {opts['timeout']}s")
             raise RangerError(
                 f"opencode run timed out after {opts['timeout']}s"
             ) from None
 
         if proc.returncode != 0:
+            _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
             raise RangerError(
                 f"opencode run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
             )
+        first = proc.stdout.strip().splitlines()
+        _finish("✓", "green", _clip(first[0], 90) if first else "")
         return proc.stdout.strip()

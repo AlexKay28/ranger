@@ -14,6 +14,7 @@ import pytest
 
 import ranger
 from ranger import Ranger, RangerError
+from ranger import DEFAULT_MODEL
 
 
 def fake_run(stdout="", stderr="", returncode=0):
@@ -35,12 +36,29 @@ def test_run_default_flags_and_pwd_env():
     cmd = m.call_args.args[0]
     assert cmd[0] == "opencode"
     assert cmd[1] == "run"
-    assert "--model" in cmd and "openrouter/anthropic/claude-sonnet-4.5" in cmd
+    assert "--model" in cmd and DEFAULT_MODEL in cmd  # package default when no env/arg
     assert "--auto" in cmd
     assert "hello" in cmd  # prompt travels as the last argument
     assert m.call_args.kwargs["cwd"] == "/tmp/demo"
     # the PWD env fix: subprocess cwd alone is not enough for opencode
     assert m.call_args.kwargs["env"]["PWD"] == "/tmp/demo"
+
+
+def test_ranger_model_env_override():
+    import os
+    with mock.patch.dict(os.environ, {"RANGER_MODEL": "custom/m"}), mock.patch(
+        "ranger.subprocess.run", return_value=fake_run("ok")
+    ) as m:
+        Ranger().ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "custom/m"
+    # explicit argument still beats the environment
+    with mock.patch.dict(os.environ, {"RANGER_MODEL": "custom/m"}), mock.patch(
+        "ranger.subprocess.run", return_value=fake_run("ok")
+    ) as m:
+        Ranger(model="arg/m").ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "arg/m"
 
 
 def test_run_no_pwd_env_without_cwd():
@@ -243,4 +261,81 @@ def test_docs_do_not_mention_internal_providers():
         text = f.read_text()
         for word in banned:
             assert word not in text, f"{f}: internal id '{word}' leaked"
+
+
+# --------------------------------------------------------------------- #
+# live terminal UI
+
+class _FakeTty:
+    """A stderr stand-in that claims to be a terminal and records writes."""
+
+    def __init__(self):
+        self.is_tty = True
+        self.chunks = []
+
+    def isatty(self):
+        return self.is_tty
+
+    def write(self, s):
+        self.chunks.append(s)
+
+    def flush(self):
+        pass
+
+
+def test_summarize_resolves_relative_paths_against_agent_cwd(tmp_path):
+    agent = Ranger(cwd=tmp_path)
+    seen = []
+
+    def capture(cmd, **kw):
+        seen.append(cmd[-1])
+        return fake_run("ok")
+
+    with mock.patch("ranger.subprocess.run", side_effect=capture):
+        agent.summarize("notes.md")
+    assert str(tmp_path / "notes.md") in seen[0]  # agent cwd, not python cwd
+
+
+def test_pretty_default_and_per_call_override():
+    assert Ranger().pretty is True
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")):
+        agent.ask("hi", pretty=False)  # accepted, no TypeError
+
+
+def test_ui_silent_when_not_a_tty():
+    """Piped/captured stderr must stay byte-identical: UI never fires."""
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("done")):
+        agent.ask("hi")
+    import sys as _sys
+    assert not _sys.stderr.isatty()  # precondition of the test env
+
+
+def test_ui_draws_progress_on_tty(capsys):
+    import sys as _sys
+    agent = Ranger()
+    fake_tty = _FakeTty()
+    with mock.patch.object(_sys, "stderr", fake_tty), mock.patch(
+        "ranger.subprocess.run", return_value=fake_run("the answer\nline two")
+    ):
+        out = agent.ask("hello world")
+    assert out == "the answer\nline two"
+    drawn = "".join(fake_tty.chunks)
+    assert "⠋" in drawn and "ask" in drawn and "\r" in drawn  # spinner animated
+    assert "✓" in drawn and "the answer" in drawn             # final ok line
+
+
+def test_ui_draws_error_mark_on_failure():
+    import sys as _sys
+    agent = Ranger()
+    fake_tty = _FakeTty()
+    with mock.patch.object(_sys, "stderr", fake_tty), mock.patch(
+        "ranger.subprocess.run", return_value=fake_run("", stderr="boom", returncode=1)
+    ):
+        with pytest.raises(RangerError):
+            agent.do("break things", timeout=5)
+    drawn = "".join(fake_tty.chunks)
+    assert "✗" in drawn and "boom" in drawn
+
 

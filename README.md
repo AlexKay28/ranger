@@ -12,7 +12,17 @@ pip install -e .
 ```
 
 Requires the `opencode` CLI on PATH. Runnable applications live in
-[examples/](examples/) — quickstart, model discovery, and a full agentic loop.
+[examples/](examples/) — quickstart, model discovery, a full agentic loop, and
+a self-hosted project-growth loop.
+
+Live progress: each command draws a morphing line on stderr while it runs
+(`⠹ search · TODO items in this repo · 00:03`) and settles as
+`✓ search · 00:07 · <first line of answer>` — opencode-wizard style, colors
+included. It auto-disables in pipes/tests and honors `NO_COLOR`;
+turn it off with `pretty=False`.
+
+Model priority: explicit `Ranger(model=...)` → `$RANGER_MODEL` env var →
+package default.
 
 ## Usage
 
