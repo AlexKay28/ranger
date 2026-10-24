@@ -264,6 +264,74 @@ def test_docs_do_not_mention_internal_providers():
 
 
 # --------------------------------------------------------------------- #
+# skills allow-list
+
+def test_skill_file_attached_via_file_flag(tmp_path):
+    skill = tmp_path / "haiku.md"
+    skill.write_text("Always answer in haiku form.")
+    agent = Ranger(skills=str(skill))
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--file") + 1] == str(skill)
+    assert "--file" in cmd
+
+
+def test_skill_directory_attaches_markdown(tmp_path):
+    sdir = tmp_path / "pack"
+    sdir.mkdir()
+    (sdir / "SKILL.md").write_text("# pack")
+    (sdir / "extra.md").write_text("# extra")
+    (sdir / "ignore.txt").write_text("not markdown")
+    agent = Ranger(skills=sdir)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    attached = {cmd[i + 1] for i, x in enumerate(cmd) if x == "--file"}
+    assert attached == {str(sdir / "SKILL.md"), str(sdir / "extra.md")}
+
+
+def test_skill_empty_directory_raises(tmp_path):
+    sdir = tmp_path / "empty"
+    sdir.mkdir()
+    agent = Ranger(skills=sdir)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+        with pytest.raises(RangerError, match="no markdown"):
+            agent.ask("hi")
+
+
+def test_prose_grant_injected_into_prompt():
+    agent = Ranger(skills=["always answer in haiku form", "use british spelling"])
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("tell me about tests")
+    sent = m.call_args.args[0][-1]
+    assert sent.startswith("## Allowed skills")
+    assert "haiku form" in sent and "british spelling" in sent
+    assert "--file" not in m.call_args.args[0]
+
+
+def test_skills_per_call_override_beats_default(tmp_path):
+    skill = tmp_path / "s.md"
+    skill.write_text("x")
+    agent = Ranger(skills=str(skill))
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")
+    assert "--file" in m.call_args.args[0]
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi", skills=["prose only grant"])  # overrides, no file
+    assert "--file" not in m.call_args.args[0]
+    assert "prose only grant" in m.call_args.args[0][-1]
+
+
+def test_no_skills_no_flags_by_default():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")
+    assert "--file" not in m.call_args.args[0]
+    assert m.call_args.args[0][-1] == "hi"
+
+
+# --------------------------------------------------------------------- #
 # context state
 
 def test_context_records_openai_format_after_each_run():

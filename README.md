@@ -90,6 +90,21 @@ agent.ask("...", memory=False)  # one stateless run
 ranger.Ranger(memory=False)      # or a fully stateless agent
 ```
 
+## Skills allow-list
+
+Grant the agent specific skills or operating rules per run — a markdown
+file or directory rides along via opencode's `--file` attachment; plain
+prose entries are injected as prompt grants.
+
+```python
+agent = ranger.Ranger(skills=[
+    "skills/haiku/SKILL.md",        # file -> --file attachment
+    "skills/pack",                  # dir -> all its *.md attached
+    'Always answer in British spelling',  # prose -> prompt grant
+])
+agent.do("write the changelog", skills=["docs/changelog_style.md"])  # per call
+```
+
 ## AGI loop, the point of the whole thing
 
 ```python

@@ -40,14 +40,14 @@ import time
 from pathlib import Path
 
 __all__ = ["Ranger", "RangerError"]
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 # Settings every run accepts as a per-call override.
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "title", "thinking",
-    "pretty", "memory",
+    "pretty", "memory", "skills",
 )
 
 # How many characters of recorded context a run may recall, max.
@@ -143,6 +143,11 @@ class Ranger:
             message format) and recall recent context in later runs within
             a character budget. Manage with `context_summarize()` /
             `context_compact()` / `context_clear()`.
+        skills: allow-list of skills/tools the agent may use for each
+            run. Entries may be a path to a markdown/SKILL.md file
+            (attached via opencode's --file flag), a directory (its
+            SKILL.md and *.md files are attached), or a plain prose
+            grant that is injected into the prompt as guidance.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -161,6 +166,7 @@ class Ranger:
         pretty: bool = True,
         memory: bool = True,
         memory_budget: int = _MEMORY_BUDGET,
+        skills: list | None = None,
     ) -> None:
         self.model = model or os.environ.get("RANGER_MODEL") or DEFAULT_MODEL
         self.cwd = str(Path(cwd).resolve()) if cwd else None
@@ -173,6 +179,7 @@ class Ranger:
         self.pretty = pretty
         self.memory = memory
         self.memory_budget = memory_budget
+        self.skills = skills
         #: OpenAI-format conversation state: {"role", "content"} dicts.
         self.context: list[dict] = []
 
@@ -401,6 +408,25 @@ class Ranger:
         if opts["thinking"]:
             cmd.append("--thinking")
 
+        # skills allow-list: real files ride along via --file; prose grants
+        # are injected into the prompt as operating guidance
+        prose_grants: list[str] = []
+        granted = opts["skills"] or []
+        if isinstance(granted, (str, Path)):
+            granted = [granted]
+        for entry in granted:
+            p = Path(entry)
+            if p.is_dir():
+                found = sorted(p.glob("*.md"))
+                if not found:
+                    raise RangerError(f"skill directory has no markdown: {p}")
+                for f in found:
+                    cmd += ["--file", str(f)]
+            elif p.is_file():
+                cmd += ["--file", str(p)]
+            else:
+                prose_grants.append(str(entry))
+
         # context recall: prepend recent recorded history (bounded), then
         # record the raw request/answer pair after a successful run
         use_memory = opts["memory"]
@@ -421,8 +447,16 @@ class Ranger:
                     "## Previous interaction in this session\n"
                     + transcript
                     + "\n\n## Current request\n"
-                    + prompt
+                    + full_prompt
                 )
+        if prose_grants:
+            # prepended AFTER recall so it can never be overwritten
+            full_prompt = (
+                "## Allowed skills / operating grants for this task\n"
+                + "\n".join(f"- {g}" for g in prose_grants)
+                + "\n\n"
+                + full_prompt
+            )
         cmd.append(full_prompt)
 
         # live progress UI — stderr only; never a TTY in tests/pipes

@@ -43,6 +43,13 @@ All commands auto-record their exchange into `agent.context` (OpenAI message
 format) and recall recent history within a character budget. `memory=False`
 on the constructor or any single call disables recording and recall.
 
+### Skills allow-list (shipped)
+`Ranger(skills=[...])` or any per-call `skills=[...]` grants the agent
+extra skills/tools: markdown files and directories attach via opencode's
+`--file` flag; plain-prose entries are injected into the prompt as
+operating grants. `with_config(skills=...)` carries an allow-list on a
+configured copy.
+
 ## ✅ Shipped (7)
 
 ### `ask(prompt) -> str`
