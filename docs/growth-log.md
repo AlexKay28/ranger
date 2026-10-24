@@ -47,3 +47,34 @@ documentation + tests). This is the loop's only cross-cycle memory.
 - **Backlog additions (reviewer advisory):** gate does not scan non-py/md
   file types; docs compile-check could become a permanent pytest gate.
 
+## Cycle 3 — CI workflow + badge (2026-10-24)
+
+- **Goal:** GitHub Actions running the unit suite on push/PR (py 3.9–3.13)
+  plus README badge.
+- **Evidence:** observed (tests existed, no runner); persona rotation (E9) —
+  fresh archetypes: outside cold-clone contributor, release manager.
+- **Contract:** A1 YAML valid; A2 exact locally-green commands; A3 no
+  opencode CLI / no network beyond pip; A4 badge URL correct. Non-goals:
+  no publish/deploy jobs.
+- **Outcome:** `pass_merged` @ 107985b (log bookkeeping @ 992e7af).
+- **Verification:** A1–A4 mechanically re-verified (pyyaml structural parse,
+  matrix string types, badge URL). Local suite 15/15 unchanged.
+- **Independent review:** ACCEPTED (advisory: cycle-2 log record was
+  uncommitted at review time — committed separately).
+- **Delivery stages (distinct, honest):** verified_local ✅, integrated_local
+  ✅ (commit on main), delivered_main ⏸ NOT claimed — badge shows "no
+  status" until the first pushed Actions run; a green run can only be
+  recorded after the push happens and completes.
+
+## 3-cycle pilot summary
+
+- 3/3 goals merged, one review rejection overcame (cycle 2, false-green
+  hygiene gate) — the reviewer earned its keep exactly once, which is the
+  cheapest possible proof the loop is not self-graded theater.
+- Backlog remaining (candidates for the next run, not auto-worked):
+  permanent docs compile-check pytest gate; commands.md 🔜 batch
+  (plan/edit/review/test/read); non-py/md hygiene surface; reviewer
+  cosmetic findings from cycle 1; PyPI publish prep.
+- Iteration ceiling was treated as a maximum, not a quota; loop stops here.
+
+
