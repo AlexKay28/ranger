@@ -28,6 +28,21 @@ e.g. `"build"`, `"plan"`), `title=`, `thinking=`. Unknown keywords raise
 `TypeError`.
 
 
+### `agent.context_summarize() -> str`
+Digest of the recorded session history (an ask-powered summary; history
+itself is untouched).
+
+### `agent.context_compact() -> str`
+Collapse the whole history into a single `system` digest message — future
+runs recall the bounded summary instead of the full transcript.
+
+### `agent.context_clear() -> list[dict]`
+Wipe recorded context; returns what was cleared.
+
+All commands auto-record their exchange into `agent.context` (OpenAI message
+format) and recall recent history within a character budget. `memory=False`
+on the constructor or any single call disables recording and recall.
+
 ## ✅ Shipped (7)
 
 ### `ask(prompt) -> str`

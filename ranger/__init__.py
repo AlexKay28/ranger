@@ -40,12 +40,18 @@ import time
 from pathlib import Path
 
 __all__ = ["Ranger", "RangerError"]
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 # Settings every run accepts as a per-call override.
-_RUN_KEYS = ("model", "timeout", "auto", "session", "agent", "title", "thinking", "pretty")
+_RUN_KEYS = (
+    "model", "timeout", "auto", "session", "agent", "title", "thinking",
+    "pretty", "memory",
+)
+
+# How many characters of recorded context a run may recall, max.
+_MEMORY_BUDGET = 20000
 
 
 class RangerError(RuntimeError):
@@ -133,6 +139,10 @@ class Ranger:
         pretty: live terminal progress (spinner, colors, clocks) on stderr
             while each command runs; off automatically when stderr is not a
             TTY or NO_COLOR is set.
+        memory: record every command exchange to `self.context` (OpenAI
+            message format) and recall recent context in later runs within
+            a character budget. Manage with `context_summarize()` /
+            `context_compact()` / `context_clear()`.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -149,6 +159,8 @@ class Ranger:
         title: str | None = None,
         thinking: bool = False,
         pretty: bool = True,
+        memory: bool = True,
+        memory_budget: int = _MEMORY_BUDGET,
     ) -> None:
         self.model = model or os.environ.get("RANGER_MODEL") or DEFAULT_MODEL
         self.cwd = str(Path(cwd).resolve()) if cwd else None
@@ -159,6 +171,10 @@ class Ranger:
         self.title = title
         self.thinking = thinking
         self.pretty = pretty
+        self.memory = memory
+        self.memory_budget = memory_budget
+        #: OpenAI-format conversation state: {"role", "content"} dicts.
+        self.context: list[dict] = []
 
     # ------------------------------------------------------------------ #
     # discovery & configuration
@@ -205,6 +221,41 @@ class Ranger:
                 value = str(Path(value).resolve())
             setattr(clone, key, value)
         return clone
+
+    # ------------------------------------------------------------------ #
+    # context management
+
+    def context_summarize(self) -> str:
+        """Ask the agent for a text digest of the recorded context.
+
+        History is left untouched. Returns "" when nothing is recorded.
+        """
+        if not self.context:
+            return ""
+        transcript = "\n\n".join(f"[{m['role']}] {m['content']}" for m in self.context)
+        digest = self._run(
+            "Summarize the following session history into a compact digest: "
+            "commands issued, what was learned/decided, files touched, facts "
+            "worth keeping. Plain text, bullet points.\n\n"
+            + transcript,
+            label="summarize",
+        )
+        return digest
+
+    def context_compact(self) -> str:
+        """Collapse the whole history into one system summary message.
+
+        The digest replaces self.context, so future runs recall a bounded
+        summary instead of the full transcript. Returns the digest.
+        """
+        digest = self.context_summarize()
+        self.context = [{"role": "system", "content": digest}] if digest else []
+        return digest
+
+    def context_clear(self) -> list[dict]:
+        """Wipe the recorded context; returns what was cleared."""
+        old, self.context = self.context, []
+        return old
 
     # ------------------------------------------------------------------ #
     # commands
@@ -349,7 +400,30 @@ class Ranger:
             cmd += ["--title", opts["title"]]
         if opts["thinking"]:
             cmd.append("--thinking")
-        cmd.append(prompt)
+
+        # context recall: prepend recent recorded history (bounded), then
+        # record the raw request/answer pair after a successful run
+        use_memory = opts["memory"]
+        full_prompt = prompt
+        if use_memory and self.context:
+            selected, total = [], 0
+            for msg in reversed(self.context):
+                total += len(msg["content"]) + 16
+                if total > self.memory_budget:
+                    break
+                selected.append(msg)
+            selected.reverse()
+            if selected:
+                transcript = "\n\n".join(
+                    f"[{m['role']}] {m['content']}" for m in selected
+                )
+                full_prompt = (
+                    "## Previous interaction in this session\n"
+                    + transcript
+                    + "\n\n## Current request\n"
+                    + prompt
+                )
+        cmd.append(full_prompt)
 
         # live progress UI — stderr only; never a TTY in tests/pipes
         use_ui = opts["pretty"] and getattr(sys.stderr, "isatty", lambda: False)()
@@ -399,4 +473,8 @@ class Ranger:
             )
         first = proc.stdout.strip().splitlines()
         _finish("✓", "green", _clip(first[0], 90) if first else "")
-        return proc.stdout.strip()
+        answer = proc.stdout.strip()
+        if use_memory:
+            self.context.append({"role": "user", "content": prompt})
+            self.context.append({"role": "assistant", "content": answer})
+        return answer

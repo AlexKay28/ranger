@@ -73,6 +73,23 @@ See [docs/commands.md](docs/commands.md) for the full command catalog —
 15 methods at three maturity tiers: what's shipped, what's next, and
 what needs bigger machinery (gates, retries, safety rails).
 
+## Context state (memory)
+
+The agent remembers. Every command exchange is recorded to
+`agent.context` in classic OpenAI message format
+(`{"role": "user"|"assistant"|"system", "content": ...}`) and recent
+history (within a character budget) is recalled into later runs — so
+follow-ups like "now do the same for tests/" just work.
+
+```python
+agent.context         # the message list
+agent.context_summarize()   # -> digest of what happened so far
+agent.context_compact()     # collapse history to one system digest
+agent.context_clear()       # wipe; returns what was cleared
+agent.ask("...", memory=False)  # one stateless run
+ranger.Ranger(memory=False)      # or a fully stateless agent
+```
+
 ## AGI loop, the point of the whole thing
 
 ```python

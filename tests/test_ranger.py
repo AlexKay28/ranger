@@ -264,6 +264,106 @@ def test_docs_do_not_mention_internal_providers():
 
 
 # --------------------------------------------------------------------- #
+# context state
+
+def test_context_records_openai_format_after_each_run():
+    agent = Ranger(memory=True)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("answer here")):
+        agent.ask("hi")
+    assert agent.context == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "answer here"},
+    ]
+
+
+def test_context_recall_prepends_history():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", side_effect=[fake_run("first answer")]) as m:
+        agent.ask("first question")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("second answer")) as m:
+        agent.ask("second question")
+    sent = m.call_args.args[0][-1]
+    assert "first question" in sent and "first answer" in sent
+    assert "## Current request\nsecond question" in sent
+    # raw answers recorded, not the context-prefixed prompt (no nesting)
+    assert agent.context[2]["content"] == "second question"
+
+
+def test_context_memory_off_stops_recording_and_recall():
+    agent = Ranger(memory=False)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("who")):
+        agent.ask("knock")
+    assert agent.context == []
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("who")) as m:
+        agent.ask("knock again")
+    assert m.call_args.args[0][-1] == "knock again"  # no context block
+
+
+def test_context_per_call_override():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("a")):
+        agent.ask("one")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("b")) as m:
+        agent.ask("two", memory=False)  # isolated run
+    assert m.call_args.args[0][-1] == "two"
+    assert len(agent.context) == 2  # and nothing recorded for it
+
+
+def test_context_budget_bounds_recall():
+    agent = Ranger(memory_budget=10)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("x" * 500)):
+        agent.ask("big exchange")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("y")) as m:
+        agent.ask("next")
+    # nothing fits in the budget -> the run is sent raw
+    assert m.call_args.args[0][-1] == "next"
+
+
+def test_context_clear_returns_old_and_resets():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("a")):
+        agent.ask("one")
+    removed = agent.context_clear()
+    assert agent.context == []
+    assert [m["role"] for m in removed] == ["user", "assistant"]
+
+
+def test_context_compact_replaces_history_with_system_digest():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("step one happened"), fake_run("- did step one\n- learned X"),
+    ]):
+        agent.ask("do step one")
+        digest = agent.context_compact()
+    assert digest == "- did step one\n- learned X"
+    assert agent.context == [{"role": "system", "content": digest}]
+    # the compacted summary is recalled in the next run
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("next step")
+    sent = m.call_args.args[0][-1]
+    assert "[system] - did step one" in sent and "Prompt contracts" not in sent
+
+
+def test_context_summarize_keeps_history():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("note"), fake_run("digest"),
+    ]):
+        agent.ask("question")
+        agent.context_summarize()
+    # question + summarize runs are both recorded; nothing was collapsed
+    assert len(agent.context) >= 4
+    assert all(m["role"] in ("user", "assistant") for m in agent.context)
+
+
+def test_gate_never_records_context():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("", returncode=0)):
+        agent.gate("true")
+    assert agent.context == []  # gate is model-free: not part of the transcript
+
+
+# --------------------------------------------------------------------- #
 # boolean gates
 
 @pytest.mark.parametrize("reply,expected", [
