@@ -444,6 +444,17 @@ If you need hard cancellation, run long goals with a small `timeout` in a
 sandbox/throwaway directory, or verify outcomes mechanically afterwards
 (that is what `check`/`gate`/`until` are for).
 
+### Ctrl+C / kernel interrupt
+
+Interrupting (`KeyboardInterrupt`) stops the Python call immediately; the
+CLI client process is killed and the live progress UI prints an honest
+`✗ … interrupted by user` line and retires its spinner on **every** exit
+path (success, error, interrupt) — a cancelled call never leaves a
+ticking progress thread behind (the classic wedged-notebook symptom). The
+same descendants caveat as above applies: grandchildren already spawned
+by the harness may outlive the interrupt — `pkill -f "opencode run"`
+(or `codex exec`) cleans up strays.
+
 ## Errors
 
 | Situation | Raised |

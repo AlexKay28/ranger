@@ -1222,59 +1222,72 @@ class Ranger:
             sys.stderr.flush()
 
         try:
-            proc = subprocess.run(
-                cmd,
-                cwd=self.cwd,
-                env={**os.environ, "PWD": self.cwd} if self.cwd else None,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,  # own process group → contained blast
-                timeout=opts["timeout"],
-            )
-        except FileNotFoundError:
-            # attribute the failure to its real cause: a missing agent
-            # cwd also raises FileNotFoundError from the spawn
-            if self.cwd and not Path(self.cwd).is_dir():
-                _finish("✗", "red", "agent cwd does not exist")
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=self.cwd,
+                    env={**os.environ, "PWD": self.cwd} if self.cwd else None,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,  # own pg → contained blast
+                    timeout=opts["timeout"],
+                )
+            except FileNotFoundError:
+                # attribute the failure to its real cause: a missing agent
+                # cwd also raises FileNotFoundError from the spawn
+                if self.cwd and not Path(self.cwd).is_dir():
+                    _finish("✗", "red", "agent cwd does not exist")
+                    raise RangerError(
+                        f"agent cwd does not exist: {self.cwd}"
+                    ) from None
+                _finish("✗", "red", f"{backend_name} CLI not found")
                 raise RangerError(
-                    f"agent cwd does not exist: {self.cwd}"
+                    f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
                 ) from None
-            _finish("✗", "red", f"{backend_name} CLI not found")
-            raise RangerError(
-                f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
-            ) from None
-        except subprocess.TimeoutExpired:
-            _finish("✗", "red", f"timed out after {opts['timeout']}s")
-            raise RangerError(
-                f"{backend_name} run timed out after {opts['timeout']}s"
-            ) from None
-        except OSError as exc:
-            _finish("✗", "red", _clip(str(exc), 90))
-            raise RangerError(
-                f"{backend_name} run could not be spawned: {exc}"
-            ) from None
+            except subprocess.TimeoutExpired:
+                _finish("✗", "red", f"timed out after {opts['timeout']}s")
+                raise RangerError(
+                    f"{backend_name} run timed out after {opts['timeout']}s"
+                ) from None
+            except OSError as exc:
+                _finish("✗", "red", _clip(str(exc), 90))
+                raise RangerError(
+                    f"{backend_name} run could not be spawned: {exc}"
+                ) from None
 
-        if proc.returncode != 0:
-            _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
-            raise RangerError(
-                f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
-            )
-        answer, info = adapter.parse_output(proc.stdout, use_stats)
-        if use_stats and info is not None:
-            self.last = {
-                "label": label,
-                "wall_s": round(time.time() - t0, 2),
-                **info,
-            }
-        first = answer.splitlines()
-        _finish("✓", "green", _clip(first[0], 90) if first else "")
-        if use_memory:
-            self.context.append({"role": "user", "content": prompt})
-            self.context.append({"role": "assistant", "content": answer})
-        return answer
+            if proc.returncode != 0:
+                _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
+                raise RangerError(
+                    f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
+                )
+            answer, info = adapter.parse_output(proc.stdout, use_stats)
+            if use_stats and info is not None:
+                self.last = {
+                    "label": label,
+                    "wall_s": round(time.time() - t0, 2),
+                    **info,
+                }
+            first = answer.splitlines()
+            _finish("✓", "green", _clip(first[0], 90) if first else "")
+            if use_memory:
+                self.context.append({"role": "user", "content": prompt})
+                self.context.append({"role": "assistant", "content": answer})
+            return answer
+        except KeyboardInterrupt:
+            # Ctrl+C / kernel interrupt: subprocess.run already killed the
+            # child; print an honest ✗ line and propagate — the finally
+            # clause below retires the spinner (a leaked spinner thread
+            # ticks forever, wedging notebooks' stderr)
+            _finish("✗", "red", "interrupted by user")
+            raise
+        finally:
+            # fires on EVERY exit path — success, error, interrupt — so the
+            # spinner thread can never outlive the call
+            if spinner is not None:
+                spinner.stop()
 
 
 # ====================================================================== #

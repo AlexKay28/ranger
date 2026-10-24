@@ -28,6 +28,55 @@ def fake_run(stdout="", stderr="", returncode=0):
 
 
 # --------------------------------------------------------------------- #
+# interruption hygiene: a leaked spinner thread ticks forever in
+# notebooks — every exit path must retire it
+
+class _TTYStderr:
+    """stderr stand-in that looks like a TTY so the live UI activates."""
+
+    def write(self, s):
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return True
+
+
+def test_interrupt_stops_the_spinner():
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=KeyboardInterrupt), \
+         mock.patch("sys.stderr", _TTYStderr()), \
+         mock.patch("ranger._Spinner") as spinner_cls:
+        agent = Ranger()
+        with pytest.raises(KeyboardInterrupt):
+            agent.ask("x")
+    spinner_cls.return_value.stop.assert_called()  # retired, never leaks
+
+
+def test_error_path_stops_the_spinner():
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run("", stderr="boom",
+                                          returncode=3)), \
+         mock.patch("sys.stderr", _TTYStderr()), \
+         mock.patch("ranger._Spinner") as spinner_cls:
+        agent = Ranger()
+        with pytest.raises(RangerError):
+            agent.ask("x")
+    spinner_cls.return_value.stop.assert_called()
+
+
+def test_success_path_stops_the_spinner():
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run("done")), \
+         mock.patch("sys.stderr", _TTYStderr()), \
+         mock.patch("ranger._Spinner") as spinner_cls:
+        assert Ranger().ask("x") == "done"
+    spinner_cls.return_value.stop.assert_called()
+
+
+# --------------------------------------------------------------------- #
 # command construction
 
 def test_run_default_flags_and_pwd_env():
