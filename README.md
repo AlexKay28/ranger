@@ -11,7 +11,9 @@ from plain Python code — for agentic-loop prototyping. You write code, not cha
 pip install -e .
 ```
 
-Requires the `opencode` CLI on PATH. Runnable applications live in
+Requires the `opencode` CLI on PATH. On a distro-pegged pip (e.g. 22.x) an
+editable install can fail with "build backend is missing the build_editable
+hook" — fix the tool, not the package: `pip install -U pip`, then retry. Runnable applications live in
 [examples/](examples/) — quickstart, model discovery, a full agentic loop, and
 a self-hosted project-growth loop.
 
