@@ -28,7 +28,7 @@ def test_pypi_readme_uses_an_absolute_cheatsheet_url():
 
 def test_source_distribution_manifest_includes_project_assets():
     manifest = (REPO / "MANIFEST.in").read_text()
-    for asset in ("LICENSE", "README.md", "docs/cheatsheet.png",
+    for asset in ("LICENSE", "README.md", "SKILL.md", "docs/cheatsheet.png",
                   "docs/*.md", "scripts/cheatsheet.py"):
         assert asset in manifest
     assert "ranger = [\"py.typed\"]" in PYPROJECT

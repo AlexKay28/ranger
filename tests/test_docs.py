@@ -25,6 +25,7 @@ REPO = Path(__file__).resolve().parent.parent
 API_TEXT = (REPO / "docs" / "API.md").read_text()
 README_TEXT = (REPO / "README.md").read_text()
 CHEATSHEET_SOURCE = (REPO / "scripts" / "cheatsheet.py").read_text()
+SKILL_TEXT = (REPO / "SKILL.md").read_text()
 
 PUBLIC_METHODS = [
     name for name, _ in inspect.getmembers(Ranger, predicate=inspect.isfunction)
@@ -62,6 +63,7 @@ def test_readme_links_the_reference_and_catalog():
     assert "docs/PARADIGM.md" in README_TEXT     # design backbone reachable
     assert "docs/ARCHITECTURE.md" in README_TEXT # codebase tour reachable
     assert "docs/PUBLISHING.md" in README_TEXT   # release checklist reachable
+    assert "SKILL.md" in README_TEXT              # agent instructions reachable
     assert "backend" in API_TEXT                 # backends documented
 
 
@@ -84,6 +86,14 @@ def test_cheatsheet_is_embedded_and_covers_the_shipped_surface():
         assert command in CHEATSHEET_SOURCE, (
             f"cheatsheet misses {command} — update scripts/cheatsheet.py and redraw")
     assert "ranger.__version__" in CHEATSHEET_SOURCE  # version is not hardcoded
+
+
+def test_root_skill_is_shipped_and_covers_safe_agent_workflows():
+    assert SKILL_TEXT.startswith("---\nname: ranger\n")
+    for detail in ("pip install rangers", "import ranger", "gate_cmd=",
+                   "max_iter", "RangerError", "KeyboardInterrupt",
+                   "subprocess.run", "subprocess.Popen", "OpenRouter"):
+        assert detail in SKILL_TEXT, f"SKILL.md misses {detail!r}"
 
 
 def test_examples_compile_and_are_main_guarded():

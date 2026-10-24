@@ -12,6 +12,9 @@ check → repeat maps 1:1 onto expression, statement and condition. See
 [docs/PARADIGM.md](docs/PARADIGM.md) for the seven laws every feature is
 reviewed against.
 
+AI coding agents: start with [SKILL.md](SKILL.md) for the library's safe
+workflow, contracts, and repository contribution rules.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/AlexKay28/ranger/main/docs/cheatsheet.png" alt="ranger command cheatsheet" width="760">
 </p>
