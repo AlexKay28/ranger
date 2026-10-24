@@ -32,7 +32,7 @@ CTOR_PARAMS = [
     p for p in inspect.signature(Ranger.__init__).parameters if p != "self"
 ]
 MODULE_PUBLIC = ["Ranger", "RangerError", "DEFAULT_MODEL", "register_backend",
-                 "__version__"]
+                 "backends", "debate", "__version__"]
 
 
 def test_api_documents_every_public_method():
@@ -93,12 +93,15 @@ def test_examples_use_only_shipped_api():
 
 
 def test_every_shipped_command_has_an_example_usage():
-    """The five core commands plus the loop must appear somewhere in examples/."""
+    """Every public API surface must appear somewhere in examples/."""
     all_example_text = "\n".join(
         p.read_text() for p in sorted((REPO / "examples").glob("*.py"))
     )
     for command in ("ask", "summarize", "write", "do", "search", "check",
-                    "gate", "until", "models", "with_config"):
+                    "gate", "until", "models", "with_config",
+                    # multi-agent interactions (v0.6)
+                    "review", "challenge", "second_opinion", "refine_with",
+                    "debate"):
         assert f".{command}(" in all_example_text or f"Ranger.{command}" in all_example_text, (
             f"no example demonstrates .{command}()"
         )

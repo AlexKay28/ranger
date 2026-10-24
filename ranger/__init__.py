@@ -42,8 +42,8 @@ import uuid
 from pathlib import Path
 
 __all__ = ["Ranger", "RangerError", "DEFAULT_MODEL", "register_backend",
-           "backends"]
-__version__ = "0.5.0"
+           "backends", "debate"]
+__version__ = "0.6.0"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
@@ -770,6 +770,229 @@ class Ranger:
                 "steps": steps, "report": report}
 
     # ------------------------------------------------------------------ #
+    # multi-agent interactions
+    #
+    # Compositions, never a runtime (paradigm law 6): every pattern below
+    # is ordinary typed calls between two agents. Verdicts are grammar,
+    # never vibes; budgets are honest; cross-agent material travels as
+    # explicitly-labeled unverified claims, and reviewers/challengers run
+    # free of their own chat history (law 4: memory colors dialogues,
+    # never facts about someone else's work).
+
+    @staticmethod
+    def _last_claim(other: "Ranger") -> str:
+        """The other agent's most recent substantive assertion."""
+        for msg in reversed(getattr(other, "context", [])):
+            if msg.get("role") == "assistant" and msg.get("content", "").strip():
+                return msg["content"]
+        raise RangerError(
+            "that agent has no recorded claim yet — pass one explicitly "
+            "(claim=/author=) or let it speak first"
+        )
+
+    def review(self, subject: str, author: "Ranger | str | None" = None,
+               **ov) -> dict:
+        """Review work as a second agent; judge from verified facts.
+
+        `self` is the REVIEWER. The `subject` describes what to review (a
+        goal, a file, a change) in the agent's cwd. If `author` is another
+        Ranger, its latest report is injected as **claims to verify** —
+        never as truth; a bare string is treated as the claims text. The
+        review runs memory- and session-free, so the verdict is about the
+        work, not about anyone's chat history.
+
+        Frozen reply contract the reviewer must honor:
+
+            VERDICT: APPROVE | REJECT | REQUEST_CHANGES
+            FINDINGS: <what was actually verified, and how>
+            CHANGES:  <exactly what must change; "none" when approving>
+
+        Returns {"passed": bool, "verdict": str, "findings": str,
+        "changes": str}. APPROVE -> passed=True. Unparseable replies raise
+        RangerError — review never guesses.
+
+            critic.review("the parser handles empty input", author=builder)
+        """
+        claims = None
+        if isinstance(author, Ranger):
+            claims = self._last_claim(author)
+        elif isinstance(author, str):
+            claims = author
+        elif author is not None:
+            raise TypeError("author must be a Ranger, a claims string, or None")
+        if "session" in ov:
+            # law 4: a verdict must not be read from a continued thread
+            raise TypeError(
+                "review() runs session-free by contract — remove session="
+            )
+        ov.pop("memory", None)  # reviews are never colored by chat history
+        prompt = "## Review request\n"
+        prompt += f"Review this subject in the current directory: {subject}\n"
+        if claims:
+            prompt += (
+                "\n## The author claims (NOT verified — verify everything "
+                "yourself against the actual files/commands; trust nothing)\n"
+                + claims + "\n"
+            )
+        prompt += (
+            "\nFirst verify the facts directly (read files, run read-only "
+            "commands). Then reply in EXACTLY this format and nothing else:\n"
+            "VERDICT: APPROVE or VERDICT: REJECT or VERDICT: REQUEST_CHANGES\n"
+            "FINDINGS: what you verified and observed, bullet lines\n"
+            "CHANGES: exactly what must change, or the single word none\n"
+        )
+        answer = self._run(prompt, label="review", memory=False,
+                           session=None, **ov)
+        m = re.search(r"^\s*VERDICT\s*:\s*(APPROVE|REJECT|REQUEST_CHANGES)",
+                      answer, re.IGNORECASE | re.MULTILINE)
+        if not m:
+            raise RangerError(
+                f"review() could not parse a VERDICT line from:\n{answer[:300]}"
+            )
+
+        def section(key: str) -> str:
+            mm = re.search(rf"^\s*{key}\s*:\s*(.+)$", answer,
+                           re.IGNORECASE | re.MULTILINE)
+            return mm.group(1).strip() if mm else ""
+
+        verdict = m.group(1).upper()
+        return {
+            "passed": verdict == "APPROVE",
+            "verdict": verdict,
+            "findings": section("FINDINGS"),
+            "changes": section("CHANGES"),
+        }
+
+    def challenge(self, other: "Ranger", claim: str | None = None,
+                  rounds: int = 2, **ov) -> dict:
+        """Adversarially challenge another agent's claim.
+
+        `self` is the CHALLENGER, `other` the defender. The `claim`
+        defaults to the defender's latest recorded assertion. Each round:
+        the challenger names ONE concrete verifiable weakness, the
+        defender answers with checkable evidence, the challenger rules on
+        that attack alone — **SUSTAINED** (defense failed) or
+        **WITHDRAWN** (defense satisfied). No sympathy: the ruling must
+        follow from the evidence lines, and budget exhaustion leaves an
+        honest result.
+
+        Returns {"survived": bool, "rounds": [{"attack", "defense",
+        "ruling"}...], "summary": str}. survived=True means every attack
+        was withdrawn (or the defender conceded nothing); any SUSTAINED
+        ruling ends the challenge with survived=False immediately.
+
+            auditor.challenge(author)          # attack their latest claim
+        """
+        if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 0:
+            raise ValueError(f"rounds must be a non-negative int, got {rounds!r}")
+        if claim is None:
+            claim = self._last_claim(other)
+        history: list[dict] = []
+        for i in range(1, rounds + 1):
+            so_far = ("\n".join(
+                f"- attack {r['attack']}\n- defense: {r['defense']}"
+                for r in history) or "- none yet")
+            attack = self.ask(
+                f"A defender asserts this claim:\n{claim}\n\n"
+                f"Attacks/defenses so far:\n{so_far}\n\n"
+                f"Attack {i} of {rounds}: name ONE concrete, verifiable "
+                "weakness in the claim, or demand one missing proof. "
+                "Reply with a single line: ATTACK: <your attack>",
+                **ov,
+            ).strip()
+            defense = other.ask(
+                f"Your claim is under attack:\n{claim}\n\n"
+                f"The attacker says:\n{attack}\n\n"
+                "Defend with concrete, checkable evidence — or concede. "
+                "Reply with your defense, ending with a final line: "
+                "DEFENDED or CONCEDED",
+                **ov,
+            ).strip()
+            mm = re.search(r"(?:^|\n)\s*(DEFENDED|CONCEDED)\s*(?:\n|$)",
+                           defense, re.IGNORECASE)
+            conceded = bool(mm and mm.group(1).upper() == "CONCEDED")
+            if conceded:
+                # the defender's own concession ends the challenge — no
+                # ruling call, no mercy round
+                history.append({"attack": attack, "defense": defense,
+                                "ruling": "CONCEDED"})
+                return {"survived": False, "rounds": history,
+                        "summary": "the defender conceded"}
+            ruling = self.ask(
+                f"You attacked this claim:\n{claim}\n\n"
+                f"Your attack:\n{attack}\n\nThe defense:\n{defense}\n\n"
+                "Rule on THIS attack only, from the evidence alone — ignore "
+                "sympathy, ignore who wrote what. Reply with a single line: "
+                "RULING: SUSTAINED or RULING: WITHDRAWN",
+                **ov,
+            ).strip()
+            mr = re.search(r"^\s*RULING\s*:\s*(SUSTAINED|WITHDRAWN)",
+                           ruling, re.IGNORECASE | re.MULTILINE)
+            if not mr:
+                raise RangerError(
+                    f"challenge() could not parse a RULING line from:\n{ruling[:300]}"
+                )
+            won = mr.group(1).upper() == "SUSTAINED"
+            history.append({"attack": attack, "defense": defense,
+                            "ruling": "SUSTAINED" if won else "WITHDRAWN"})
+            if conceded or won:
+                return {"survived": False, "rounds": history,
+                        "summary": ruling}
+        return {"survived": True, "rounds": history,
+                "summary": "all attacks withdrawn or budget exhausted"}
+
+    def second_opinion(self, other: "Ranger", prompt: str, **ov) -> dict:
+        """Ask the same question to two agents; disagreement is the signal.
+
+        Returns {"mine": str, "theirs": str, "differs": bool} — plain
+        normalized comparison, no judgment, no winner.
+        """
+        mine = self.ask(prompt, **ov)
+        theirs = other.ask(prompt, **ov)
+        norm = lambda s: " ".join(s.split()).casefold()
+        return {"mine": mine, "theirs": theirs, "differs": norm(mine) != norm(theirs)}
+
+    def refine_with(self, critic: "Ranger", goal: str, max_iter: int = 3,
+                    **ov) -> dict:
+        """The two-agent until: do, get reviewed, address the changes, repeat.
+
+        `self` does the work in its cwd; `critic.review(...)` gates each
+        round. REQUEST_CHANGES/REJECT feed the requested changes verbatim
+        into the next attempt. Only the critic's mechanical APPROVE can
+        end the loop early — budget exhaustion returns approved=False
+        honestly.
+
+        Returns {"approved": bool, "iterations": int, "report": str,
+        "reviews": [review dicts...]}.
+
+            builder.refine_with(critic, "add retry tests for parse()",
+                                 max_iter=4)
+        """
+        if not isinstance(max_iter, int) or isinstance(max_iter, bool) \
+                or max_iter < 0:
+            raise ValueError(
+                f"max_iter must be a non-negative int, got {max_iter!r}")
+        if not isinstance(critic, Ranger):
+            raise TypeError("critic must be a Ranger (it gates via .review)")
+        reviews: list[dict] = []
+        pending = ""
+        report = ""
+        for i in range(1, max_iter + 1):
+            task = goal if not pending else (
+                f"{goal}\n\nThe reviewer requested these changes (address "
+                f"ALL of them):\n{pending}"
+            )
+            report = self.do(task, **ov)
+            rev = critic.review(subject=goal, author=self, **ov)
+            reviews.append(rev)
+            if rev["passed"]:
+                return {"approved": True, "iterations": i,
+                        "report": report, "reviews": reviews}
+            pending = rev["changes"] or rev["findings"]
+        return {"approved": False, "iterations": len(reviews),
+                "report": report, "reviews": reviews}
+
+    # ------------------------------------------------------------------ #
     # plumbing
 
     def _run(self, prompt: str, label: str = "run", **ov) -> str:
@@ -959,3 +1182,72 @@ class Ranger:
             self.context.append({"role": "user", "content": prompt})
             self.context.append({"role": "assistant", "content": answer})
         return answer
+
+
+# ====================================================================== #
+# symmetric multi-agent interactions
+# ====================================================================== #
+
+def debate(agent_a: "Ranger", agent_b: "Ranger", topic: str,
+           rounds: int = 2, judge: "Ranger | None" = None, **ov) -> dict:
+    """Two agents exchange positions on a topic; disagreement surfaces.
+
+    Each round, each side states its position (seeing the opponent's last
+    position, explicitly labeled) — factual points, no fluff. An optional
+    third `judge` agent digests where the positions factually disagree and
+    what evidence would settle it; it runs memory-free and never names a
+    "winner" (a debate digests, it does not crown).
+
+    Returns {"transcript": [{"round", "a", "b"}...], "digest": str | None}.
+
+        ranger.debate(optimist, pessimist, "should this repo add PyPI publishing?",
+                      judge=archivist)
+    """
+    if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 0:
+        raise ValueError(f"rounds must be a non-negative int, got {rounds!r}")
+    for name, agent in (("agent_a", agent_a), ("agent_b", agent_b)):
+        if not hasattr(agent, "ask"):
+            raise TypeError(f"{name} must be a Ranger")
+    transcript: list[dict] = []
+    prev_a = prev_b = None
+    for i in range(1, rounds + 1):
+        def position(opponent_last, who):
+            p = (
+                f"Debate topic: {topic}\n"
+                f"Round {i} of {rounds}. You are the {who}.\n"
+            )
+            if opponent_last:
+                p += (
+                    "\n## The opponent's last position (NOT verified — "
+                    "challenge it with facts if it is wrong)\n"
+                    + opponent_last + "\n"
+                )
+            p += (
+                "\nState your position: strongest concrete, checkable "
+                "points, five lines maximum. No fluff, no concessions to "
+                "politeness."
+            )
+            return p
+
+        prev_a = agent_a.ask(position(prev_b, "first speaker"), **ov).strip()
+        prev_b = agent_b.ask(position(prev_a, "second speaker"), **ov).strip()
+        transcript.append({"round": i, "a": prev_a, "b": prev_b})
+    digest = None
+    if judge is not None:
+        if not hasattr(judge, "ask"):
+            raise TypeError("judge must be a Ranger")
+        digest = judge.ask(
+            "Two positions were exchanged on this topic:\n"
+            f"{topic}\n\n"
+            + "\n\n".join(
+                f"[first speaker, round {t['round']}]\n{t['a']}\n"
+                f"[second speaker, round {t['round']}]\n{t['b']}"
+                for t in transcript
+            )
+            + "\n\nDigest: where do the two positions FACTUALLY disagree, "
+            "and what evidence would settle each disagreement? Do not "
+            "crown a winner.",
+            memory=False, session=None,  # the judge must not be biased by
+            **ov,                          # its own threads or chat history
+        ).strip()
+    return {"transcript": transcript, "digest": digest}

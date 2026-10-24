@@ -4,7 +4,7 @@ Complete reference for everything `ranger` ships. Every public name on this
 page is enforced by `tests/test_docs.py` — if a method or setting is added
 to the code but missing here, the suite fails.
 
-Version 0.5.0 · Module: `ranger` · Single class: `ranger.Ranger`
+Version 0.6.0 · Module: `ranger` · Single class: `ranger.Ranger`
 
 ---
 
@@ -283,6 +283,75 @@ delegates to the backend adapter. opencode runs `opencode models`; codex
 cannot enumerate models and raises `RangerError` pointing at
 `~/.codex/config.toml` / `model=`. No agent, no tokens, no context recording.
 
+## Multi-agent interactions
+
+Compositions, never a runtime (paradigm law 6): every pattern below is
+ordinary typed calls between agents. Three invariants hold across all of
+them: **verdicts are grammar** (APPROVE/REJECT/REQUEST_CHANGES,
+SUSTAINED/WITHDRAWN — unparseable replies raise, never guess), **budgets
+are honest** (exhausted rounds leave `passed: False` / `survived: True`
+per contract), and **reviewers, challengers and judges run free of their
+own chat history** (`memory`/`session` are dropped for those calls) — a
+verdict is about the work, not about anyone's conversation. Cross-agent
+material always travels explicitly labeled as *claims to verify*.
+
+With two agents — a `builder` and a `critic` — and a third `skeptic`:
+
+```python
+both    = builder.second_opinion(critic, prompt)   # {mine, theirs, differs}
+verdict = critic.review(subject, author=builder)   # reviewer verifies facts
+outcome = builder.refine_with(critic, goal)         # do -> review -> fix -> repeat
+duel    = critic.challenge(builder, rounds=2)       # adversarial claim attack
+talk    = ranger.debate(builder, critic, topic,    # symmetric exchange
+                        rounds=2, judge=skeptic)
+```
+
+### `review(subject, author=None) -> dict` (method on the REVIEWER)
+
+Reviews the `subject` in the agent's cwd. `author` may be another Ranger
+(its latest recorded answer is injected as claims to verify — never
+truth), a bare string, or `None`. Reply contract is frozen
+(`VERDICT: APPROVE|REJECT|REQUEST_CHANGES`, then `FINDINGS:`, `CHANGES:`)
+and mechanically parsed. Returns
+`{"passed": bool, "verdict": str, "findings": str, "changes": str}` —
+`passed` is True only on APPROVE.
+
+### `challenge(other, claim=None, rounds=2) -> dict` (method on the CHALLENGER)
+
+Attacks the defender `other`'s claim (default: its latest recorded
+assertion). Each round: ONE concrete verifiable weakness → defense with
+checkable evidence ending `DEFENDED`/`CONCEDED` → the challenger rules on
+that attack alone via `RULING: SUSTAINED|WITHDRAWN`. Any SUSTAINED ruling
+(or a CONCEDED defense) ends with `survived: False` immediately; all
+withdrawn (or budget exhausted) leaves `survived: True`. Returns
+`{"survived": bool, "rounds": [{"attack", "defense", "ruling"}...],
+"summary": str}`.
+
+### `second_opinion(other, prompt) -> dict`
+
+Same prompt to two agents. Returns
+`{"mine": str, "theirs": str, "differs": bool}` — normalized comparison,
+no judgment, no winner.
+
+### `refine_with(critic, goal, max_iter=3) -> dict`
+
+The two-agent `until`: `do` the step → `critic.review(subject=goal,
+author=self)` gates the round → REQUEST_CHANGES/REJECT feed the requested
+changes verbatim into the next attempt. Only a mechanical APPROVE ends
+the loop early. Returns `{"approved": bool, "iterations": int,
+"report": str, "reviews": [review dicts...]}`.
+
+### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` (module-level)
+
+Symmetric position exchange; each side sees the opponent's last position
+labeled as unverified. The optional `judge` agent (memory-free) digests
+where the positions factually disagree and what evidence would settle it
+— it never crowns a winner. Returns
+`{"transcript": [{"round", "a", "b"}...], "digest": str | None}`.
+
+Validation: `rounds`/`max_iter` must be non-negative ints (`ValueError`);
+wrong-typed `author`/`critic`/agents raise `TypeError`.
+
 ## Backends (harness adapters)
 
 `Ranger(backend="codex")` drives a different headless harness with the
@@ -379,6 +448,7 @@ sandbox/throwaway directory, or verify outcomes mechanically afterwards
 | unknown `with_config` key | `TypeError` |
 | invalid `effort` | `ValueError` (constructor), `TypeError` (per-call) |
 | invalid `backend` | `ValueError` |
+| explicit `session=` passed to `review()` / `debate(judge=...)` | `TypeError` (verdicts run session-free) |
 | `until(max_iter=...)` not a non-negative int | `ValueError` |
 | skills directory with no markdown | `RangerError` |
 

@@ -145,6 +145,23 @@ absorbed by one adapter class per backend — see the Backends section of
 [docs/API.md](docs/API.md) for the full capability map and the recipe for
 adding your own harness.
 
+## Multi-agent interactions
+
+Two (or three) agents, and the expected patterns as ready-made methods —
+verdicts are grammar, budgets are honest, reviewers run free of their own
+chat history:
+
+```python
+both    = builder.second_opinion(critic, prompt)    # {mine, theirs, differs}
+verdict = critic.review(subject, author=builder)    # APPROVE/REJECT/REQUEST_CHANGES
+outcome = builder.refine_with(critic, goal)          # the two-agent until()
+duel    = critic.challenge(builder)                  # adversarial claim attack
+talk    = ranger.debate(builder, critic, topic, judge=skeptic)
+```
+
+See the Multi-agent interactions section of [docs/API.md](docs/API.md)
+and `examples/multi_agent.py`.
+
 ## Skills allow-list
 
 Grant the agent specific skills or operating rules per run — a markdown

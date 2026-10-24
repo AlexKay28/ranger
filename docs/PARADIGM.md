@@ -52,6 +52,9 @@ Python control flow**. No DSL, no graph JSON, no hidden runtime.
    recall applies only to dialogue commands (`ask`, `do`, `write`,
    `context_*`); `check`, `search` and `summarize` always run
    history-independent, because a verdict must not be a function of chat.
+   The same corollary governs multi-agent interactions: reviewers,
+   challengers and judges run memory- and session-free, and one agent's
+   words reach another only as explicitly-labeled *claims to verify*.
 
 5. **Failure is an exception, not a message.**
    `RangerError` is raised for the surrounding program to handle — missing
@@ -61,7 +64,12 @@ Python control flow**. No DSL, no graph JSON, no hidden runtime.
 6. **Composability over orchestration.**
    Plain methods compose into any pipeline the caller can write. ranger
    ships no runtime, no scheduler, no framework — it is a rail your code
-   runs on.
+   runs on. Multi-agent interactions (review, challenge, debate,
+   second_opinion, refine_with) are **compositions, never a runtime**:
+   ready-made choreography over the same typed calls, with grammar
+   verdicts, honest budgets and history-free judges. The day a pattern
+   needs code instead of a library method, it is the caller's while-loop
+   — nothing is hidden inside.
 
 7. **The harness is a replaceable data plane.**
    Everything harness-specific (CLI flags, output schemas, sandbox

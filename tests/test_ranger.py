@@ -977,3 +977,155 @@ def test_memory_budget_per_call_override():
         agent.ask("hi", memory_budget=100)  # tiny budget: almost nothing fits
     joined = m.call_args.args[0][-1]
     assert "u" * 9000 not in joined and "a" * 9000 not in joined
+
+
+# --------------------------------------------------------------------- #
+# multi-agent interactions (v0.6) — frozen contracts, mocked calls
+
+def _review_answer(verdict="APPROVE", findings="all verified",
+                   changes="none"):
+    return (f"VERDICT: {verdict}\nFINDINGS: {findings}\n"
+            f"CHANGES: {changes}")
+
+
+def test_review_parses_verdicts_mechanically():
+    builder, critic = Ranger(cwd="/tmp/demo"), Ranger(cwd="/tmp/demo")
+    builder.context.append({"role": "assistant", "content": "I added tests."})
+    for verdict, passed in (("APPROVE", True), ("REJECT", False),
+                            ("REQUEST_CHANGES", False)):
+        with mock.patch("ranger.subprocess.run",
+                        return_value=fake_run(_review_answer(verdict))):
+            rev = critic.review("the tests exist", author=builder)
+        assert rev == {"passed": passed, "verdict": verdict,
+                       "findings": "all verified", "changes": "none"}
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run("looks good to me!")):
+        with pytest.raises(RangerError, match="VERDICT"):
+            critic.review("x", author=builder)
+
+
+def test_review_is_memory_and_session_free():
+    critic = Ranger(session="ses_bias")
+    critic.context = [{"role": "user", "content": "we agreed it's fine"},
+                      {"role": "assistant", "content": "sure, fine"}]
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run(_review_answer())) as m:
+        critic.review("the thing")
+    cmd = m.call_args.args[0]
+    prompt = cmd[-1]
+    assert "Previous interaction" not in prompt  # not colored by own chat
+    assert "ses_bias" not in cmd                  # nor resumed from a session
+    assert "we agreed it's fine" not in prompt
+
+
+def test_review_injects_author_claims_as_unverified():
+    builder = Ranger()
+    builder.context.append({"role": "assistant", "content": "all tests pass"})
+    critic = Ranger()
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run(_review_answer())) as m:
+        critic.review("suite health", author=builder)
+    prompt = m.call_args.args[0][-1]
+    assert "all tests pass" in prompt
+    assert "NOT verified" in prompt  # claims labeled, trust nothing
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run(_review_answer())):
+        critic.review("x", author="plain string claims")  # bare string ok
+        with pytest.raises(RangerError, match="no recorded claim"):
+            Ranger().review("x", author=Ranger())  # silent author rejected
+
+
+def test_challenge_attacks_defends_and_rules():
+    attacker, defender = Ranger(), Ranger()
+    defender.context.append({"role": "assistant",
+                             "content": "the parser handles every case"})
+    replies = iter([
+        "ATTACK: no test for empty input exists",     # attack
+        "Fixed — added tests; DEFENDED",               # defense
+        "RULING: WITHDRAWN",                           # ruling round 1
+        "ATTACK: benchmark numbers are hearsay",       # round 2 attack
+        "Here are the numbers. DEFENDED",              # defense
+        "RULING: SUSTAINED",                           # sustained -> survives no
+    ])
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda *a, **k: fake_run(next(replies))):
+        duel = attacker.challenge(defender, rounds=2)
+    assert duel["survived"] is False
+    assert [r["ruling"] for r in duel["rounds"]] == ["WITHDRAWN", "SUSTAINED"]
+    assert len(duel["rounds"]) == 2  # immediate stop after SUSTAINED? no: last
+    # budgets: all withdrawn -> survived True
+    replies2 = iter(["ATTACK: a", "DEFENDED", "RULING: WITHDRAWN"] * 3)
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda *a, **k: fake_run(next(replies2))):
+        ok = attacker.challenge(defender, rounds=2)
+    assert ok["survived"] is True and len(ok["rounds"]) == 2
+    # concession ends it immediately
+    replies3 = iter(["ATTACK: a", "you got me.\nCONCEDED"])
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda *a, **k: fake_run(next(replies3))):
+        lost = attacker.challenge(defender, rounds=2)
+    assert lost["survived"] is False and len(lost["rounds"]) == 1
+    with pytest.raises(ValueError):  # bad budget
+        attacker.challenge(defender, rounds=-1)
+
+
+def test_second_opinion_compares_normatively():
+    a, b = Ranger(), Ranger()
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("The\nanswer  is 42"), fake_run("the answer is 42"),
+    ]):
+        same = a.second_opinion(b, "the question")
+    assert same["differs"] is False  # whitespace/case differences don't count
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("42"), fake_run("43"),
+    ]):
+        diff = a.second_opinion(b, "the question")
+    assert diff["differs"] is True
+
+
+def test_refine_with_gates_on_mechanical_approve():
+    builder, critic = Ranger(cwd="/tmp/demo"), Ranger(cwd="/tmp/demo")
+    replies = iter([
+        fake_run("worked"),                      # do #1
+        fake_run(_review_answer("REQUEST_CHANGES",
+                                findings="f", changes="add empty-input test")),
+        fake_run("worked again"),                 # do #2
+        fake_run(_review_answer("APPROVE")),      # approved
+    ])
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda *a, **k: next(replies)):
+        out = builder.refine_with(critic, "add input tests", max_iter=3)
+    assert out["approved"] is True and out["iterations"] == 2
+    assert out["reviews"][0]["changes"] == "add empty-input test"
+    # budget exhaustion is honest: never approved without APPROVE
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("w"), fake_run(_review_answer("REQUEST_CHANGES", changes="c")),
+        fake_run("w"), fake_run(_review_answer("REQUEST_CHANGES", changes="c")),
+    ]):
+        out2 = builder.refine_with(critic, "goal", max_iter=2)
+    assert out2["approved"] is False and out2["iterations"] == 2
+    with pytest.raises(TypeError):  # critic must be a Ranger
+        builder.refine_with("not an agent", "goal")
+    with pytest.raises(ValueError):
+        builder.refine_with(critic, "goal", max_iter=-1)
+
+
+def test_debate_exchanges_and_judges():
+    a, b, judge = Ranger(), Ranger(), Ranger()
+    replies = iter([fake_run("pos-A"), fake_run("pos-B"), fake_run("pos-A2"),
+                    fake_run("pos-B2"), fake_run("digest here")])
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda *a2, **k: next(replies)):
+        talk = ranger.debate(a, b, "the topic", rounds=2, judge=judge)
+    assert [t["round"] for t in talk["transcript"]] == [1, 2]
+    assert talk["digest"] == "digest here" and judge.context == []
+    # each side sees the opponent's labeled position
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("standing firm"), fake_run("opposing"),
+    ]) as m:
+        ranger.debate(a, b, "topic", rounds=1)
+    assert "standing firm" in m.call_args_list[-1].args[0][-1]
+    with pytest.raises(ValueError):
+        ranger.debate(a, b, "topic", rounds=1.5)
+    with pytest.raises(TypeError):
+        ranger.debate(a, "b", "topic")
