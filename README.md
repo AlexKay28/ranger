@@ -55,7 +55,8 @@ print(agent.ask("say ok"))
 Runnable applications live in [examples/](examples/): quickstart, model
 discovery, a full agentic loop, a self-hosted project-growth loop, plus three
 small day-to-day recipes — repair a red test command, independently review a
-local diff before merge, and draft release notes from git history.
+local diff before merge, review one file, and draft release notes from git
+history.
 
 Live progress: each command draws a morphing line on stderr while it runs
 (`⠹ search · TODO items in this repo · 00:03`) and settles as
