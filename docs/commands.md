@@ -50,7 +50,22 @@ extra skills/tools: markdown files and directories attach via opencode's
 operating grants. `with_config(skills=...)` carries an allow-list on a
 configured copy.
 
-## ✅ Shipped (7)
+### Mode / effort / stats (shipped)
+- `mode="build"` — run as a named opencode agent (build/plan/general or a
+  custom one from the project's opencode config). Per-call override wins;
+  legacy `agent=` still accepted.
+- `effort="low|medium|high"` — depth directive on every run: low = brevity
+  bias, high = forces thinking blocks + verify-before-answering.
+- `stats=True` — JSON-mode runs; after each command `agent.last` holds
+  `wall_s`, `model_s`, `parts`, `chars`, `session`.
+
+## ✅ Shipped (8)
+
+### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
+The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
+mechanical verdict — `gate_cmd` (pure exit code) or `condition` (agent YES/NO).
+Returns `{"achieved", "iterations", "steps", "report"}`; exhausted budget means
+`achieved: False`, honestly, never a sympathy iteration.
 
 ### `ask(prompt) -> str`
 Raw prompt, raw answer. The escape hatch every other method is built on.
@@ -119,7 +134,7 @@ minimal fixes. Pairs with `fix` for the repair loop.
 Pointed Q&A about one file ("what inputs can crash this?"), vs `summarize`'s
 general digest.
 
-## 🌱 Later (4)
+## 🌱 Later (3)
 
 Bigger contracts — multi-step verification, retries, or safety rails.
 
@@ -136,10 +151,6 @@ Requires multiple `edit` runs with progress tracking.
 Ask the agent to stage and commit its own work with a sensible generated
 message. Needs safety rails (refuse if cwd isn't a repo, no force-pushes).
 
-### `until(goal, max_iter=5, feedback=None) -> str`
-The loop primitive: run `plan → do → check` iterations until the gate returns
-`True` or `max_iter` is exhausted. This is the end goal of the whole package.
-
 ## Non-goals
 
 - No streaming/chat style interface — blocks until the run finishes, returns a
@@ -148,8 +159,11 @@ The loop primitive: run `plan → do → check` iterations until the gate return
 
 ## The point
 
-With `until` on top of these primitives, the README's manual loop becomes:
+`until` shipped — the README's manual loop is now one call:
 
 ```python
-agent.until("parser.py: implement the TODO, all tests green")
+agent.until("parser.py: implement the TODO, all tests green",
+            gate_cmd="python -m pytest -q")
 ```
+
+The 🌱 tier that remains (fix/transform/commit) composes on top of it.

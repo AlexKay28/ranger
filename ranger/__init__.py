@@ -31,6 +31,7 @@ Discover available models and configure runs:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -40,14 +41,14 @@ import time
 from pathlib import Path
 
 __all__ = ["Ranger", "RangerError"]
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 # Settings every run accepts as a per-call override.
 _RUN_KEYS = (
-    "model", "timeout", "auto", "session", "agent", "title", "thinking",
-    "pretty", "memory", "skills",
+    "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
+    "pretty", "memory", "skills", "effort", "stats",
 )
 
 # How many characters of recorded context a run may recall, max.
@@ -148,6 +149,15 @@ class Ranger:
             (attached via opencode's --file flag), a directory (its
             SKILL.md and *.md files are attached), or a plain prose
             grant that is injected into the prompt as guidance.
+        mode: opencode agent name to run as ("build", "plan", "general",
+            or any custom agent defined in the project's opencode
+            config). Legacy alias: `agent=`.
+        effort: "low" | "medium" | "high" depth directive. "low" biases
+            the prompt toward brevity; "high" forces thinking blocks and
+            a verify-before-answering directive; "medium" is neutral.
+        stats: request runs in JSON mode and record telemetry into
+            `agent.last` (wall/model time, part count, answer size,
+            opencode session id).
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -167,7 +177,12 @@ class Ranger:
         memory: bool = True,
         memory_budget: int = _MEMORY_BUDGET,
         skills: list | None = None,
+        mode: str | None = None,
+        effort: str = "medium",
+        stats: bool = False,
     ) -> None:
+        if effort not in ("low", "medium", "high"):
+            raise ValueError(f"effort must be low|medium|high, got {effort!r}")
         self.model = model or os.environ.get("RANGER_MODEL") or DEFAULT_MODEL
         self.cwd = str(Path(cwd).resolve()) if cwd else None
         self.timeout = timeout
@@ -180,6 +195,10 @@ class Ranger:
         self.memory = memory
         self.memory_budget = memory_budget
         self.skills = skills
+        self.mode = mode
+        self.effort = effort
+        self.stats = stats
+        self.last: dict = {}
         #: OpenAI-format conversation state: {"role", "content"} dicts.
         self.context: list[dict] = []
 
@@ -386,6 +405,55 @@ class Ranger:
             return False
         return proc.returncode == 0
 
+    def until(
+        self,
+        goal: str,
+        max_iter: int = 5,
+        gate_cmd: str | None = None,
+        condition: str | None = None,
+        **ov,
+    ) -> dict:
+        """The loop primitive: plan → do → verify, repeated until green.
+
+        Each iteration asks for ONE concrete next step toward the goal,
+        executes it with do(), then decides achieved/not via a mechanical
+        gate — either `gate_cmd` (shell command, exit code decides) or
+        `condition` (agent-verified YES/NO). With neither, the gate falls
+        back to `check("the goal is fully achieved: {goal}")`.
+
+        Returns {"achieved": bool, "iterations": n, "steps": [...],
+        "report": last agent answer}. Honest by construction: max_iter
+        exhausted -> achieved=False, never a fifth iteration because the
+        agent says it's "almost done".
+
+            agent.until("tests folder has coverage for parse()",
+                        gate_cmd="python -m pytest -q")
+        """
+        steps: list[str] = []
+        report = ""
+        for i in range(1, max_iter + 1):
+            step = self.ask(
+                f"Goal: {goal}\n"
+                f"Steps already attempted:\n"
+                + ("\n".join(f"- {s}" for s in steps) or "- none")
+                + "\n\nName ONE concrete, small next step toward the goal. "
+                "Reply with the step only, one line.",
+                **ov,
+            ).strip()
+            report = self.do(step, **ov)
+            steps.append(step)
+            if gate_cmd is not None:
+                ok = self.gate(gate_cmd)
+            elif condition is not None:
+                ok = self.check(condition, **ov)
+            else:
+                ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+            if ok:
+                return {"achieved": True, "iterations": i, "steps": steps,
+                        "report": report}
+        return {"achieved": False, "iterations": max_iter, "steps": steps,
+                "report": report}
+
     # ------------------------------------------------------------------ #
     # plumbing
 
@@ -397,16 +465,25 @@ class Ranger:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
 
         cmd = ["opencode", "run", "--model", opts["model"]]
-        if opts["agent"]:
-            cmd += ["--agent", opts["agent"]]
+        # priority: per-call agent/mode beats constructor mode beats legacy agent
+        agent_name = ov.get("agent") or ov.get("mode") or opts["mode"] or opts["agent"]
+        if agent_name:
+            cmd += ["--agent", agent_name]
         if opts["auto"]:
             cmd.append("--auto")
         if opts["session"]:
             cmd += ["--session", opts["session"]]
         if opts["title"]:
             cmd += ["--title", opts["title"]]
-        if opts["thinking"]:
+        effort = (opts["effort"] or "medium").lower()
+        if effort not in ("low", "medium", "high"):
+            raise TypeError(f"effort must be low|medium|high, got {effort!r}")
+        force_thinking = effort == "high" and not opts["thinking"]
+        if opts["thinking"] or force_thinking:
             cmd.append("--thinking")
+        use_stats = opts["stats"]
+        if use_stats:
+            cmd += ["--format", "json"]
 
         # skills allow-list: real files ride along via --file; prose grants
         # are injected into the prompt as operating guidance
@@ -457,6 +534,13 @@ class Ranger:
                 + "\n\n"
                 + full_prompt
             )
+        if effort == "low":
+            full_prompt += "\n\n(Effort directive: low — be brief, minimal ceremony.)"
+        elif effort == "high":
+            full_prompt += (
+                "\n\n(Effort directive: high — work carefully and verify "
+                "your answer before replying.)"
+            )
         cmd.append(full_prompt)
 
         # live progress UI — stderr only; never a TTY in tests/pipes
@@ -505,9 +589,36 @@ class Ranger:
             raise RangerError(
                 f"opencode run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
             )
-        first = proc.stdout.strip().splitlines()
+        if use_stats:
+            parts_text, session, starts, ends = [], None, [], []
+            for line in proc.stdout.splitlines():
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                session = obj.get("sessionID") or session
+                part = obj.get("part") or {}
+                if part.get("type") == "text" and "text" in part:
+                    parts_text.append(part["text"])
+                    t = part.get("time") or {}
+                    if t.get("start"):
+                        starts.append(t["start"])
+                    if t.get("end"):
+                        ends.append(t["end"])
+            answer = "\n".join(parts_text).strip()
+            model_ms = (max(ends) - min(starts)) / 1000 if starts and ends else None
+            self.last = {
+                "label": label,
+                "wall_s": round(time.time() - t0, 2),
+                "model_s": round(model_ms, 2) if model_ms is not None else None,
+                "parts": len(parts_text),
+                "chars": len(answer),
+                "session": session,
+            }
+        else:
+            answer = proc.stdout.strip()
+        first = answer.splitlines()
         _finish("✓", "green", _clip(first[0], 90) if first else "")
-        answer = proc.stdout.strip()
         if use_memory:
             self.context.append({"role": "user", "content": prompt})
             self.context.append({"role": "assistant", "content": answer})

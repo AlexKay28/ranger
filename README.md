@@ -29,8 +29,6 @@ package default.
 ## Usage
 
 ```python
-import ranger
-
 agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
 agent.summarize("notes.md")          # -> str summary of the file
 agent.write("a one-page report on X")  # -> path of the file the agent wrote
@@ -39,6 +37,8 @@ agent.search("where do we parse config?")            # -> multiline findings rep
 agent.ask("anything at all")         # -> raw prompt, raw answer
 agent.check("all tests pass")        # -> YES/NO verdict as a bool
 agent.gate("python -m pytest -q")    # -> exit-code booleans, no model
+agent.until("make the tests green", gate_cmd="python -m pytest -q")
+                                    # -> loop: plan/do/verify until green
 ```
 
 Each call is one fresh headless `opencode run` in the agent's working directory

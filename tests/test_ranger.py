@@ -463,6 +463,91 @@ def test_gate_exit_code_booleans():
         assert agent.gate("false") is False
 
 
+# --------------------------------------------------------------------- #
+# mode / effort / stats / until
+
+def test_mode_selects_opencode_agent():
+    agent = Ranger(mode="build")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--agent") + 1] == "build"
+    # legacy agent= alias still works; mode wins on conflict
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi", agent="plan")
+    assert m.call_args.args[0][m.call_args.args[0].index("--agent") + 1] == "plan"
+
+
+def test_effort_validation_and_directives():
+    with pytest.raises(ValueError):
+        Ranger(effort="turbo")
+    agent = Ranger(effort="high")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert "--thinking" in cmd  # high effort forces thinking
+    assert "verify" in cmd[-1].lower()
+    agent2 = Ranger(effort="low")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent2.ask("hi")
+    assert "--thinking" not in m.call_args.args[0]
+    assert "be brief" in m.call_args.args[0][-1]
+    # explicit per-call override
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent2.ask("hi", effort="medium")
+    assert "be brief" not in m.call_args.args[0][-1]
+
+
+def test_stats_json_mode_and_telemetry():
+    agent = Ranger(stats=True)
+    payload = (
+        '{"type":"text","sessionID":"ses_abc","part":{"type":"text","text":"first ","time":{"start":1000,"end":2500}}}\n'
+        '{"type":"text","sessionID":"ses_abc","part":{"type":"text","text":"second","time":{"start":2500,"end":4000}}}\n'
+        'not json noise\n'
+    )
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+        out = agent.ask("hi")
+    assert out == "first \nsecond"
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--format") + 1] == "json"
+    assert agent.last["session"] == "ses_abc"
+    assert agent.last["model_s"] == 3.0
+    assert agent.last["parts"] == 2
+    assert agent.last["wall_s"] >= 0
+    assert agent.last["label"] == "ask"
+
+
+def test_stats_off_by_default():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("plain text")):
+        assert agent.ask("hi") == "plain text"
+    assert agent.last == {}
+
+
+def test_until_loop_untils_gate_passes():
+    agent = Ranger()
+    results = iter([False, False, True])
+    with mock.patch.object(Ranger, "gate", side_effect=lambda cmd, **kw: next(results)), \
+         mock.patch.object(Ranger, "ask", side_effect=lambda p, **kw: "a step"), \
+         mock.patch.object(Ranger, "do", side_effect=lambda p, **kw: f"did {p}"):
+        outcome = agent.until("make tests green", max_iter=5,
+                              gate_cmd="python -m pytest -q")
+    assert outcome["achieved"] is True
+    assert outcome["iterations"] == 3
+    assert outcome["steps"] == ["a step"] * 3
+
+
+def test_until_exhausts_honestly():
+    agent = Ranger()
+    with mock.patch.object(Ranger, "check", side_effect=lambda cond, **ov: False), \
+         mock.patch.object(Ranger, "ask", side_effect=lambda p, **kw: "step"), \
+         mock.patch.object(Ranger, "do", side_effect=lambda p, **kw: "nope"):
+        outcome = agent.until("impossible goal", max_iter=2)
+    assert outcome == {"achieved": False, "iterations": 2,
+                       "steps": ["step", "step"], "report": "nope"}
+
+
+
 def test_gate_timeout_is_false():
     agent = Ranger()
     with mock.patch(
