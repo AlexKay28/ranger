@@ -37,6 +37,8 @@ agent.write("a one-page report on X")  # -> path of the file the agent wrote
 agent.do("rename all *.txt files in data/ to *.md")  # -> report of CLI-like work
 agent.search("where do we parse config?")            # -> multiline findings report
 agent.ask("anything at all")         # -> raw prompt, raw answer
+agent.check("all tests pass")        # -> YES/NO verdict as a bool
+agent.gate("python -m pytest -q")    # -> exit-code booleans, no model
 ```
 
 Each call is one fresh headless `opencode run` in the agent's working directory

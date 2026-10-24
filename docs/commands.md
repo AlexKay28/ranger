@@ -28,7 +28,7 @@ e.g. `"build"`, `"plan"`), `title=`, `thinking=`. Unknown keywords raise
 `TypeError`.
 
 
-## ✅ Shipped (5)
+## ✅ Shipped (7)
 
 ### `ask(prompt) -> str`
 Raw prompt, raw answer. The escape hatch every other method is built on.
@@ -68,6 +68,15 @@ Read-only codebase search. Returns a `file:line` multiline report. Never edits.
 agent.search("where do we parse config files?")
 ```
 
+### `check(condition) -> bool`
+Boolean verdict on repo state. The agent must actually verify (commands, file
+reads) and answer with YES/NO as the first word; unparseable answers raise
+`RangerError` instead of guessing. The loop-grade primitive for gates.
+
+### `gate(command) -> bool`
+Fully mechanical sibling of `check` — no model at all: a shell command whose
+exit code decides. `agent.gate("python -m pytest -q")`.
+
 ## 🔜 Next batch (planned, same pattern) (5)
 
 ### `plan(goal) -> str`
@@ -88,7 +97,7 @@ minimal fixes. Pairs with `fix` for the repair loop.
 Pointed Q&A about one file ("what inputs can crash this?"), vs `summarize`'s
 general digest.
 
-## 🌱 Later (5)
+## 🌱 Later (4)
 
 Bigger contracts — multi-step verification, retries, or safety rails.
 
@@ -101,17 +110,12 @@ retry-on-failure shell around `do`.
 Batch edit across many files ("add type hints to every function in src/*.py").
 Requires multiple `edit` runs with progress tracking.
 
-### `verify(goal) -> bool` *(gated return type)*
-Same as `do`, but evaluates a checkable success condition and returns
-`True`/`False` instead of a report. Handles prompts like
-`verify("all tests pass")` with a gate on the exit status of a test run.
-
 ### `commit(message=None) -> str`
 Ask the agent to stage and commit its own work with a sensible generated
 message. Needs safety rails (refuse if cwd isn't a repo, no force-pushes).
 
 ### `until(goal, max_iter=5, feedback=None) -> str`
-The loop primitive: run `plan → do → verify` iterations until the gate returns
+The loop primitive: run `plan → do → check` iterations until the gate returns
 `True` or `max_iter` is exhausted. This is the end goal of the whole package.
 
 ## Non-goals

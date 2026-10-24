@@ -14,6 +14,8 @@ clean. Disable with Ranger(..., pretty=False) or per call (..., pretty=False).
     path = agent.write("a one-page report on X")
     result = agent.do("rename all *.txt files in data/ to *.md")
     hits = agent.search("where do we parse config files?")
+    ok = agent.check("all tests pass")     # bool: YES/NO verdict, never guessed
+    green = agent.gate("python -m pytest -q")  # bool: pure exit-code gate
 
 Discover available models and configure runs:
 
@@ -30,6 +32,7 @@ Discover available models and configure runs:
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -37,7 +40,7 @@ import time
 from pathlib import Path
 
 __all__ = ["Ranger", "RangerError"]
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
@@ -276,6 +279,54 @@ class Ranger:
             "No code changes."
         )
         return self._run(prompt, label="search", **ov)
+
+    def check(self, condition: str, **ov) -> bool:
+        """Verify a claim about repo state; return True or False.
+
+        The agent may run whatever it needs (commands, file reads) to
+        establish the truth, but its answer contract is strict: the first
+        word of the reply must be YES or NO. Anything else raises
+        RangerError rather than guessing.
+
+            agent.check("all tests pass")        # -> bool
+            agent.check("README mentions the license")
+        """
+        prompt = (
+            f"Decide whether this condition is TRUE in the current directory: "
+            f"{condition}\n"
+            "Actually verify it with file reads or shell commands — never "
+            "guess. Reply with YES or NO as the first word, then one short "
+            "line of evidence. No other preamble."
+        )
+        answer = self._run(prompt, label="check", **ov)
+        match = re.match(r"\W*(yes|no)\b", answer.strip(), re.IGNORECASE)
+        if not match:
+            raise RangerError(
+                f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
+            )
+        return match.group(1).upper() == "YES"
+
+    def gate(self, command: str, timeout: float | None = None) -> bool:
+        """Mechanical boolean gate: run a shell command, return exit==0.
+
+        No model involved — pure subprocess. Use for checkable success
+        conditions in your loops.
+
+            if agent.gate("python -m pytest -q"):
+                ...
+        """
+        try:
+            proc = subprocess.run(
+                command,
+                shell=True,
+                cwd=self.cwd,
+                env={**os.environ, "PWD": self.cwd} if self.cwd else None,
+                capture_output=True,
+                timeout=timeout if timeout is not None else self.timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return False
+        return proc.returncode == 0
 
     # ------------------------------------------------------------------ #
     # plumbing

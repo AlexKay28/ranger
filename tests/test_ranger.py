@@ -264,6 +264,46 @@ def test_docs_do_not_mention_internal_providers():
 
 
 # --------------------------------------------------------------------- #
+# boolean gates
+
+@pytest.mark.parametrize("reply,expected", [
+    ("YES — all 15 tests pass.", True),
+    ("NO — two tests fail.", False),
+    ("Yes, the license is mentioned.", True),
+    ("no, nothing matches.", False),
+])
+def test_check_parses_verdicts(reply, expected):
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(reply)):
+        assert agent.check("all tests pass") is expected
+
+
+def test_check_rejects_unparseable_verdicts():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("Probably fine?")):
+        with pytest.raises(RangerError, match="YES/NO"):
+            agent.check("all tests pass")
+
+
+def test_gate_exit_code_booleans():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("", returncode=0)) as m:
+        assert agent.gate("true") is True
+        assert m.call_args.args[0] == "true"
+        assert m.call_args.kwargs["shell"] is True
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("", returncode=1)):
+        assert agent.gate("false") is False
+
+
+def test_gate_timeout_is_false():
+    agent = Ranger()
+    with mock.patch(
+        "ranger.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="x", timeout=5)
+    ):
+        assert agent.gate("sleep 100", timeout=1) is False
+
+
+# --------------------------------------------------------------------- #
 # live terminal UI
 
 class _FakeTty:
