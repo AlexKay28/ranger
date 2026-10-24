@@ -24,3 +24,26 @@ documentation + tests). This is the loop's only cross-cycle memory.
 - **Backlog (unselected):** test suite (cycle 2), CI workflow (cycle 3),
   docs compile-check as permanent regression gate, fix reviewer cosmetic
   findings.
+
+## Cycle 2 — unit test suite (2026-10-24)
+
+- **Goal:** tests/test_ranger.py pinning shipped behavior; fully mocked
+  subprocess; CI-safe anywhere.
+- **Evidence:** observed (repo shipped zero tests for a public API) + persona
+  hypotheses (contributor trust, evaluator trust); test infrastructure also
+  unblocks cycle 3.
+- **Contract:** A1 pytest exit 0 >=12 tests; A2 coverage list (flags, PWD env,
+  per-call overrides, error paths, models(), with_config, write() existence
+  gate, prompt contents); A3 examples compile gate; A4 `.[dev]` extras work.
+  Non-goals: no library changes, no CI, no live agent runs.
+- **Outcome:** `pass_merged` @ 2e9bea2.
+- **Verification:** 15/15 pass; suite also passes with `PATH=/nonexistent`
+  (proof: zero real subprocess spawns). `git diff ranger/` empty.
+- **Independent review:** first round **REJECTED** — the new hygiene gate was
+  false-green (scanned root *.md only, missed docs/*.md which itself carried
+  an internal id). Fixed: gate now rglobs all .py+.md, self-excludes only the
+  test file; growth log reworded; loose assertion tightened. Second round:
+  accepted conditions met.
+- **Backlog additions (reviewer advisory):** gate does not scan non-py/md
+  file types; docs compile-check could become a permanent pytest gate.
+
