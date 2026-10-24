@@ -2,8 +2,15 @@
 
 ![CI](https://github.com/AlexKay28/ranger/actions/workflows/ci.yml/badge.svg)
 
-Agent-as-a-library. Run the [opencode](https://opencode.ai) coding agent headlessly
-from plain Python code — for agentic-loop prototyping. You write code, not chat.
+Agent-as-a-library. Run the [opencode](https://opencode.ai) or
+[codex](https://github.com/openai/codex) coding agents headlessly from plain
+Python code — for agentic-loop prototyping. You write code, not chat.
+
+The whole design follows one paradigm: **the agent is a function call —
+Python owns the loop, the harness is just the data plane.** Plan → act →
+check → repeat maps 1:1 onto expression, statement and condition. See
+[docs/PARADIGM.md](docs/PARADIGM.md) for the seven laws every feature is
+reviewed against.
 
 ## Install
 
@@ -11,9 +18,11 @@ from plain Python code — for agentic-loop prototyping. You write code, not cha
 pip install -e .
 ```
 
-Requires the `opencode` CLI on PATH. On a distro-pegged pip (e.g. 22.x) an
-editable install can fail with "build backend is missing the build_editable
-hook" — fix the tool, not the package: `pip install -U pip`, then retry.
+Requires a harness CLI on PATH: [opencode](https://opencode.ai) (default
+backend) and/or [codex](https://github.com/openai/codex). On a distro-pegged
+pip (e.g. 22.x) an editable install can fail with "build backend is missing
+the build_editable hook" — fix the tool, not the package:
+`pip install -U pip`, then retry.
 
 ## Quick start (no clone needed)
 
@@ -110,6 +119,31 @@ agent.context_clear()       # wipe; returns what was cleared
 agent.ask("...", memory=False)  # one stateless run
 ranger.Ranger(memory=False)      # or a fully stateless agent
 ```
+
+Context memory colors your dialogues, never your facts: `ask`/`do`/`write`
+recall the recent conversation; `check`/`search`/`summarize` always run
+history-independent, so a verdict is about the repo, not the chat
+([PARADIGM.md](docs/PARADIGM.md), law 4).
+
+## Backends (harness adapters)
+
+The same API drives different harnesses; the setting is one constructor
+argument, per-call overridable:
+
+```python
+import ranger
+
+agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")  # opencode (default)
+gpt   = ranger.Ranger(backend="codex")            # model from ~/.codex/config.toml
+gpt   = ranger.Ranger(backend="codex", model="gpt-5.1-codex")
+
+ranger.register_backend("mine", MyHarnessAdapter)  # your own — one small class
+```
+
+Harness differences (flags, sessions, sandboxes, output schemas) are
+absorbed by one adapter class per backend — see the Backends section of
+[docs/API.md](docs/API.md) for the full capability map and the recipe for
+adding your own harness.
 
 ## Skills allow-list
 

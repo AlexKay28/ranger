@@ -6,6 +6,7 @@ Contract (cycle 2 of the growth loop): >=12 tests, exit 0, no changes to
 ranger/__init__.py, no network, no real agent calls.
 """
 
+import re
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -418,10 +419,16 @@ def test_context_summarize_keeps_history():
         fake_run("note"), fake_run("digest"),
     ]):
         agent.ask("question")
-        agent.context_summarize()
-    # question + summarize runs are both recorded; nothing was collapsed
-    assert len(agent.context) >= 4
+        digest = agent.context_summarize()
+    assert digest == "digest"
+    # history truly untouched: only the ask exchange is recorded — the
+    # transcript-bearing digest request is never nested back in
+    assert len(agent.context) == 2
     assert all(m["role"] in ("user", "assistant") for m in agent.context)
+    # and repeated summarization cannot recursively duplicate history
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("digest2")):
+        agent.context_summarize()
+    assert len(agent.context) == 2
 
 
 def test_gate_never_records_context():
@@ -632,3 +639,341 @@ def test_ui_draws_error_mark_on_failure():
     assert "✗" in drawn and "boom" in drawn
 
 
+
+# --------------------------------------------------------------------- #
+# harness backends (adapters)
+
+CODEX_JSONL = (
+    '{"type":"thread.started","thread_id":"th_123"}\n'
+    "not json at all\n"
+    '{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"ok"}}\n'
+    '{"type":"turn.completed","usage":{"input_tokens":1,'
+    '"cached_input_tokens":0,"output_tokens":5}}\n'
+)
+
+
+def test_codex_command_construction():
+    agent = Ranger(backend="codex", model="gpt-5.1-codex", cwd="/tmp/demo")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        assert agent.ask("hi") == "ok"
+    cmd = m.call_args.args[0]
+    assert cmd[0] == "codex" and cmd[1] == "exec"
+    assert "--skip-git-repo-check" in cmd
+    assert cmd[cmd.index("-m") + 1] == "gpt-5.1-codex"
+    assert cmd[cmd.index("-C") + 1] == "/tmp/demo"      # native cd flag
+    assert "--approve-for-me" in cmd                   # auto=True autonomy
+    assert cmd[-1] == "hi"                               # prompt last
+    # codex always answers in JSON; ranger never guesses raw stdout
+    assert "--json" in cmd
+
+
+def test_codex_no_model_means_config_default(monkeypatch):
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    agent = Ranger(backend="codex")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert "-m" not in cmd  # codex picks its config.toml default
+    # auto=False pins a read-only sandbox (exec cannot be interactive)
+    agent_ro = Ranger(backend="codex", auto=False)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent_ro.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("-s") + 1] == "read-only"
+
+
+def test_codex_session_resume_shape():
+    agent = Ranger(backend="codex", session="th_123")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[2] == "resume" and cmd[4] == "th_123"  # exec resume <id>
+
+
+def test_codex_rejects_opencode_only_options():
+    for kw in ({"mode": "build"}, {"agent": "build"}, {"title": "t"}):
+        with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)):
+            with pytest.raises(RangerError, match="codex.*does not support"):
+                Ranger(backend="codex").ask("hi", **kw)
+
+
+def test_codex_effort_and_thinking_map_to_reasoning():
+    agent = Ranger(backend="codex", effort="high")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent.ask("x")
+    cmd = m.call_args.args[0]
+    assert 'model_reasoning_effort="high"' in cmd  # effort -> reasoning config
+    agent_lo = Ranger(backend="codex", effort="low")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent_lo.ask("x")
+    assert 'model_reasoning_effort="low"' in m.call_args.args[0]
+
+
+def test_codex_stats_reports_real_tokens():
+    agent = Ranger(backend="codex", stats=True)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)):
+        agent.ask("hi")
+    assert agent.last["session"] == "th_123"
+    assert agent.last["parts"] == 1 and agent.last["chars"] == 2
+    assert agent.last["input_tokens"] == 1
+    assert agent.last["output_tokens"] == 5
+
+
+def test_codex_skills_are_inlined_not_flagged(tmp_path):
+    skill = tmp_path / "style.md"
+    skill.write_text("Answer only in haiku.")
+    agent = Ranger(backend="codex", skills=[tmp_path])
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert "--file" not in cmd                      # no native attachment flag
+    assert "Answer only in haiku." in cmd[-1]       # ...so the text rides inside
+
+
+def test_backend_validation_everywhere():
+    with pytest.raises(ValueError):
+        Ranger(backend="nope")
+    with pytest.raises(TypeError):  # per-call too
+        with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+            Ranger().ask("hi", backend="wat")
+    with pytest.raises(ValueError):
+        Ranger.models(backend="wat")
+
+
+def test_codex_models_listing_is_honest():
+    with pytest.raises(RangerError, match="enumeration is not available"):
+        Ranger.models(backend="codex")
+
+
+def test_register_custom_backend_and_run_it():
+    class _Mine(ranger._Backend):
+        name = "mine"
+        install_hint = "install mine"
+
+        def build_cmd(self, o, full_prompt, skill_files):
+            return ["mycli", "go", full_prompt], full_prompt
+
+        def parse_output(self, stdout, want_stats):
+            return stdout.strip(), None
+
+    ranger.register_backend("mine", _Mine)
+    agent = Ranger(backend="mine")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("done")) as m:
+        assert agent.ask("hi") == "done"
+    assert m.call_args.args[0] == ["mycli", "go", "hi"]
+    assert agent.with_config(backend="mine").backend == "mine"
+
+
+def test_same_commands_work_across_backends():
+    """The public API must not depend on the harness underneath."""
+    yes_plain = "YES the file exists"
+    yes_jsonl = CODEX_JSONL.replace('"text":"ok"', f'"text":"{yes_plain}"')
+    for backend, stdout in (("opencode", yes_plain), ("codex", yes_jsonl)):
+        agent = Ranger(backend=backend, cwd="/tmp/demo")
+        with mock.patch("ranger.subprocess.run", return_value=fake_run(stdout)):
+            assert agent.check("the file exists") is True
+        agent.context_clear()
+    # and the YES/NO contract stays strict on both: unparseable raises
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)):
+        with pytest.raises(RangerError):
+            Ranger(backend="codex").check("file exists")
+
+
+def test_check_accepts_verdict_line_after_chatter():
+    """Some harnesses chat before the verdict; a YES/NO-only line still parses."""
+    agent = Ranger()
+    chatty = ("I'll verify the file directly.\nYES  \nEvidence: it exists.")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(chatty)):
+        assert agent.check("file exists") is True
+    chatty_no = ("Let me look.\nno.\nnothing found")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(chatty_no)):
+        assert agent.check("file exists") is False
+    # prose that merely mentions the words never parses
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(
+            "The question of yes or no is subtle; I found no verdict.")):
+        with pytest.raises(RangerError):
+            agent.check("file exists")
+
+
+# --------------------------------------------------------------------- #
+# paradigm law: context memory colors dialogues, never facts
+
+def test_recall_is_skipped_for_pure_commands():
+    """check/search/summarize run history-independent; ask/do recall."""
+    agent = Ranger()
+    agent.context = [
+        {"role": "user", "content": "we agreed the PORT is 8080"},
+        {"role": "assistant", "content": "okay, 8080 it is"},
+    ]
+    for label, method in (("check", lambda: agent.check("port is 8080")),
+                           ("search", lambda: agent.search("PORT usage")),
+                           ("summarize", lambda: agent.summarize("x.py"))):
+        with mock.patch("ranger.subprocess.run",
+                        return_value=fake_run("YES")) as m:
+            method()
+        assert "Previous interaction" not in m.call_args.args[0][-1], (
+            f"{label} must not see conversation history"
+        )
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("what port did we agree on?")
+    assert "Previous interaction" in m.call_args.args[0][-1]  # dialogue recalls
+
+
+# --------------------------------------------------------------------- #
+# critic round fixes (gpt-6.1-sol adversarial review)
+
+def test_prompts_travel_after_option_terminator():
+    """Task text is data, never flags: `--` guards the prompt on every backend."""
+    for backend in ("opencode", "codex"):
+        stdout = CODEX_JSONL if backend == "codex" else "ok"
+        agent = Ranger(backend=backend, cwd="/tmp/demo")
+        with mock.patch("ranger.subprocess.run", return_value=fake_run(stdout)) as m:
+            agent.ask("--help")
+        cmd = m.call_args.args[0]
+        assert cmd[-1] == "--help"
+        assert cmd[-2] == "--", f"{backend}: no option terminator before prompt"
+
+
+def test_pure_commands_drop_harness_session(monkeypatch):
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    agent = Ranger(cwd="/tmp/demo", session="ses_hist")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("flow")) as m:
+        agent.ask("hi")  # dialogue keeps the session
+    assert "ses_hist" in m.call_args.args[0]
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("YES")) as m:
+        agent.check("x exists")  # fact commands drop it
+    assert "ses_hist" not in m.call_args.args[0]
+
+
+def test_codex_resume_applies_model_and_readonly(monkeypatch):
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    agent = Ranger(backend="codex", session="th_1", model="gpt-5.1-codex",
+                   auto=False, cwd="/tmp/demo")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[2] == "resume" and "th_1" in cmd
+    assert cmd[cmd.index("-m") + 1] == "gpt-5.1-codex"     # model still applies
+    assert 'sandbox_mode="read-only"' in " ".join(cmd)    # policy still enforced
+    assert "-C" not in cmd                                # resume takes no -C
+
+
+def test_backend_switch_does_not_inherit_wrong_default(monkeypatch):
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    # opencode-default agent, per-call switch to codex: no -m foisted
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        Ranger().ask("hi", backend="codex")
+    assert "-m" not in m.call_args.args[0]
+    assert DEFAULT_MODEL not in m.call_args.args[0]
+    # codex-default agent, per-call switch to opencode: package default fills in
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        Ranger(backend="codex").ask("hi", backend="opencode")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
+    # explicit ctor model still wins after a backend switch
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+        Ranger(model="custom/m").ask("hi", backend="codex")
+    assert m.call_args.args[0][m.call_args.args[0].index("-m") + 1] == "custom/m"
+
+
+def test_with_config_copies_mutable_state():
+    base = Ranger()
+    clones = [base.with_config(model=f"m{i}") for i in range(2)]
+    for c in clones:
+        c.context.append({"role": "user", "content": "hi"})
+    assert base.context == []                        # original untouched
+    assert clones[0].context is not clones[1].context  # no shared list
+    # with_config(model=...) is the copy's EXPLICIT choice — per-run
+    # resolution must not resurrect the base agent's model
+    copy = base.with_config(model="fast/model")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        copy.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "fast/model"
+
+
+def test_check_rejects_contradictory_and_unconfident():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run",
+                   return_value=fake_run("I checked:\nYES\nNO")):
+        with pytest.raises(RangerError, match="contradictory"):
+            agent.check("x")
+    with mock.patch("ranger.subprocess.run",
+                   return_value=fake_run("NO verification was performed; I cannot answer.")):
+        with pytest.raises(RangerError):
+            agent.check("x")
+
+
+def test_write_slug_is_sanitized_and_collision_proof(tmp_path):
+    agent = Ranger(cwd=tmp_path)
+
+    def fake_exec(cmd, **kw):
+        # extract the CURRENT target ("at exactly: <path>") from the frozen
+        # prompt; recall (write is a dialogue command) may embed earlier
+        # targets too, so always take the LAST match
+        found = re.findall(r"at exactly: (\S+)", cmd[-1])
+        if found:
+            Path(found[-1]).write_text("x")   # agent honors the contract
+        return fake_run("claimed")
+
+    with mock.patch("ranger.subprocess.run", side_effect=fake_exec):
+        agent.write("describe src/parser.py")
+        agent.write("describe src/parser.py")
+        agent.write("two  tasks!!! with /slashes/")
+    outs = [p.name for p in tmp_path.glob("ranger_describe_src_parser_py*")]
+    assert len(outs) >= 2, "repeated tasks must never collide on one path"
+    for name in (p.name for p in tmp_path.glob("ranger_*")):
+        assert "/" not in name and ".." not in name  # safe direct children
+
+
+def test_write_rejects_directory_as_output(tmp_path):
+    agent = Ranger(cwd=tmp_path)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("claimed")):
+        with pytest.raises(RangerError, match="did not write"):
+            agent.write("report", path=".")  # a directory is not a document
+
+
+def test_until_validates_max_iter():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")):
+        for bad in (-1, "three", 2.5):
+            with pytest.raises(ValueError):
+                agent.until("goal", max_iter=bad, gate_cmd="true")
+        # zero is a valid, immediately-honest no-iteration result
+        res = agent.until("goal", max_iter=0, gate_cmd="true")
+        assert res == {"achieved": False, "iterations": 0, "steps": [],
+                       "report": ""}
+
+
+def test_registered_backends_listing():
+    assert "codex" in ranger.backends() and "opencode" in ranger.backends()
+    assert ranger.backends() == sorted(ranger.backends())
+
+
+def test_relative_skill_paths_resolve_against_agent_cwd(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "style.md").write_text("Use haikus.")
+    agent = Ranger(cwd=str(target), skills=["style.md"])
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    i = cmd.index("--file")
+    assert Path(cmd[i + 1]).is_absolute()          # harness gets absolute
+    assert cmd[i + 1] == str(target / "style.md")  # resolved in AGENT cwd
+
+
+def test_memory_budget_per_call_override():
+    agent = Ranger()
+    agent.context = [
+        {"role": "user", "content": "u" * 9000},
+        {"role": "assistant", "content": "a" * 9000},
+    ]
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")  # default 20k budget: both messages recalled
+    joined = m.call_args.args[0][-1]
+    assert "u" * 9000 in joined and "a" * 9000 in joined
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi", memory_budget=100)  # tiny budget: almost nothing fits
+    joined = m.call_args.args[0][-1]
+    assert "u" * 9000 not in joined and "a" * 9000 not in joined

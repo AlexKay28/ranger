@@ -97,11 +97,18 @@ def one_cycle(agent: ranger.Ranger, target: Path, n: int) -> str:
         "NON_GOALS: <comma list>"
     )
     print(f"[cycle {n}] selected:\n{selection}\n")
-    checks_cmd = next(
-        (ln.split("CHECKS_CMD:", 1)[1].strip() for ln in selection.splitlines()
-         if ln.strip().startswith("CHECKS_CMD:")),
-        "true",
-    )
+    checks_lines = [ln.split("CHECKS_CMD:", 1)[1].strip()
+                    for ln in selection.splitlines()
+                    if ln.strip().startswith("CHECKS_CMD:")]
+    # fail closed: no acceptance command, or a literal no-op like `true`,
+    # aborts the cycle — the gate must never pass a goal unchecked
+    usable = (len(checks_lines) == 1 and checks_lines[0]
+              and checks_lines[0] != "true")
+    if not usable:
+        print(f"[cycle {n}] no usable CHECKS_CMD in selection — "
+              "cycle aborted (gate fails closed)")
+        return
+    checks_cmd = checks_lines[0]
 
     # 5. bounded implement -> verify attempts (frozen contract, mechanical gate)
     outcome, evidence, attempt = "fail_budget", "", 0
@@ -110,7 +117,7 @@ def one_cycle(agent: ranger.Ranger, target: Path, n: int) -> str:
         agent.do(f"{goal_line}\nDo the work now. Respect the non-goals.")
         passed, evidence = run_acceptance_checks(target, checks_cmd)
         if passed:
-            outcome = "pass_merged"
+            outcome = "pass"  # acceptance verified; no merge claim implied
             break
         if attempt < MAX_ATTEMPTS_PER_GOAL:
             agent.do(

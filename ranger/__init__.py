@@ -38,18 +38,273 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
-__all__ = ["Ranger", "RangerError"]
-__version__ = "0.4.0"
+__all__ = ["Ranger", "RangerError", "DEFAULT_MODEL", "register_backend",
+           "backends"]
+__version__ = "0.5.0"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 
 # Settings every run accepts as a per-call override.
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
-    "pretty", "memory", "skills", "effort", "stats",
+    "pretty", "memory", "skills", "effort", "stats", "backend", "memory_budget",
 )
+
+# ====================================================================== #
+# Harness backends (adapters)
+#
+# A backend translates ranger's normalized run options into ONE CLI
+# invocation for some headless agent harness, and parses its output back
+# into plain answer text (+ optional telemetry dict). Everything else in
+# ranger — prompt contracts, context memory, check/gate/until, effort
+# directives, the UI — is harness-agnostic and lives above this layer.
+#
+# To support a new harness: subclass `_Backend`, implement `build_cmd`
+# and `parse_output` (and `list_models` if the CLI can enumerate models),
+# then `ranger.register_backend("name", YourBackend)`.
+# ====================================================================== #
+
+_BACKEND_CLASSES: dict[str, type] = {}  # filled after the base + impls
+
+
+def register_backend(name: str, adapter_cls: type) -> None:
+    """Register a harness adapter class under `name`.
+
+    `Ranger(backend=name)` becomes valid immediately after. Custom
+    backends live in-process only (they are not persisted by
+    `with_config` across program runs unless re-registered).
+    """
+    if not name or not name.replace("_", "").replace("-", "").isalnum():
+        raise ValueError(f"invalid backend name: {name!r}")
+    _BACKEND_CLASSES[name] = adapter_cls
+
+
+def backends() -> list[str]:
+    """Names of all registered harness backends, sorted."""
+    return sorted(_BACKEND_CLASSES)
+
+
+class _Backend:
+    """Base class for harness adapters. See the module docstring above."""
+
+    name = "?"
+    install_hint = "install the harness CLI and put it on PATH"
+    #: True when `session=` continuing is natively expressible.
+    supports_sessions = True
+    #: True when file-based skills ride along natively (else inlined).
+    native_file_skills = True
+
+    def unavailable(self, option: str) -> RangerError:
+        return RangerError(
+            f"{self.name!r} harness does not support {option!r} — "
+            "remove it for this backend (see docs/API.md, Backends)"
+        )
+
+    def build_cmd(self, o: dict, full_prompt: str, skill_files: list):
+        """Return (cmd_argv, final_prompt).
+
+        `o` holds resolved run options (model, cwd, timeout, auto, session,
+        agent, mode, title, thinking, effort, stats, backend...).
+        `skill_files` are attached markdown files/dirs; either wire them to
+        a native flag or inline them into the returned prompt.
+        """
+        raise NotImplementedError
+
+    def parse_output(self, stdout: str, want_stats: bool):
+        """Return (answer_text, info_dict_or_None).
+
+        `info` may carry telemetry fields merged into `agent.last` when
+        `want_stats` (session, model_s, input_tokens, ...). Return None
+        when stats were not requested or unavailable.
+        """
+        raise NotImplementedError
+
+    def list_models(self, match: str | None) -> list[str]:
+        raise RangerError(
+            f"model enumeration is not available for {self.name!r}: "
+            "set the model in its config file or pass model= explicitly"
+        )
+
+
+class _OpenCodeBackend(_Backend):
+    name = "opencode"
+    install_hint = "install it from https://opencode.ai"
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        cmd = ["opencode", "run", "--model", o["model"]]
+        agent_name = o.get("agent") or o.get("mode")
+        if agent_name:
+            cmd += ["--agent", agent_name]
+        if o["auto"]:
+            cmd.append("--auto")
+        if o["session"]:
+            cmd += ["--session", o["session"]]
+        if o["title"]:
+            cmd += ["--title", o["title"]]
+        if o["thinking"]:
+            cmd.append("--thinking")
+        if o["stats"]:
+            cmd += ["--format", "json"]
+        for f in skill_files:
+            cmd += ["--file", str(f)]
+        cmd.append("--")      # nothing after this can be parsed as a flag —
+        cmd.append(full_prompt)  # the prompt is data, never options
+        return cmd, full_prompt
+
+    def parse_output(self, stdout, want_stats):
+        if not want_stats:
+            return stdout.strip(), None
+        parts_text, session, starts, ends = [], None, [], []
+        for line in stdout.splitlines():
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            session = obj.get("sessionID") or session
+            part = obj.get("part") or {}
+            if part.get("type") == "text" and "text" in part:
+                parts_text.append(part["text"])
+                t = part.get("time") or {}
+                if t.get("start"):
+                    starts.append(t["start"])
+                if t.get("end"):
+                    ends.append(t["end"])
+        answer = "\n".join(parts_text).strip()
+        model_ms = (max(ends) - min(starts)) / 1000 if starts and ends else None
+        info = {
+            "model_s": round(model_ms, 2) if model_ms is not None else None,
+            "parts": len(parts_text),
+            "chars": len(answer),
+            "session": session,
+        }
+        return answer, info
+
+    def list_models(self, match):
+        try:
+            proc = subprocess.run(
+                ["opencode", "models"],
+                capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
+            )
+        except FileNotFoundError:
+            raise RangerError(
+                f"opencode CLI not found on PATH — {self.install_hint}"
+            ) from None
+        except subprocess.TimeoutExpired:
+            raise RangerError("opencode models timed out after 60s") from None
+        if proc.returncode != 0:
+            raise RangerError(f"opencode models failed:\n{proc.stderr.strip()}")
+        ids = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        if match:
+            needle = match.lower()
+            ids = [i for i in ids if needle in i.lower()]
+        return ids
+
+
+class _CodexBackend(_Backend):
+    name = "codex"
+    install_hint = "install it from https://github.com/openai/codex"
+    native_file_skills = False  # markdown skills are inlined into prompts
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        for k in ("agent", "mode", "title"):
+            if o.get(k):
+                raise self.unavailable(k)
+        if skill_files:
+            blocks = []
+            for f in skill_files:
+                blocks.append(
+                    f"### Attached skill file: {f}\n"
+                    + Path(f).read_text(encoding="utf-8")
+                )
+            full_prompt = (
+                "## Attached operating instructions (skill files)\n\n"
+                + "\n\n".join(blocks)
+                + "\n\n## Task\n"
+                + full_prompt
+            )
+        if o["session"]:
+            # resume shares -m/-c/--json but takes neither -C nor -s
+            # flags; requested model and a read-only policy are still
+            # honored via -c/-m (auto=True keeps the session's existing
+            # policy)
+            cmd = ["codex", "exec", "resume", "--skip-git-repo-check",
+                   o["session"]]
+            if not o["auto"]:
+                cmd += ["-c", 'sandbox_mode="read-only"']
+        else:
+            cmd = ["codex", "exec", "--skip-git-repo-check"]
+            if o["cwd"]:
+                cmd += ["-C", o["cwd"]]
+            # agent autonomy: --approve-for-me routes approvals through
+            # automatic review with its own workspace-write sandbox (it
+            # conflicts with -s); auto=False pins a read-only sandbox
+            # (exec cannot be interactive)
+            if o["auto"]:
+                cmd.append("--approve-for-me")
+            else:
+                cmd += ["-s", "read-only"]
+        if o["model"]:
+            cmd += ["-m", o["model"]]
+        # effort/thinking map onto codex reasoning config
+        if o["thinking"]:
+            cmd += ["-c", 'model_reasoning_effort="high"']
+        elif o["effort"] == "low":
+            cmd += ["-c", 'model_reasoning_effort="low"']
+        elif o["effort"] == "high":
+            cmd += ["-c", 'model_reasoning_effort="high"']
+        cmd.append("--json")
+        cmd.append("--")        # prompt is data, never options
+        cmd.append(full_prompt)
+        return cmd, full_prompt
+
+    def parse_output(self, stdout, want_stats):
+        texts, thread, usage = [], None, None
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            kind = obj.get("type")
+            if kind == "thread.started":
+                thread = obj.get("thread_id") or thread
+            elif kind == "item.completed":
+                item = obj.get("item") or {}
+                if item.get("type") == "agent_message" and item.get("text"):
+                    texts.append(item["text"])
+            elif kind == "turn.completed":
+                usage = obj.get("usage") or usage
+        answer = "\n".join(texts).strip()
+        if not want_stats:
+            return answer, None
+        info = {
+            "model_s": None,  # codex reports token usage, not model seconds
+            "parts": len(texts),
+            "chars": len(answer),
+            "session": thread,
+        }
+        if usage:
+            info.update({
+                "input_tokens": usage.get("input_tokens"),
+                "cached_input_tokens": usage.get("cached_input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+            })
+        return answer, info
+
+
+register_backend("opencode", _OpenCodeBackend)
+register_backend("codex", _CodexBackend)
+
+# Commands whose answers must be pure facts about the world, never colored
+# by conversation history (paradigm law: context memory colors dialogues,
+# never facts). Recall is skipped for these; recording still happens.
+_PURE_LABELS = frozenset({"check", "search", "summarize"})
 
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
@@ -158,6 +413,10 @@ class Ranger:
         stats: request runs in JSON mode and record telemetry into
             `agent.last` (wall/model time, part count, answer size,
             opencode session id).
+        backend: which harness to drive — "opencode" (default) or "codex".
+            The public API is identical; harness differences (CLI flags,
+            sessions, stats schemas) are absorbed internally. See the
+            Backends section of docs/API.md for the exact behavior map.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -180,22 +439,36 @@ class Ranger:
         mode: str | None = None,
         effort: str = "medium",
         stats: bool = False,
+        backend: str = "opencode",
     ) -> None:
         if effort not in ("low", "medium", "high"):
             raise ValueError(f"effort must be low|medium|high, got {effort!r}")
-        self.model = model or os.environ.get("RANGER_MODEL") or DEFAULT_MODEL
+        if backend not in _BACKEND_CLASSES:
+            raise ValueError(
+                f"backend must be one of {', '.join(sorted(_BACKEND_CLASSES))}, "
+                f"got {backend!r}"
+            )
+        self.backend = backend
+        # raw explicit choice; effective default is resolved per run so a
+        # per-call backend switch never inherits the other backend's default
+        self._model_explicit = model
+        self.model = (
+            model
+            or os.environ.get("RANGER_MODEL")
+            or (DEFAULT_MODEL if backend == "opencode" else None)
+        )
         self.cwd = str(Path(cwd).resolve()) if cwd else None
         self.timeout = timeout
         self.auto = auto
         self.session = session
         self.agent = agent
+        self.mode = mode
         self.title = title
         self.thinking = thinking
         self.pretty = pretty
         self.memory = memory
         self.memory_budget = memory_budget
         self.skills = skills
-        self.mode = mode
         self.effort = effort
         self.stats = stats
         self.last: dict = {}
@@ -206,28 +479,26 @@ class Ranger:
     # discovery & configuration
 
     @staticmethod
-    def models(match: str | None = None) -> list[str]:
-        """List available opencode model IDs from `opencode models`.
+    def models(match: str | None = None, backend: str = "opencode") -> list[str]:
+        """List available model IDs for a harness.
+
+        Delegates to the backend adapter: opencode runs `opencode models`;
+        backends whose CLI cannot enumerate models raise RangerError with
+        guidance (codex models are set in ~/.codex/config.toml or passed
+        as model=).
 
         Args:
             match: optional substring filter (case-insensitive).
+            backend: backend name (default "opencode").
         """
         try:
-            proc = subprocess.run(
-                ["opencode", "models"],
-                capture_output=True, text=True, timeout=60,
-            )
-        except FileNotFoundError:
-            raise RangerError(
-                "opencode CLI not found on PATH — install it from https://opencode.ai"
+            adapter = _BACKEND_CLASSES[backend]()
+        except KeyError:
+            raise ValueError(
+                f"unknown backend {backend!r} (registered: "
+                f"{', '.join(sorted(_BACKEND_CLASSES))})"
             ) from None
-        if proc.returncode != 0:
-            raise RangerError(f"opencode models failed:\n{proc.stderr.strip()}")
-        ids = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-        if match:
-            needle = match.lower()
-            ids = [i for i in ids if needle in i.lower()]
-        return ids
+        return adapter.list_models(match)
 
     def with_config(self, **overrides) -> "Ranger":
         """Return a copy of this Ranger with run settings overridden.
@@ -242,10 +513,17 @@ class Ranger:
                 raise TypeError(f"unknown config key: {key!r} (valid: {', '.join(_RUN_KEYS + ('cwd',))})")
         clone = Ranger.__new__(Ranger)
         clone.__dict__ = dict(self.__dict__)
+        # mutable state must not leak between configured copies
+        clone.context = [dict(m) for m in self.context]
+        clone.last = dict(self.last)
         for key, value in overrides.items():
-            if key == "cwd":
+            if key == "cwd" and value is not None:
                 value = str(Path(value).resolve())
             setattr(clone, key, value)
+        if "model" in overrides:
+            # the explicit-choice marker must travel with the override, or
+            # per-run default resolution would resurrect the old model
+            clone._model_explicit = overrides["model"]
         return clone
 
     # ------------------------------------------------------------------ #
@@ -254,7 +532,9 @@ class Ranger:
     def context_summarize(self) -> str:
         """Ask the agent for a text digest of the recorded context.
 
-        History is left untouched. Returns "" when nothing is recorded.
+        History is left untouched (the transcript-bearing request is never
+        recorded back, so repeated summarization cannot nest). Returns ""
+        when nothing is recorded.
         """
         if not self.context:
             return ""
@@ -265,7 +545,8 @@ class Ranger:
             "worth keeping. Plain text, bullet points.\n\n"
             + transcript,
             label="summarize",
-        )
+            memory=False,  # the transcript is embedded explicitly — recording
+        )                  # it back would nest history into history
         return digest
 
     def context_compact(self) -> str:
@@ -312,8 +593,11 @@ class Ranger:
         Returns the path of the file that was written.
         """
         if path is None:
-            slug = task.strip().lower().replace(" ", "_")[:40] or "ranger_out"
-            out = Path(self.cwd or Path.cwd()) / f"ranger_{slug}_{int(time.time())}.md"
+            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:40]
+            slug = slug.strip("_-") or "ranger_out"
+            out = Path(self.cwd or Path.cwd()) / (
+                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:6]}.md"
+            )
         else:
             out = Path(path)
             if not out.is_absolute():
@@ -325,7 +609,7 @@ class Ranger:
             "When done, reply with the file path only."
         )
         self._run(prompt, label="write", **ov)
-        if not out.exists():
+        if not out.is_file():
             raise RangerError(f"agent did not write the expected file: {out}")
         return str(out)
 
@@ -372,16 +656,45 @@ class Ranger:
             f"Decide whether this condition is TRUE in the current directory: "
             f"{condition}\n"
             "Actually verify it with file reads or shell commands — never "
-            "guess. Reply with YES or NO as the first word, then one short "
-            "line of evidence. No other preamble."
+            "guess. The verdict must be the very first thing you print: "
+            "a line containing only YES or only NO, nothing before it. "
+            "One short line of evidence may follow it. No other preamble."
         )
         answer = self._run(prompt, label="check", **ov)
+        lines = answer.strip().splitlines()
+
+        def standalone(line: str):
+            m = re.fullmatch(r"\W*(yes|no)\W*", line.strip(), re.IGNORECASE)
+            return m.group(1).upper() if m else None
+
+        # a verdict is a line consisting solely of YES or NO; more than one
+        # verdict is a contradiction, which is no verdict at all
+        verdicts = [v for v in (standalone(l) for l in lines[:10]) if v]
+        joined = "+".join(verdicts)
+        if verdicts:
+            if "YES+NO" in joined or "NO+YES" in joined:
+                raise RangerError(
+                    "check() got contradictory YES and NO verdicts from:\n"
+                    + answer[:300]
+                )
+            return verdicts[0] == "YES"
+
         match = re.match(r"\W*(yes|no)\b", answer.strip(), re.IGNORECASE)
-        if not match:
-            raise RangerError(
-                f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
-            )
-        return match.group(1).upper() == "YES"
+        if match:
+            first_line = lines[0] if lines else ""
+            rest = first_line[re.match(r"\W*(yes|no)\b", first_line,
+                                       re.IGNORECASE).end():]
+            if re.search(r"\b(cannot|can'?t|couldn'?t|unable|unable to|"
+                         r"unknown|unsure|not sure|no idea)\b", rest,
+                         re.IGNORECASE):
+                raise RangerError(
+                    "check() got an unconfident non-verdict from:\n"
+                    + answer[:300]
+                )
+            return match.group(1).upper() == "YES"
+        raise RangerError(
+            f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
+        )
 
     def gate(self, command: str, timeout: float | None = None) -> bool:
         """Mechanical boolean gate: run a shell command, return exit==0.
@@ -429,6 +742,8 @@ class Ranger:
             agent.until("tests folder has coverage for parse()",
                         gate_cmd="python -m pytest -q")
         """
+        if not isinstance(max_iter, int) or max_iter < 0:
+            raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
         steps: list[str] = []
         report = ""
         for i in range(1, max_iter + 1):
@@ -443,7 +758,7 @@ class Ranger:
             report = self.do(step, **ov)
             steps.append(step)
             if gate_cmd is not None:
-                ok = self.gate(gate_cmd)
+                ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
             elif condition is not None:
                 ok = self.check(condition, **ov)
             else:
@@ -451,8 +766,8 @@ class Ranger:
             if ok:
                 return {"achieved": True, "iterations": i, "steps": steps,
                         "report": report}
-        return {"achieved": False, "iterations": max_iter, "steps": steps,
-                "report": report}
+        return {"achieved": False, "iterations": len(steps),
+                "steps": steps, "report": report}
 
     # ------------------------------------------------------------------ #
     # plumbing
@@ -464,43 +779,68 @@ class Ranger:
         if unknown:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
 
-        cmd = ["opencode", "run", "--model", opts["model"]]
-        # priority: per-call agent/mode beats constructor mode beats legacy agent
-        agent_name = ov.get("agent") or ov.get("mode") or opts["mode"] or opts["agent"]
-        if agent_name:
-            cmd += ["--agent", agent_name]
-        if opts["auto"]:
-            cmd.append("--auto")
-        if opts["session"]:
-            cmd += ["--session", opts["session"]]
-        if opts["title"]:
-            cmd += ["--title", opts["title"]]
-        effort = (opts["effort"] or "medium").lower()
+        backend_name = opts["backend"]
+        try:
+            adapter = _BACKEND_CLASSES[backend_name]()
+        except KeyError:
+            raise TypeError(
+                f"unknown backend {backend_name!r} (registered: "
+                f"{', '.join(sorted(_BACKEND_CLASSES))})"
+            ) from None
+
+        o = dict(opts)
+        o["cwd"] = self.cwd  # adapters reference it for native cd flags
+        # law 4 corollary: fact commands run history-independent — the
+        # harness session is continuation state, so drop it for pure labels
+        if label in _PURE_LABELS:
+            o["session"] = None
+        # model defaults are backend-specific; resolve AFTER the effective
+        # backend is known so a per-call switch never inherits the wrong
+        # package default (per-call model > explicit ctor > env > backend)
+        if "model" in ov:
+            model_eff = ov["model"]
+        elif self._model_explicit is not None:
+            model_eff = self._model_explicit
+        else:
+            model_eff = (
+                os.environ.get("RANGER_MODEL")
+                or (DEFAULT_MODEL if backend_name == "opencode" else None)
+            )
+        o["model"] = model_eff
+        # priority: per-call agent/mode beats constructor mode beats agent
+        o["agent"] = (
+            ov.get("agent") or ov.get("mode")
+            or opts.get("mode") or opts.get("agent")
+        )
+        o["mode"] = None
+        effort = (o["effort"] or "medium").lower()
         if effort not in ("low", "medium", "high"):
             raise TypeError(f"effort must be low|medium|high, got {effort!r}")
-        force_thinking = effort == "high" and not opts["thinking"]
-        if opts["thinking"] or force_thinking:
-            cmd.append("--thinking")
-        use_stats = opts["stats"]
-        if use_stats:
-            cmd += ["--format", "json"]
+        # high effort implies thinking blocks / reasoning effort
+        o["thinking"] = bool(o["thinking"] or effort == "high")
+        use_stats = o["stats"]
 
-        # skills allow-list: real files ride along via --file; prose grants
-        # are injected into the prompt as operating guidance
+        # skills allow-list: files/dirs are handed to the adapter (native
+        # attachment flag where one exists, inlined otherwise); prose
+        # entries become operating grants injected into the prompt
         prose_grants: list[str] = []
-        granted = opts["skills"] or []
+        skill_files: list[Path] = []
+        granted = o["skills"] or []
         if isinstance(granted, (str, Path)):
             granted = [granted]
         for entry in granted:
             p = Path(entry)
+            if not p.is_absolute():
+                # relative skill paths resolve against the AGENT's cwd —
+                # the world the harness operates in — never the process cwd
+                p = Path(self.cwd or str(Path.cwd())) / p
             if p.is_dir():
                 found = sorted(p.glob("*.md"))
                 if not found:
                     raise RangerError(f"skill directory has no markdown: {p}")
-                for f in found:
-                    cmd += ["--file", str(f)]
+                skill_files.extend(found)
             elif p.is_file():
-                cmd += ["--file", str(p)]
+                skill_files.append(p)
             else:
                 prose_grants.append(str(entry))
 
@@ -508,11 +848,12 @@ class Ranger:
         # record the raw request/answer pair after a successful run
         use_memory = opts["memory"]
         full_prompt = prompt
-        if use_memory and self.context:
+        if use_memory and self.context and label not in _PURE_LABELS:
+            budget = o.get("memory_budget") or self.memory_budget
             selected, total = [], 0
             for msg in reversed(self.context):
                 total += len(msg["content"]) + 16
-                if total > self.memory_budget:
+                if total > budget:
                     break
                 selected.append(msg)
             selected.reverse()
@@ -541,7 +882,7 @@ class Ranger:
                 "\n\n(Effort directive: high — work carefully and verify "
                 "your answer before replying.)"
             )
-        cmd.append(full_prompt)
+        cmd, full_prompt = adapter.build_cmd(o, full_prompt, skill_files)
 
         # live progress UI — stderr only; never a TTY in tests/pipes
         use_ui = opts["pretty"] and getattr(sys.stderr, "isatty", lambda: False)()
@@ -571,52 +912,47 @@ class Ranger:
                 env={**os.environ, "PWD": self.cwd} if self.cwd else None,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,  # own process group → contained blast
                 timeout=opts["timeout"],
             )
         except FileNotFoundError:
-            _finish("✗", "red", "opencode CLI not found")
+            # attribute the failure to its real cause: a missing agent
+            # cwd also raises FileNotFoundError from the spawn
+            if self.cwd and not Path(self.cwd).is_dir():
+                _finish("✗", "red", "agent cwd does not exist")
+                raise RangerError(
+                    f"agent cwd does not exist: {self.cwd}"
+                ) from None
+            _finish("✗", "red", f"{backend_name} CLI not found")
             raise RangerError(
-                "opencode CLI not found on PATH — install it from https://opencode.ai"
+                f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
             ) from None
         except subprocess.TimeoutExpired:
             _finish("✗", "red", f"timed out after {opts['timeout']}s")
             raise RangerError(
-                f"opencode run timed out after {opts['timeout']}s"
+                f"{backend_name} run timed out after {opts['timeout']}s"
+            ) from None
+        except OSError as exc:
+            _finish("✗", "red", _clip(str(exc), 90))
+            raise RangerError(
+                f"{backend_name} run could not be spawned: {exc}"
             ) from None
 
         if proc.returncode != 0:
             _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
             raise RangerError(
-                f"opencode run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
+                f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
             )
-        if use_stats:
-            parts_text, session, starts, ends = [], None, [], []
-            for line in proc.stdout.splitlines():
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                session = obj.get("sessionID") or session
-                part = obj.get("part") or {}
-                if part.get("type") == "text" and "text" in part:
-                    parts_text.append(part["text"])
-                    t = part.get("time") or {}
-                    if t.get("start"):
-                        starts.append(t["start"])
-                    if t.get("end"):
-                        ends.append(t["end"])
-            answer = "\n".join(parts_text).strip()
-            model_ms = (max(ends) - min(starts)) / 1000 if starts and ends else None
+        answer, info = adapter.parse_output(proc.stdout, use_stats)
+        if use_stats and info is not None:
             self.last = {
                 "label": label,
                 "wall_s": round(time.time() - t0, 2),
-                "model_s": round(model_ms, 2) if model_ms is not None else None,
-                "parts": len(parts_text),
-                "chars": len(answer),
-                "session": session,
+                **info,
             }
-        else:
-            answer = proc.stdout.strip()
         first = answer.splitlines()
         _finish("✓", "green", _clip(first[0], 90) if first else "")
         if use_memory:

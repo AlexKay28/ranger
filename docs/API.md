@@ -4,7 +4,7 @@ Complete reference for everything `ranger` ships. Every public name on this
 page is enforced by `tests/test_docs.py` — if a method or setting is added
 to the code but missing here, the suite fails.
 
-Version 0.4.0 · Module: `ranger` · Single class: `ranger.Ranger`
+Version 0.5.0 · Module: `ranger` · Single class: `ranger.Ranger`
 
 ---
 
@@ -14,8 +14,12 @@ Version 0.4.0 · Module: `ranger` · Single class: `ranger.Ranger`
 pip install -e .          # or: pip install .
 ```
 
-Requires the `opencode` CLI on PATH (https://opencode.ai). Old-distro-pip
-users: `pip install -U pip` fixes missing-`build_editable` editable installs.
+Requires a harness CLI on PATH: [opencode](https://opencode.ai) (the
+default backend) and/or [codex](https://github.com/openai/codex) — opencode
+is only needed if you actually use the default backend. On a distro-pegged
+pip (e.g. 22.x) an editable install can fail with "build backend is missing
+the build_editable hook" — fix the tool, not the package:
+`pip install -U pip`, then retry.
 
 ## Environment variables
 
@@ -35,8 +39,13 @@ pointed the agent.
 |---|---|---|
 | `ranger.Ranger` | class | The agent class (below). |
 | `ranger.RangerError` | exception | Subclass of `RuntimeError`; raised for every harness failure. |
-| `ranger.DEFAULT_MODEL` | str | Package-default model ID. |
+| `ranger.DEFAULT_MODEL` | str | Package-default model ID (opencode backend). |
+| `ranger.backends()` | function | Sorted names of all registered harness backends. |
+| `ranger.register_backend(name, cls)` | function | Register a custom harness adapter — see Backends below. |
 | `ranger.__version__` | str | Package version. |
+
+Design backbone: [PARADIGM.md](PARADIGM.md) — the agent is a function call;
+Python owns the loop.
 
 ---
 
@@ -81,27 +90,39 @@ ranger.Ranger(
 | `skills` | `None` | allow-list: files/dirs via `--file`, prose as grants |
 | `effort` | `"medium"` | "low"/"medium"/"high" depth directive |
 | `stats` | `False` | JSON-mode runs + telemetry in `agent.last` |
+| `backend` | `"opencode"` | which harness to drive — see Backends below |
 
 ### Per-call overrides
 
 Every command method (`ask`, `summarize`, `write`, `do`, `search`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
-that single call only. Unknown keywords raise `TypeError` immediately —
-typos fail loudly, never silently. Priority rules:
+that single call only — **except `cwd`**, which is agent identity and is
+constructor/`with_config`-only. Unknown keywords raise `TypeError`
+immediately — typos fail loudly, never silently. Priority rules:
 
 - Per-call value beats constructor value.
-- Model: `model=` argument → `RANGER_MODEL` env → package default.
+- Model: per-call `model=` → constructor `model=` → `RANGER_MODEL` env →
+  package default **resolved per effective backend** (a per-call
+  `backend=` switch never inherits the other backend's default; codex
+  without an explicit model uses its own `config.toml` default and passes
+  no `-m` at all).
 - Agent selection: per-call `agent=` → per-call `mode=` → constructor
   `mode=` → constructor `agent=`.
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
   was requested; `effort` ∈ {low, medium, high} — anything else raises
   (`ValueError` at construction, `TypeError` per-call).
+- **Fact commands run pure**: `check`, `search` and `summarize` drop
+  `session=` and skip history recall — a verdict is about the repo, not
+  the chat.
 
 ### `with_config(**overrides) -> Ranger`
 
 Returns a **copy** of the agent with settings overridden (the original is
 untouched). Accepts every constructor run-setting plus `cwd` (normalized to
-an absolute path). Unknown keys raise `TypeError`.
+an absolute path; `cwd=None` restores the process-cwd default) and
+`memory_budget`. Unknown keys raise `TypeError`. The copy takes a
+**snapshot** of `context` and `last` — the two agents' histories diverge
+from the copy point on.
 
     smart = ranger.Ranger(model="…sonnet…")
     fast = smart.with_config(model="…flash…", mode="build")
@@ -126,8 +147,12 @@ The file **is** the answer: the agent writes a complete document and must
 reply with the path only. Returns the file path, which ranger has
 **verified to exist** — if the agent failed to write it, `RangerError` is
 raised instead of returning a lie. `path=` pins the exact target file;
-without it a `ranger_<slug>_<timestamp>.md` name is generated in the
-agent cwd (empty tasks fall back to slug `ranger_out`).
+without it a `ranger_<slug>_<timestamp>_<random>.md` name is generated in
+the agent cwd — the slug is sanitized to safe filename characters (a task
+like `"describe src/parser.py"` cannot smuggle a subdirectory), the random
+suffix prevents collisions between repeated tasks, and the postcondition is
+`out.is_file()` (an existing *directory* does not satisfy the contract).
+Empty tasks fall back to slug `ranger_out`.
 
 ### `do(goal, **ov) -> str`
 
@@ -146,9 +171,12 @@ prompt.
 ### `check(condition, **ov) -> bool`
 
 Boolean verdict on repo state. The agent must actually verify (commands,
-file reads) and answer with **YES or NO as the first word**; ranger parses
-it (punctuation-tolerant: "Yes," / "no," pass) and returns `True`/`False`.
-An unparseable reply raises `RangerError` — check never guesses.
+file reads) and answer with a **line consisting only of YES or NO** (an
+early first-word YES/NO also parses, modulo punctuation). ranger returns
+`True`/`False` and **never guesses**: an unparseable reply, a reply whose
+first line confesses inability ("cannot verify", "unknown"...), or
+**contradictory YES and NO verdict lines** all raise `RangerError`. History
+and harness sessions are dropped for the call — it is a pure query.
 
 ### `gate(command, timeout=None) -> bool`
 
@@ -187,9 +215,13 @@ fifth round — only the gate can.
 
 - Every command automatically records its **raw** request and answer (never
   the context-prefixed prompt, so transcripts cannot nest/explode).
-- Subsequent runs recall the most recent messages that fit inside
-  `memory_budget` characters, prepended as a `## Previous interaction`
-  block before the `## Current request`.
+- Subsequent **dialogue** commands (`ask`, `do`, `write`, `context_*`)
+  recall the most recent messages that fit inside `memory_budget`
+  characters, prepended as a `## Previous interaction` block before the
+  `## Current request`.
+- **Fact commands run pure**: `check`, `search` and `summarize` never see
+  conversation history — a verdict must not be a function of chat
+  (paradigm law: context memory colors your dialogues, never your facts).
 - `memory=False` (constructor or single call) disables both recording and
   recall. `gate()` and `models()` never touch the transcript.
 
@@ -203,11 +235,14 @@ fifth round — only the gate can.
 
 ## Skills allow-list
 
-`skills` entries resolve by type:
+`skills` entries resolve by type — **relative paths resolve against the
+agent's `cwd`** (the world the harness operates in), and are converted to
+absolute paths before the harness sees them, so opencode and codex attach
+the same file:
 
 | Entry | Behavior |
 |---|---|
-| markdown file path | attached with opencode's real `--file` flag |
+| markdown file path | attached with opencode's real `--file` flag; codex inlines the file text into the prompt |
 | directory path | every `*.md` inside is attached (sorted); no markdown → `RangerError` |
 | plain prose string | injected as a `## Allowed skills / operating grants` bullet — applied after context recall, so it can never be overwritten |
 
@@ -243,9 +278,62 @@ Honesty note: the opencode JSON stream carries timing and session data but
 
 ## Models discovery
 
-`Ranger.models(match=None) -> list[str]` (static): runs `opencode models`,
-returns the model IDs, optionally filtered by case-insensitive substring.
-No agent, no tokens, no context recording.
+`Ranger.models(match=None, backend="opencode") -> list[str]` (static):
+delegates to the backend adapter. opencode runs `opencode models`; codex
+cannot enumerate models and raises `RangerError` pointing at
+`~/.codex/config.toml` / `model=`. No agent, no tokens, no context recording.
+
+## Backends (harness adapters)
+
+`Ranger(backend="codex")` drives a different headless harness with the
+identical public API. All harness-specific translation — CLI flags, output
+schemas, sandbox semantics — lives in one adapter class per backend; the
+command contracts, context memory and loops are untouched (paradigm law 7:
+the harness is a replaceable data plane).
+
+Capability map:
+
+| Setting | opencode | codex |
+|---|---|---|
+| `model` | `--model` (package default if unset) | `-m`; unset → codex config.toml default |
+| `cwd` | subprocess cwd + `PWD` env fix | native `-C` flag (resume runs use the process cwd) |
+| `auto` | `--auto` | `--approve-for-me` (workspace-write); `auto=False` → `-s read-only` (exec cannot be interactive) |
+| `session` | `--session <id>` | `codex exec resume <id>` (model and a requested read-only policy still apply on resume) |
+| `mode` / `agent` | `--agent <name>` | not supported — `RangerError` if set |
+| `title` | `--title` | not supported — `RangerError` if set |
+| `thinking` / `effort` | `--thinking`; effort as prompt directive | `-c model_reasoning_effort="low|high"` |
+| skills: files/dirs | native `--file` attachment | inlined into the prompt (codex has no attachment flag) |
+| `stats` | wall + model seconds, parts, session id | wall, parts, thread id **and real token usage** (`input_tokens`, `cached_input_tokens`, `output_tokens`) |
+| `gate()` | harness-free — plain subprocess on every backend | same |
+
+codex runs always capture in JSON (its stream is JSONL; ranger parses
+`agent_message` items). opencode captures plain text unless `stats=True`.
+
+### Adding your own harness
+
+```python
+import ranger
+
+class MyHarness(ranger._Backend):
+    name = "mine"
+    install_hint = "install it from https://example.com"
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        # o = resolved run options; return (argv, possibly-rewritten prompt)
+        return ["mycli", "--run", full_prompt], full_prompt
+
+    def parse_output(self, stdout, want_stats):
+        # return (answer_text, telemetry_dict_or_None)
+        return stdout.strip(), None
+
+ranger.register_backend("mine", MyHarness)
+agent = ranger.Ranger(backend="mine")
+```
+
+`build_cmd` decides flags and may inline skills; `parse_output` converts
+the harness stream into the answer plus optional telemetry merged into
+`agent.last`. Implement `list_models(match)` too if the CLI can enumerate
+models. Custom registrations live in-process only.
 
 ## Live progress UI
 
@@ -257,18 +345,41 @@ failure. Output is **stderr-only**: returned strings and your stdout stay
 byte-clean. Auto-off in pipes/tests; `NO_COLOR` strips colors; `pretty=False`
 silences.
 
+## Timeouts & cancellation — what is actually guaranteed
+
+When a run exceeds `timeout`, ranger kills the harness CLI process and
+raises `RangerError`. Honesty about the boundary:
+
+- The CLI is spawned in its **own process group**, so its immediate
+  children can be identified and torn down by the OS.
+- Harness CLIs are not always the whole story: opencode executes through a
+  background **service**, codex through local subprocesses. A timeout
+  stops the CLI client; work already queued inside the harness may still
+  complete on its side. ranger cannot cancel what the harness does not
+  expose an cancellation handle for.
+- `gate()` timeouts leave the shell command's descendants similarly
+  unaccounted for.
+
+If you need hard cancellation, run long goals with a small `timeout` in a
+sandbox/throwaway directory, or verify outcomes mechanically afterwards
+(that is what `check`/`gate`/`until` are for).
+
 ## Errors
 
 | Situation | Raised |
 |---|---|
-| `opencode` not on PATH | `RangerError("opencode CLI not found…")` |
+| harness CLI not on PATH | `RangerError("<backend> CLI not found…")` |
+| agent `cwd` does not exist | `RangerError` |
+| harness process could not be spawned (permissions, ENOEXEC, ...) | `RangerError` with cause |
 | run exits non-zero (bad model, harness error) | `RangerError` with stderr |
 | run exceeds `timeout` | `RangerError("… timed out …")` |
-| `write()` file missing after the run | `RangerError` |
-| `check()` unparseable verdict | `RangerError` |
+| `write()` target is missing **or not a regular file** after the run | `RangerError` |
+| `check()` unparseable, unconfident or contradictory verdict | `RangerError` |
 | unknown per-call keyword | `TypeError` |
 | unknown `with_config` key | `TypeError` |
 | invalid `effort` | `ValueError` (constructor), `TypeError` (per-call) |
+| invalid `backend` | `ValueError` |
+| `until(max_iter=...)` not a non-negative int | `ValueError` |
 | skills directory with no markdown | `RangerError` |
 
 ## Prompt contracts, for the curious
@@ -279,8 +390,11 @@ Each command wraps your input in a frozen prompt the agent must honor:
 - `write`: write the file at `{path}`, reply with the path only.
 - `do`: accomplish `{goal}` with tools, report what changed.
 - `search`: grep for `{goal}`, reply `file:line` report, **no code changes**.
-- `check`: decide TRUE/FALSE for `{condition}`, must verify, first word YES/NO.
+- `check`: decide TRUE/FALSE for `{condition}`, must verify, answer a standalone YES/NO line.
 - `until`: each iteration, "name ONE concrete next step, one line."
+
+All prompts travel after an option terminator (`--`), so task text can never
+be parsed as CLI flags.
 
 These templates are what the unit tests pin — changing a command's prompt
 contract is a breaking change, visible in review.

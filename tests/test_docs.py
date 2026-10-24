@@ -31,7 +31,8 @@ PUBLIC_METHODS = [
 CTOR_PARAMS = [
     p for p in inspect.signature(Ranger.__init__).parameters if p != "self"
 ]
-MODULE_PUBLIC = ["Ranger", "RangerError", "DEFAULT_MODEL", "__version__"]
+MODULE_PUBLIC = ["Ranger", "RangerError", "DEFAULT_MODEL", "register_backend",
+                 "__version__"]
 
 
 def test_api_documents_every_public_method():
@@ -56,7 +57,8 @@ def test_api_documents_module_level_api():
 def test_readme_links_the_reference_and_catalog():
     assert "docs/API.md" in README_TEXT          # API reference reachable
     assert "docs/commands.md" in README_TEXT     # command catalog reachable
-    assert "docs/growth-log.md" in README_TEXT or True  # soft link, optional
+    assert "docs/PARADIGM.md" in README_TEXT     # design backbone reachable
+    assert "backend" in API_TEXT                 # backends documented
 
 
 def test_examples_compile_and_are_main_guarded():
