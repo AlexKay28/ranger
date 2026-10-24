@@ -309,19 +309,25 @@ talk    = ranger.debate(builder, critic, topic,    # symmetric exchange
 ### `review(subject, author=None) -> dict` (method on the REVIEWER)
 
 Reviews the `subject` in the agent's cwd. `author` may be another Ranger
-(its latest recorded answer is injected as claims to verify — never
-truth), a bare string, or `None`. Reply contract is frozen
-(`VERDICT: APPROVE|REJECT|REQUEST_CHANGES`, then `FINDINGS:`, `CHANGES:`)
-and mechanically parsed. Returns
+(a latest recorded answer is injected as claims to verify — never
+truth), a bare string, or `None`. Reply contract is frozen and strictly
+validated: exactly ONE `VERDICT: APPROVE|REJECT|REQUEST_CHANGES` line,
+plus non-empty `FINDINGS:` and `CHANGES:` sections (both may span
+multiple lines). Zero, conflicting, invalid, or incomplete replies raise
+`RangerError` — review never guesses. Returns
 `{"passed": bool, "verdict": str, "findings": str, "changes": str}` —
 `passed` is True only on APPROVE.
 
 ### `challenge(other, claim=None, rounds=2) -> dict` (method on the CHALLENGER)
 
 Attacks the defender `other`'s claim (default: its latest recorded
-assertion). Each round: ONE concrete verifiable weakness → defense with
-checkable evidence ending `DEFENDED`/`CONCEDED` → the challenger rules on
-that attack alone via `RULING: SUSTAINED|WITHDRAWN`. Any SUSTAINED ruling
+assertion). Each round: `ATTACK: <attack>` → defense ending with a
+final `DEFENDED` or `CONCEDED` line → the challenger rules on that
+attack alone via `RULING: SUSTAINED|WITHDRAWN`. Every reply is
+mechanically validated: a missing `ATTACK:` marker, a defense without
+exactly one terminal status, or zero/multiple `RULING:` lines raises
+`RangerError`. Attacks and rulings run memory- and session-free (law 4);
+the defense keeps the defender's own settings. Any SUSTAINED ruling
 (or a CONCEDED defense) ends with `survived: False` immediately; all
 withdrawn (or budget exhausted) leaves `survived: True`. Returns
 `{"survived": bool, "rounds": [{"attack", "defense", "ruling"}...],
@@ -336,21 +342,26 @@ no judgment, no winner.
 ### `refine_with(critic, goal, max_iter=3) -> dict`
 
 The two-agent `until`: `do` the step → `critic.review(subject=goal,
-author=self)` gates the round → REQUEST_CHANGES/REJECT feed the requested
-changes verbatim into the next attempt. Only a mechanical APPROVE ends
-the loop early. Returns `{"approved": bool, "iterations": int,
-"report": str, "reviews": [review dicts...]}`.
+author=report)` gates the round on the work report from THIS attempt
+(as unverified claims — independent of memory settings) →
+REQUEST_CHANGES/REJECT feed the requested changes verbatim into the
+next attempt. Only a mechanical APPROVE ends the loop early. Returns
+`{"approved": bool, "iterations": int, "report": str, "reviews":
+[review dicts...]}`. Passing `session=` raises `TypeError` before any
+work runs (the gate is session-free by contract).
 
 ### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` (module-level)
 
 Symmetric position exchange; each side sees the opponent's last position
-labeled as unverified. The optional `judge` agent (memory-free) digests
-where the positions factually disagree and what evidence would settle it
-— it never crowns a winner. Returns
+labeled as unverified. The optional `judge` agent (validated before any
+speaker runs; runs memory- and session-free) digests where the positions
+factually disagree and what evidence would settle it — it never crowns
+a winner. Returns
 `{"transcript": [{"round", "a", "b"}...], "digest": str | None}`.
 
 Validation: `rounds`/`max_iter` must be non-negative ints (`ValueError`);
-wrong-typed `author`/`critic`/agents raise `TypeError`.
+wrong-typed `author`/`critic`/agents/judge raise `TypeError` — up front,
+never after work has already run.
 
 ## Backends (harness adapters)
 

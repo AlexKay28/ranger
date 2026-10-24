@@ -1041,10 +1041,10 @@ def test_challenge_attacks_defends_and_rules():
                              "content": "the parser handles every case"})
     replies = iter([
         "ATTACK: no test for empty input exists",     # attack
-        "Fixed — added tests; DEFENDED",               # defense
+        "Fixed — added tests\nDEFENDED",              # defense
         "RULING: WITHDRAWN",                           # ruling round 1
         "ATTACK: benchmark numbers are hearsay",       # round 2 attack
-        "Here are the numbers. DEFENDED",              # defense
+        "Here are the numbers\nDEFENDED",              # defense
         "RULING: SUSTAINED",                           # sustained -> survives no
     ])
     with mock.patch("ranger.subprocess.run",

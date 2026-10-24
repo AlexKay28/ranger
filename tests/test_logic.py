@@ -200,20 +200,28 @@ def test_write_path_resolution_table(tmp_path):
         assert agent.write("doc", path=abs_target) == str(abs_target)
 
 
-def test_slug_sanitization_table():
-    """The slug transform is a pure function — table-test the transform."""
+def test_slug_sanitization_table(tmp_path):
+    """Exercise write() itself and check the generated target's name."""
+    agent = Ranger(cwd=tmp_path)
     import re as _re
     table = [
-        ("Describe SRC/Parser.py", "describe_src_parser_py"),
-        ("UPPER Case", "upper_case"),
-        ("two  spaces__lots!!!", "two_spaces__lots"),
-        ("...", "ranger_out"),            # nothing survives -> fallback
-        ("a/b/../escape", "a_b_escape"),
+        ("Describe SRC/Parser.py", "ranger_describe_src_parser_py"),
+        ("UPPER Case", "ranger_upper_case"),
+        ("...", "ranger_ranger_out"),       # nothing survives -> slug fallback
+        ("a/b/../escape", "ranger_a_b_escape"),
     ]
-    for task, expected_slug in table:
-        slug = _re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:40]
-        slug = slug.strip("_-") or "ranger_out"
-        assert slug == expected_slug, f"task {task!r}"
+    for task, expected_prefix in table:
+        def fake(cmd, **kw):
+            m = _re.findall(r"at exactly: (\S+)", cmd[-1])
+            Path(m[-1]).write_text("x")
+            return fake_run("done")
+        with mock.patch("ranger.subprocess.run", side_effect=fake):
+            out = agent.write(task)
+        name = Path(out).name
+        assert name.startswith(expected_prefix), (name, expected_prefix)
+        # and the unique-suffix part is exactly a 6-hex uuid slice
+        suffix = name[:-3].rsplit("_", 1)[-1]
+        assert _re.fullmatch(r"[0-9a-f]{6}", suffix), name
 
 
 # ==================================================================== #
@@ -312,8 +320,8 @@ def test_challenge_concedes_and_rules_exactly():
         duel = attacker.challenge(defender, rounds=5)
     assert duel["survived"] is False and len(duel["rounds"]) == 1
     assert duel["rounds"][0]["ruling"] == "CONCEDED"
-    # the defender was actually shown the attack text
-    assert "ATTACK: hole" in q[1]
+    # the defender was actually shown the attack text (marker-stripped)
+    assert "hole" in q[1] and "ATTACK:" not in q[1].split("hole")[0]
 
 
 def test_second_opinion_table():
@@ -351,16 +359,153 @@ def test_debate_alternates_and_judge_sees_all(tmp_path):
 # 8. the budget commitment itself — enforced, not promised
 
 def test_suite_stays_within_one_minute():
-    """The rest of the test suite must finish in under 60 seconds.
+    """Every other test file must finish in under 60 seconds.
 
-    (This file measures the others, not itself — no recursion.)
+    All current test files are globbed in (minus this one — no
+    recursion), so future test files are budget-checked automatically.
     """
+    others = sorted(str(p) for p in REPO.glob("tests/test_*.py")
+                    if p.name != "test_logic.py")
     t0 = time.monotonic()
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q",
-         "tests/test_ranger.py", "tests/test_docs.py"],
-        cwd=REPO, capture_output=True, text=True, timeout=300,
+        [sys.executable, "-m", "pytest", "-q", *others],
+        cwd=REPO, capture_output=True, text=True, timeout=120,
     )
     elapsed = time.monotonic() - t0
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert elapsed < 60, f"suite takes {elapsed:.1f}s — over the 1-minute budget"
+
+
+# ==================================================================== #
+# 9. critic round 2 regressions — strict decision grammars
+
+REVIEW_OK = "VERDICT: APPROVE\nFINDINGS: everything verified\nCHANGES: none"
+
+
+def test_reviews_reject_poisoned_and_broken_verdicts():
+    bad = [
+        "VERDICT: APPROVE_NOT\nFINDINGS: f\nCHANGES: none",    # invalid token
+        "VERDICT: APPROVE\nVERDICT: REJECT\nFINDINGS: f\nCHANGES: none",
+        "VERDICT: APPROVE\nFINDINGS: like it\nCHANGES:",       # empty CHANGES
+        REVIEW_OK.replace("FINDINGS: everything verified\n", ""),  # no FINDINGS
+        "no verdict at all here",
+    ]
+    agent = Ranger()
+    for reply in bad:
+        with mock.patch("ranger.subprocess.run",
+                        return_value=fake_run(reply)):
+            with pytest.raises(RangerError):
+                agent.review("x")
+    # and the same grammar holds for answers decoded from codex JSON
+    codex = ('{"type":"item.completed","item":{"type":"agent_message",'
+             '"text":"VERDICT: REJECT\\nFINDINGS: broke\\nCHANGES: fix it"}}\n')
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(codex)):
+        assert Ranger(backend="codex").review("x") == {
+            "passed": False, "verdict": "REJECT",
+            "findings": "broke", "changes": "fix it"}
+
+
+def test_review_preserves_multiline_sections():
+    reply = ("VERDICT: REQUEST_CHANGES\n"
+             "FINDINGS:\n- a is broken\n- b is missing\n"
+             "CHANGES:\n- fix a\n- add b")
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(reply)):
+        rev = agent.review("x")
+    assert rev["findings"] == "- a is broken\n- b is missing"
+    assert rev["changes"] == "- fix a\n- add b"
+
+
+def test_challenge_rejects_broken_contracts():
+    attacker, defender = Ranger(), Ranger()
+    defender.context.append({"role": "assistant", "content": "CLAIM"})
+    # defense with no terminal status
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("ATTACK: hole"), fake_run("I disagree entirely."),
+    ]):
+        with pytest.raises(RangerError, match="DEFENDED"):
+            attacker.challenge(defender, rounds=1)
+    # conflicting statuses
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("ATTACK: hole"), fake_run("d\nDEFENDED\nCONCEDED"),
+    ]):
+        with pytest.raises(RangerError, match="conflicting"):
+            attacker.challenge(defender, rounds=1)
+    # attack without the ATTACK: marker
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run("the hole is obvious")):
+        with pytest.raises(RangerError, match="ATTACK"):
+            attacker.challenge(defender, rounds=1)
+    # double ruling
+    with mock.patch("ranger.subprocess.run", side_effect=[
+        fake_run("ATTACK: hole"), fake_run("d\nDEFENDED"),
+        fake_run("RULING: SUSTAINED\nRULING: WITHDRAWN"),
+    ]):
+        with pytest.raises(RangerError, match="conflicting"):
+            attacker.challenge(defender, rounds=1)
+
+
+def test_challenge_judgments_run_pure():
+    attacker, defender = Ranger(session="ses_bias"), Ranger()
+    defender.context.append({"role": "assistant", "content": "CLAIM"})
+    attacker.context = [{"role": "user", "content": "OLD_BIAS"}]
+    cmds = []
+    replies = iter(["ATTACK: hole", "d\nDEFENDED", "RULING: WITHDRAWN"])
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda cmd, **kw: (cmds.append(cmd),
+                                                   fake_run(next(replies)))[1]):
+        attacker.challenge(defender, rounds=1)
+    attack_cmd, defense_cmd = cmds[0], cmds[1]
+    assert "ses_bias" not in attack_cmd        # judgment never resumes a session
+    assert "OLD_BIAS" not in attack_cmd[-1]    # nor recalls chat history
+    ruling_cmd = cmds[2]
+    assert "ses_bias" not in ruling_cmd and "OLD_BIAS" not in ruling_cmd[-1]
+    assert "ses_bias" not in defense_cmd       # defense keeps user settings
+
+
+def test_refine_with_gates_the_actual_report_not_history():
+    builder = Ranger(memory=False, cwd="/tmp")
+    critic = Ranger()
+    seen = []
+
+    def fake(cmd, **kw):
+        seen.append(cmd[-1])
+        return (fake_run("the report text")
+                if len(seen) == 1
+                else fake_run(REVIEW_OK))
+
+    with mock.patch("ranger.subprocess.run", side_effect=fake):
+        out = builder.refine_with(critic, "goal", max_iter=1)
+    assert out["approved"] is True
+    # the review prompt carries the work report as claims — even though
+    # memory=False means nothing was recorded in context
+    assert "the report text" in seen[1]
+    assert builder.context == []
+
+
+def test_refine_and_debate_fail_fast_on_bad_overrides():
+    builder, critic = Ranger(), Ranger()
+    judge = Ranger()
+    # session can never reach the session-free review -> TypeError BEFORE do()
+    with mock.patch("ranger.subprocess.run") as m:
+        with pytest.raises(TypeError, match="session"):
+            builder.refine_with(critic, "goal", session="s1")
+    assert m.call_count == 0
+    # judge purity can't collide with user overrides
+    seen = []
+
+    def fake(cmd, **kw):
+        seen.append(cmd)
+        return fake_run(f"pos{len(seen)}")
+
+    with mock.patch("ranger.subprocess.run", side_effect=fake):
+        ranger.debate(Ranger(), Ranger(), "topic", rounds=1, judge=judge,
+                      session="s2", memory=False)
+    assert len(seen) == 3
+    assert "s2" not in seen[2]                # judge ran session-free
+    # judge type validated before any speaker runs
+    with mock.patch("ranger.subprocess.run") as m:
+        with pytest.raises(TypeError, match="judge"):
+            ranger.debate(Ranger(), Ranger(), "topic", rounds=1,
+                          judge="not an agent")
+    assert m.call_count == 0
