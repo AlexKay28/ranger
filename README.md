@@ -56,7 +56,9 @@ Runnable applications live in [examples/](examples/): quickstart, model
 discovery, a full agentic loop, a self-hosted project-growth loop, plus three
 small day-to-day recipes — repair a red test command, independently review a
 local diff before merge, review one file, and draft release notes from git
-history.
+history. They are organized by use case in the
+[examples index](examples/README.md): getting started, code work, monitoring,
+multi-agent, backends, and no-model dummy runs.
 
 Live progress: each command draws a morphing line on stderr while it runs
 (`⠹ search · TODO items in this repo · 00:03`) and settles as
@@ -175,7 +177,7 @@ talk    = ranger.debate(builder, critic, topic, judge=skeptic)
 ```
 
 See the Multi-agent interactions section of [docs/API.md](docs/API.md)
-and `examples/multi_agent.py`.
+and [`examples/multiagent/multi_agent.py`](examples/multiagent/multi_agent.py).
 
 ## Skills allow-list
 

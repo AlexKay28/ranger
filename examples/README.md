@@ -1,29 +1,43 @@
 # ranger examples
 
-Runnable applications over the `ranger` library. Install the package first
-(`pip install -e ..` from the repo root) and have the `opencode` CLI on PATH —
-examples 2 and 3 issue **real agent runs** and cost time and tokens.
+Runnable applications over `ranger`, organized by the job you want to do.
+Install the package first (`pip install rangers`, or `pip install -e .[dev]`
+from a clone). Every script is main-guarded, so importing it has no side
+effects. All folders except `dummy/` need an authenticated opencode or codex
+CLI and make real agent calls.
 
-| Example | What it shows | Agent runs |
-|---|---|---|
-| `quickstart.py` | The five core commands (`search`, `summarize`, `do`, `write`, `ask`) against a target directory | yes, several |
-| `model_discovery.py` | `Ranger.models()` discovery, `with_config()` copies, per-call overrides | one, tiny |
-| `agentic_loop.py` | A full autonomous loop: search → pick one → do, repeated N passes | yes, 3 per pass |
-| `controls.py` | The control surface: `gate`, `check`, `until`, stats telemetry, `mode`/`effort`, skills grants, context compaction | yes, ~6 |
-| `backends.py` | Same API, different harness: `Ranger(backend="codex")` and the `register_backend` extension point | yes, 1 |
-| `multi_agent.py` | The interaction patterns: `second_opinion`, `review`, `refine_with`, `challenge`, `debate` with a judge | yes, ~10 |
-| `growth_loop.py` | The project-growth loop on any repo: personas wish → pick ONE goal → frozen contract → implement → mechanical acceptance check → append-only log | yes, ~5 per cycle |
+| Folder | Example | Use case | Calls |
+|---|---|---|---:|
+| [`getting-started/`](getting-started/) | `quickstart.py` | Core `search`, `summarize`, `do`, `write`, `ask` on a target project | several |
+| | `model_discovery.py` | Discover models and make configured agent copies | 1 |
+| [`code-work/`](code-work/) | `fix_failing_tests.py` | Repair a known test command; the command is a hard gate | <= 2 repair attempts |
+| | `simple_code_review.py` | One file -> one strict review verdict | 1 |
+| | `review_before_merge.py` | Evidence report + independent critic for a local diff | 2 |
+| | `draft_release_notes.py` | Git history -> exact Markdown release-note draft | 2 |
+| | `agentic_loop.py` | Search -> choose one work order -> do, for N passes | 3/pass |
+| | `growth_loop.py` | Persona wish -> one goal -> acceptance gate -> log | ~5/cycle |
+| [`monitoring/`](monitoring/) | `project_health.py` | Read-only test status, actionable risks, telemetry | 1 + gate |
+| | `controls.py` | Gates, checks, bounded loops, stats, modes, skills, context | ~6 |
+| [`multiagent/`](multiagent/) | `multi_agent.py` | Second opinion, review, refinement, challenge, debate | ~10 |
+| [`backends/`](backends/) | `backends.py` | Same API over opencode/codex; backend registration | 1 |
+| [`dummy/`](dummy/) | `mechanical_gates.py` | Deterministic `gate()` demo in a temporary project | **0** |
+
+## Smallest useful recipes
 
 ```bash
-python quickstart.py /path/to/some/project
-python model_discovery.py
-python agentic_loop.py "clean up this repo" 2
-python growth_loop.py /path/to/some/project 3
+# no model or login required
+python examples/dummy/mechanical_gates.py
+
+# one-file review; exits nonzero unless the critic approves
+python examples/code-work/simple_code_review.py /path/to/project src/parser.py
+
+# at most two repair attempts; the shell test command is the truth
+python examples/code-work/fix_failing_tests.py /path/to/project "python -m pytest -q"
+
+# read-only test status + three actionable risks
+python examples/monitoring/project_health.py /path/to/project "python -m pytest -q"
 ```
 
-They deliberately use **only shipped API** — anything in
-[`docs/commands.md`](../docs/commands.md) marked 🔜 or 🌱 does not appear here.
-
-Importing any example is side-effect-free (agent runs live behind
-`if __name__ == "__main__"`), which is how the test suite can import-check
-them without spawning opencode.
+Examples deliberately use only shipped API — anything marked planned in
+[`docs/commands.md`](../docs/commands.md) is absent. The test suite imports
+every script recursively to keep that promise true.

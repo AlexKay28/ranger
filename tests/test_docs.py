@@ -87,7 +87,7 @@ def test_cheatsheet_is_embedded_and_covers_the_shipped_surface():
 
 
 def test_examples_compile_and_are_main_guarded():
-    example_files = sorted((REPO / "examples").glob("*.py"))
+    example_files = sorted((REPO / "examples").rglob("*.py"))
     assert example_files, "no examples found"
     for path in example_files:
         py_compile.compile(path, doraise=True)
@@ -103,7 +103,7 @@ def test_examples_compile_and_are_main_guarded():
 def test_examples_use_only_shipped_api():
     shipped = set(dir(Ranger)) | {"models", "Ranger"} | set(dir(ranger))
     shipped = {s for s in shipped if not s.startswith("_")}
-    for path in sorted((REPO / "examples").glob("*.py")):
+    for path in sorted((REPO / "examples").rglob("*.py")):
         src = path.read_text()
         used = {
             name
@@ -120,7 +120,7 @@ def test_examples_use_only_shipped_api():
 def test_every_shipped_command_has_an_example_usage():
     """Every public API surface must appear somewhere in examples/."""
     all_example_text = "\n".join(
-        p.read_text() for p in sorted((REPO / "examples").glob("*.py"))
+        p.read_text() for p in sorted((REPO / "examples").rglob("*.py"))
     )
     for command in ("ask", "summarize", "write", "do", "search", "check",
                     "gate", "until", "models", "with_config",
