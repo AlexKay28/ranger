@@ -92,7 +92,8 @@ def test_root_skill_is_shipped_and_covers_safe_agent_workflows():
     assert SKILL_TEXT.startswith("---\nname: ranger\n")
     for detail in ("pip install rangers", "import ranger", "gate_cmd=",
                    "max_iter", "RangerError", "KeyboardInterrupt",
-                   "subprocess.run", "subprocess.Popen", "OpenRouter"):
+                   "subprocess.run", "subprocess.Popen", "OpenRouter",
+                   "AlexKay28/ranger", "ranger execution bug"):
         assert detail in SKILL_TEXT, f"SKILL.md misses {detail!r}"
 
 

@@ -120,6 +120,43 @@ frozen grammars and raise `RangerError` on malformed or conflicting replies.
 - Run `python -m pytest -q`; for releases also run `python -m build` and
   `python -m twine check --strict dist/*`. See [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
+## Execution-bug feedback for maintainers
+
+If a user asks you to use ranger and you encounter a reproducible library or
+harness-execution bug, help the maintainers learn from it: create an issue at
+[`AlexKay28/ranger`](https://github.com/AlexKay28/ranger/issues) when GitHub
+authentication and issue-creation permission are available. If they are not,
+give the user the complete ready-to-paste issue instead. Do this after a
+minimal reproduction attempt — not for a malformed prompt, a missing CLI, an
+expired model quota, or an expected `RangerError` caused by invalid input.
+
+**Never include secrets.** Redact API tokens, credentials, private prompts,
+absolute private paths, and proprietary source. Link to public output only.
+
+Use this issue format:
+
+````markdown
+## ranger execution bug
+
+**ranger version:** `ranger.__version__`
+**Python / OS:** `python --version`; operating system
+**Backend / model:** `opencode|codex`; public model ID or `redacted`
+**Command or minimal code:**
+```python
+# smallest self-contained reproduction
+```
+**Expected behavior:** what should have happened
+**Actual behavior:** exact exception, exit code, or unexpected result
+**Reproduction:** always / intermittent; smallest known steps
+**Relevant non-secret context:** timeout, session/memory setting, and whether
+the problem remains with `memory=False` and a fresh session
+````
+
+Title issues as: `bug: <short observable failure>`. Before filing, search
+existing open issues for the same error and add reproduction details there
+instead of creating a duplicate. The report is feedback, not a substitute for
+the user's immediate workaround: state the workaround or honest blocker too.
+
 ## Choose an example before inventing a workflow
 
 See [examples/README.md](examples/README.md) for runnable recipes:
