@@ -71,6 +71,7 @@ ranger.Ranger(
     effort="medium",       # "low" | "medium" | "high" depth directive
     stats=False,           # JSON-mode runs; telemetry in agent.last
     retries=0,             # transport-failure re-attempts per run
+    env=None,               # dict merged over inherited os.environ for the child
 )
 ```
 
@@ -95,6 +96,33 @@ ranger.Ranger(
 | `stats` | `False` | JSON-mode runs + telemetry in `agent.last` |
 | `backend` | `"opencode"` | which harness to drive — see Backends below |
 | `retries` | `0` | re-attempts a failed run, transport failures only (`RangerTimeout`, `RangerHarnessError`); prompt-contract failures (`RangerError`) never retry |
+| `env` | `None` (inherit all) | dict merged over the child's inherited environment — see [Child process environment](#child-process-environment) |
+
+### Child process environment
+
+Every harness child process (the `ask`/`do`/`write`/`search`/`summarize`/`check`
+CLI runs, and the `gate()` shell command) sees exactly this environment:
+
+1. **The full inherited `os.environ` of your Python process** — nothing is
+   filtered, so every variable you have (including secrets such as API tokens)
+   is visible to the child.
+2. **`PWD=agent.cwd`** — when `cwd` was provided, ranger overlays `PWD` so the
+   harness cwd fix works reliably (see the `cwd` row above).
+3. **The `env=` overlay, if any** — the per-instance `env` dict (or a per-call
+   `env=` override) is merged **on top** of the inherited environment: it
+   extends, it never replaces. Existing keys with the same name are
+   overwritten by the overlay; everything else passes through untouched.
+
+`env=None` (the default) means no overlay: the child inherits everything as
+before. Example:
+
+```python
+agent = ranger.Ranger(cwd=".", env={"OPENCODE_LOG": "debug"})
+```
+
+Note that the overlay cannot *remove* an inherited variable (set it to an
+empty string instead), and secrets in your environment are passed through to
+the child by design.
 
 ### Per-call overrides
 

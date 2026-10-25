@@ -58,7 +58,7 @@ _LOG = logging.getLogger("ranger")
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
     "pretty", "memory", "skills", "effort", "stats", "backend", "memory_budget",
-    "retries",
+    "retries", "env",
 )
 
 # ====================================================================== #
@@ -478,6 +478,11 @@ class Ranger:
             missing or exited unexpectedly). Prompt-contract failures
             (plain `RangerError`) never retry and raise immediately.
             Default 0.
+        env: optional dict of environment variables merged over the fully
+            inherited `os.environ` for the child CLI process (extend, never
+            replace). `None` (default) means the child inherits everything
+            untouched. See the "Child process environment" section of
+            docs/API.md.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -502,6 +507,7 @@ class Ranger:
         stats: bool = False,
         backend: str = "opencode",
         retries: int = 0,
+        env: dict | None = None,
     ) -> None:
         if effort not in ("low", "medium", "high"):
             raise ValueError(f"effort must be low|medium|high, got {effort!r}")
@@ -534,9 +540,17 @@ class Ranger:
         self.effort = effort
         self.stats = stats
         self.retries = retries
+        self.env = env
         self.last: dict = {}
         #: OpenAI-format conversation state: {"role", "content"} dicts.
         self.context: list[dict] = []
+
+    def __repr__(self) -> str:
+        """Return a compact description of the core run settings."""
+        return (
+            f"Ranger(model={self.model!r}, backend={self.backend!r}, "
+            f"memory={self.memory!r}, cwd={self.cwd!r})"
+        )
 
     # ------------------------------------------------------------------ #
     # discovery & configuration
@@ -759,6 +773,27 @@ class Ranger:
             f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
         )
 
+    def _child_env(self, env: dict | None = None) -> dict | None:
+        """Environment for child CLI processes.
+
+        Full inherited ``os.environ`` (including secrets) extended with
+        ``PWD=agent.cwd`` and the ``env`` overlay(s). A per-call ``env``
+        merges OVER the per-instance ``env`` (same-key wins, unrelated
+        keys survive) — it extends, never replaces. ``None`` overlays
+        mean inherit everything untouched.
+        """
+        overlay: dict = dict(self.env) if self.env else {}
+        if env:
+            overlay.update(env)
+        if self.cwd is None and not overlay:
+            return None
+        child = dict(os.environ)
+        if self.cwd is not None:
+            child["PWD"] = self.cwd
+        if overlay:
+            child.update(overlay)
+        return child
+
     def gate(self, command: str, timeout: float | None = None) -> bool:
         """Mechanical boolean gate: run a shell command, return exit==0.
 
@@ -775,7 +810,7 @@ class Ranger:
                 command,
                 shell=True,
                 cwd=self.cwd,
-                env={**os.environ, "PWD": self.cwd} if self.cwd else None,
+                env=self._child_env(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -1362,7 +1397,7 @@ class Ranger:
                         proc = subprocess.run(
                             cmd,
                             cwd=self.cwd,
-                            env={**os.environ, "PWD": self.cwd} if self.cwd else None,
+                            env=self._child_env(opts.get("env")),
                             capture_output=True,
                             text=True,
                             encoding="utf-8",

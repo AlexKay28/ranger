@@ -9,6 +9,7 @@ no live harness runs.
 """
 
 import logging
+import os
 import subprocess
 from unittest import mock
 
@@ -42,6 +43,23 @@ class TestTaxonomy:
         with mock.patch("ranger.subprocess.run", side_effect=FileNotFoundError):
             with pytest.raises(RangerError):
                 agent.ask("hello")
+
+
+class TestRepr:
+    def test_repr_shows_settings(self):
+        agent = Ranger(model="openrouter/example/model-x", backend="opencode", cwd=".")
+        r = repr(agent)
+        assert "openrouter/example/model-x" in r
+        assert "opencode" in r
+        assert "memory=True" in r
+        assert "cwd=" in r
+        assert r.startswith("Ranger(")
+
+    def test_repr_reflects_memory_false_and_cwd_none(self):
+        agent = Ranger(memory=False)
+        r = repr(agent)
+        assert "memory=False" in r
+        assert "cwd=None" in r
 
 
 class TestHarnessFailures:
@@ -254,6 +272,84 @@ class TestLogging:
 
 
 
+class TestEnv:
+    """The per-instance env= setting merges over inherited os.environ for the
+    child CLI process (extend, never replace). All subprocess calls mocked."""
+
+    def test_env_overlay_extends_not_replaces_run(self):
+        agent = Ranger(cwd=".", env={"RANGER_TEST_MARKER": "1"})
+        with mock.patch(
+            "ranger.subprocess.run", return_value=fake_run("ok")
+        ) as run_mock:
+            agent.ask("hi")
+        child_env = run_mock.call_args.kwargs["env"]
+        # overlay key present ...
+        assert child_env["RANGER_TEST_MARKER"] == "1"
+        # ... and the inherited environment survived (extend, not replace)
+        assert child_env is not None
+        inherited = dict(os.environ)
+        assert child_env == {**inherited, "PWD": agent.cwd,
+                             "RANGER_TEST_MARKER": "1"}
+
+    def test_env_overlay_overwrites_same_name_key(self):
+        agent = Ranger(cwd=".", env={"PATH": "/custom/bin"})
+        with mock.patch(
+            "ranger.subprocess.run", return_value=fake_run("ok")
+        ) as run_mock:
+            agent.do("work")
+        child_env = run_mock.call_args.kwargs["env"]
+        assert child_env["PATH"] == "/custom/bin"   # overlay wins
+        assert child_env != dict(os.environ)        # but the rest is intact
+
+    def test_env_none_inherits_everything_as_today(self):
+        agent = Ranger(cwd=".")
+        with mock.patch(
+            "ranger.subprocess.run", return_value=fake_run("ok")
+        ) as run_mock:
+            agent.ask("hi")
+        child_env = run_mock.call_args.kwargs["env"]
+        assert child_env == {**os.environ, "PWD": agent.cwd}
+
+    def test_env_none_without_cwd_is_full_inherit(self):
+        agent = Ranger(env=None)
+        with mock.patch(
+            "ranger.subprocess.run", return_value=fake_run("ok")
+        ) as run_mock:
+            agent.ask("hi")
+        assert run_mock.call_args.kwargs["env"] is None
+
+    def test_env_overlay_reaches_gate_process(self):
+        agent = Ranger(cwd=".", env={"RANGER_TEST_MARKER": "1"})
+        with mock.patch("ranger.subprocess.Popen") as popen_mock:
+            popen_mock.return_value.communicate.return_value = ("", "")
+            popen_mock.return_value.returncode = 0
+            agent.gate("true")
+        child_env = popen_mock.call_args.kwargs["env"]
+        assert child_env["RANGER_TEST_MARKER"] == "1"
+        assert "PWD" in child_env
+        assert child_env == {**os.environ, "PWD": agent.cwd,
+                             "RANGER_TEST_MARKER": "1"}
+
+    def test_env_per_call_override_beats_instance_setting(self):
+        agent = Ranger(cwd=".", env={"RANGER_TEST_MARKER": "instance"})
+        with mock.patch(
+            "ranger.subprocess.run", return_value=fake_run("ok")
+        ) as run_mock:
+            agent.ask("hi", env={"RANGER_TEST_MARKER": "call"})
+        child_env = run_mock.call_args.kwargs["env"]
+        assert child_env["RANGER_TEST_MARKER"] == "call"
+
+    def test_env_with_config_override(self):
+        agent = Ranger(cwd=".")
+        clone = agent.with_config(env={"RANGER_TEST_MARKER": "clone"})
+        with mock.patch(
+            "ranger.subprocess.run", return_value=fake_run("ok")
+        ) as run_mock:
+            clone.ask("hi")
+        child_env = run_mock.call_args.kwargs["env"]
+        assert child_env["RANGER_TEST_MARKER"] == "clone"
+
+
 class TestVacuousGateDetection:
     """until() must not claim an agent win over a gate that was green
     before any work — run 1 of the issue-#1 experiment false-greened
@@ -314,3 +410,25 @@ class TestVacuousGateDetection:
             out = agent.until("goal", gate_cmd="x", max_iter=1)
         assert "already_green" not in out
         assert out["achieved"] is True and out["iterations"] == 1
+
+
+class TestEnvLayering:
+    """Per-call env must extend the instance env, not replace it.
+
+    Run 2 of the issue-#1 experiment shipped a near-miss: a per-call
+    env={"BAR": "2"} silently wiped the instance env={"FOO": "1"}.
+    Correct contract: same-key wins per-call, unrelated keys survive.
+    Spotted by a human-run spot-check, not by the agent's own tests.
+    """
+
+    def test_per_call_env_keeps_unrelated_instance_keys(self):
+        agent = Ranger(cwd=".", env={"FOO": "1", "SHARED": "instance"})
+        child = agent._child_env({"BAR": "2", "SHARED": "call"})
+        assert child["FOO"] == "1"           # untouched instance key
+        assert child["BAR"] == "2"           # added per call
+        assert child["SHARED"] == "call"     # same key: per call wins
+
+    def test_per_call_none_env_means_use_instance_not_clear(self):
+        agent = Ranger(cwd=".", env={"FOO": "1"})
+        assert agent._child_env()["FOO"] == "1"
+        assert agent._child_env(None)["FOO"] == "1"  # None never clears
