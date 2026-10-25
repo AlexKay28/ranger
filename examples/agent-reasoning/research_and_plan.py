@@ -35,14 +35,11 @@ def main() -> None:
     if "--" in evidence:                      # search returns a file:line report
         print(evidence)
 
-    # 2. Planning: the plan must quote the evidence, not vibes.
+    # 2. Planning: plan() ships the read-only contract (concrete steps,
+    #    no file changes, riskiest assumption last) — no hand-rolled prompt.
     print("\n== plan (constrained by evidence) ==")
-    plan = planner.ask(
-        f"Task: {task}\n\n"
-        f"Evidence found in the repository:\n{evidence}\n\n"
-        "Write a short implementation plan. Every step must reference a "
-        "concrete file or command from the evidence. End with the single "
-        "riskiest assumption the plan makes."
+    plan = planner.plan(
+        f"{task}\n\nEvidence found in the repository:\n{evidence}"
     )
     print(plan)
 

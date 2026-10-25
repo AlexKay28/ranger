@@ -813,6 +813,29 @@ class Ranger:
         )
         return self._run(prompt, label="do", **ov)
 
+    def plan(self, goal: str, **ov) -> str:
+        """Produce a numbered implementation plan for a goal.
+
+        Think without touching: the agent may read and analyze the working
+        directory, but the prompt contract forbids any file modification.
+        The plan is a numbered list of concrete steps (referencing real
+        files and commands) ending with the single riskiest assumption.
+        A dialogue command — the exchange is recorded into `agent.context`.
+        """
+        prompt = (
+            f"Produce an implementation plan for this goal in the current "
+            f"directory: {goal}\n"
+            "Contract: reading and analysis only — do NOT modify, create, "
+            "or delete any file. First inspect the relevant code and "
+            "configuration. Reply with a numbered plan (1., 2., 3., ...) "
+            "where every step references the concrete files to touch and "
+            "the commands to run. No preamble before the first numbered "
+            "step. End the reply with exactly one line starting "
+            "'Riskiest assumption:' stating the single riskiest assumption "
+            "the plan makes."
+        )
+        return self._run(prompt, label="plan", **ov)
+
     def search(self, goal: str, **ov) -> str:
         """Search the working directory and report where/what matches.
 
@@ -1059,6 +1082,127 @@ class Ranger:
                           "last_gate": last_gate})) from None
         return {"achieved": False, "iterations": len(steps),
                 "steps": steps, "report": report, "last_gate": last_gate}
+
+    def attempt(
+        self,
+        goal: str,
+        gate_cmd: str | None = None,
+        condition: str | None = None,
+        **ov,
+    ) -> dict:
+        """The single-shot honest sibling of until(): ONE do(), one verdict.
+
+        Runs `do(goal)` exactly once, then decides passed/not via the
+        same mechanical gate as until() — `gate_cmd` (shell command,
+        exit code decides), else `condition` (agent-verified YES/NO),
+        else `check("the goal is fully achieved: {goal}")`.
+
+        Like until(), the gate is evaluated BEFORE any agent work: an
+        already-green gate returns
+        `{"passed": True, "already_green": True, "goal": goal,
+        "report": "", "last_gate": {...}}` and runs NO agent work —
+        "it was green all along" can never masquerade as "the agent
+        made it green".
+
+        The normal return carries `last_gate: {"kind", "ok", "output"}`
+        — the mechanical verdict's own evidence, so a red outcome is a
+        diagnosis, not a dead end.
+
+            agent.attempt("add __repr__ to Parser",
+                          gate_cmd="python -m pytest -q tests/test_parser.py")
+        """
+        # -- gate sanity pre-check: vacuous-green detection -------------- #
+        if gate_cmd is not None:
+            self._gate_last = None
+            pre_ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
+            pre_ev = self._gate_last
+            pre_kind = "gate_cmd"
+        elif condition is not None:
+            pre_ok = self.check(condition, **ov)
+            pre_ev = None
+            pre_kind = "condition"
+        else:
+            pre_ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+            pre_ev = None
+            pre_kind = "check"
+        if pre_ok:
+            _LOG.info("attempt pre-check · gate(%s) already green — no work needed",
+                      pre_kind)
+            return {"passed": True, "already_green": True, "goal": goal,
+                    "report": "",
+                    "last_gate": {"kind": pre_kind, "ok": True,
+                                  "output": pre_ev[1] if pre_ev else ""}}
+        report = self.do(goal, **ov)
+        if gate_cmd is not None:
+            self._gate_last = None
+            ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
+            gate_out = self._gate_last[1] if self._gate_last else ""
+            gate_kind = "gate_cmd"
+        elif condition is not None:
+            ok = self.check(condition, **ov)
+            gate_out = ""
+            gate_kind = "condition"
+        else:
+            ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+            gate_out = ""
+            gate_kind = "check"
+        last_gate = {"kind": gate_kind, "ok": ok, "output": gate_out}
+        _LOG.info("attempt · gate(%s) → %s", gate_kind,
+                  "passed" if ok else "not passed")
+        return {"passed": ok, "already_green": False, "goal": goal,
+                "report": report, "last_gate": last_gate}
+
+    def verify_claims(self, topic: str, max_claims: int = 5, **ov) -> list:
+        """Extract verifiable claims about a topic, then verify each.
+
+        Deep-research reasoning command in two phases:
+
+        1. ONE ask() extracts up to ``max_claims`` verifiable claims about
+           ``topic`` — the prompt contract demands one claim per line,
+           each prefixed ``CLAIM:``, each checkable by reading code or
+           running commands, no commentary.
+        2. EVERY parsed claim is then verified mechanically with a fresh
+           check() call. check() is history- and session-free by
+           contract, so each verdict is an independent fact.
+
+        Each result dict is ``{"claim": str, "verdict": "PASS"|"FAIL"|
+        "UNCERTAIN", "ok": True|False|None}``. A check() that raises
+        RangerError (unparseable/contradictory answer) becomes verdict
+        "UNCERTAIN", ``ok=None`` — never a guess. If the extraction
+        yields no CLAIM: lines, RangerError is raised.
+
+            agent.verify_claims("the retry logic in _run()")
+        """
+        extraction = self.ask(
+            f"Topic: {topic}\n"
+            "List the most important factual claims about this topic in "
+            "the current directory. Contract: one claim per line, each "
+            "line prefixed with exactly 'CLAIM: '. Every claim must be "
+            "objectively verifiable by reading code or running commands "
+            "in this directory — no opinions, no speculation. At most "
+            f"{max_claims} claims. No commentary, no preamble, no "
+            "numbered list — only CLAIM: lines.",
+            **ov,
+        )
+        claims = [line.strip()[len("CLAIM:"):].strip()
+                  for line in extraction.strip().splitlines()
+                  if line.strip().startswith("CLAIM:")]
+        claims = claims[:max(0, max_claims)]
+        if not claims:
+            raise RangerError(
+                "verify_claims() parsed no CLAIM: lines from:\n"
+                + extraction[:300]
+            )
+        results = []
+        for claim in claims:
+            try:
+                ok = self.check(claim, **ov)
+                verdict = "PASS" if ok else "FAIL"
+            except RangerError:
+                ok, verdict = None, "UNCERTAIN"
+            results.append({"claim": claim, "verdict": verdict, "ok": ok})
+            _LOG.info("verify_claims · %s: %s", verdict, claim[:80])
+        return results
 
     # ------------------------------------------------------------------ #
     # multi-agent interactions

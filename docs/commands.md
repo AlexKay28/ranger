@@ -40,7 +40,7 @@ runs recall the bounded summary instead of the full transcript.
 Wipe recorded context; returns what was cleared.
 
 All commands auto-record their exchange into `agent.context` (OpenAI message
-format); dialogue commands (`ask`, `do`, `write`, `context_*`) also recall
+format); dialogue commands (`ask`, `do`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`,
 `search`, `summarize`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
@@ -63,7 +63,7 @@ configured copy.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
   `wall_s`, `model_s`, `parts`, `chars`, `session`.
 
-## ✅ Shipped — core commands (8)
+## ✅ Shipped — core commands (11)
 
 ### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
@@ -105,6 +105,16 @@ commands) like a human with a shell, return a report of what changed.
 agent.do("rename all *.txt in data/ to *.md")
 ```
 
+### `plan(goal) -> str`
+Think without touching. Produces a numbered implementation plan for a goal —
+reading and analysis only, no filesystem changes. Each step references
+concrete files and commands, and the reply ends with the single riskiest
+assumption. A dialogue command: the exchange is recorded into `agent.context`.
+
+```python
+agent.plan("migrate the config loader to TOML")
+```
+
 ### `search(goal) -> str`
 Read-only codebase search. Returns a `file:line` multiline report. Never edits.
 
@@ -120,6 +130,33 @@ reads) and answer with YES/NO as the first word; unparseable answers raise
 ### `gate(command) -> bool`
 Fully mechanical sibling of `check` — no model at all: a shell command whose
 exit code decides. `agent.gate("python -m pytest -q")`.
+
+### `attempt(goal, gate_cmd=None, condition=None) -> dict`
+The single-shot honest sibling of `until`: ONE `do()` of the goal, then a
+mechanical verdict — `gate_cmd` (pure exit code), else `condition` (agent
+YES/NO), else `check("the goal is fully achieved: {goal}")`. Like `until`,
+the gate is evaluated **before** any work: an already-green gate returns
+`passed: True, already_green: True` with zero agent runs. Returns
+`{"passed", "already_green", "goal", "report", "last_gate"}` — `last_gate`
+carries the gate's own evidence, so a red outcome is a diagnosis.
+
+```python
+agent.attempt("add __repr__ to Parser",
+              gate_cmd="python -m pytest -q tests/test_parser.py")
+```
+
+### `verify_claims(topic, max_claims=5) -> list[dict]`
+Deep-research reasoning command: one `ask()` extracts up to `max_claims`
+verifiable claims about the topic (one per line, each prefixed `CLAIM:`),
+then EVERY claim is verified mechanically with a fresh, memory-free
+`check()`. Returns `[{"claim", "verdict": "PASS"|"FAIL"|"UNCERTAIN",
+"ok": True|False|None}]` — a `check()` that raises `RangerError` becomes
+`UNCERTAIN`, never a guess. No parseable `CLAIM:` lines raises
+`RangerError`.
+
+```python
+agent.verify_claims("the retry logic in ranger's _run()")
+```
 
 ## ✅ Shipped — multi-agent interactions (5)
 
@@ -144,10 +181,7 @@ Adversarial attack on another agent's claim or last answer.
 ### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` *(module-level)*
 Symmetric exchange, optionally refereed by a third agent.
 
-## 🔜 Next batch (planned, same pattern) (5)
-
-### `plan(goal) -> str`
-Think without touching. Produces a step-by-step plan, no filesystem changes.
+## 🔜 Next batch (planned, same pattern) (4)
 
 ### `edit(file, instruction) -> str`
 Targeted fine-grained change to one file only (vs. `do`, which is free-roaming).
@@ -198,7 +232,7 @@ agent.until("parser.py: implement the TODO, all tests green",
             gate_cmd="python -m pytest -q")
 ```
 
-Shipped surface today: **13 commands** (8 core + 5 multi-agent) plus the
+Shipped surface today: **16 commands** (11 core + 5 multi-agent) plus the
 context/memory trio (`context_summarize`/`context_compact`/`context_clear`)
 and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The 🌱 tier
 that remains (fix/transform/commit) composes on top of it.

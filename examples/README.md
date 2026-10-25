@@ -18,9 +18,9 @@ effects. All folders except `dummy/` need an authenticated harness CLI
 | | `growth_loop.py` | Persona wish -> one goal -> acceptance gate -> log | ~5/cycle |
 | [`monitoring/`](monitoring/) | `project_health.py` | Read-only test status, actionable risks, telemetry | 1 + gate |
 | | `controls.py` | Gates, checks, bounded loops, stats, modes, skills, context | ~6 |
-| [`agent-reasoning/`](agent-reasoning/) | `research_and_plan.py` | Evidence-gathering agent scripts an AI writes for one task: research, red-teamed plan | ~5 |
-| | `verify_claims.py` | Deep-research pass: extract claims, verify each mechanically, honest exit code | 1 + k checks |
-| | `micro_task.py` | Micro-task resolver with the honest protocol: pre-flight, compound gate, tri-state report | 1-7 |
+| [`agent-reasoning/`](agent-reasoning/) | `research_and_plan.py` | Evidence-gathering agent scripts an AI writes for one task: research (search), plan(), red-teamed by second_opinion+challenge | ~5 |
+| | `verify_claims.py` | Deep-research pass thin-wrapping agent.verify_claims(): verdict table, honest exit code | 1 + k checks |
+| | `micro_task.py` | Micro-task resolver with the honest protocol: pre-flight, compound gate, tri-state report; `--attempt` switches until() to single-shot attempt() | 1-7 (attempt mode: 1-3) |
 | [`multiagent/`](multiagent/) | `multi_agent.py` | Second opinion, review, refinement, challenge, debate | ~10 |
 | [`backends/`](backends/) | `backends.py` | Same API over opencode/codex; backend registration | 1 |
 | [`dummy/`](dummy/) | `mechanical_gates.py` | Deterministic `gate()` demo in a temporary project | **0** |

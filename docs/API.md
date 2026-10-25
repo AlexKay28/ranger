@@ -192,6 +192,15 @@ Free-roaming filesystem work: the agent may create/edit/delete files and
 run shell commands in its cwd, then reports what it did, which files
 changed, and what failed. This is "run it like from the CLI".
 
+### `plan(goal, **ov) -> str`
+
+Reasoning without mutation: the agent produces a numbered implementation
+plan for the goal after reading and analyzing the working directory — the
+prompt contract forbids any file modification. Every step must reference
+concrete files and commands, and the reply ends with the single riskiest
+assumption. A dialogue command: the exchange is recorded into
+`agent.context` and recalled in later runs.
+
 ### `search(goal, **ov) -> str`
 
 Read-only codebase search (grep/glob over the working directory). Returns a
@@ -266,6 +275,87 @@ or log without re-running the command yourself.
 
 There is no sympathy iteration: an agent claiming "almost done" cannot buy a
 fifth round — only the gate can.
+
+### `attempt(goal, gate_cmd=None, condition=None, **ov) -> dict`
+
+The single-shot honest sibling of `until()`: ONE `do(goal)`, then a mechanical
+verdict — `gate_cmd` (pure exit-code gate) if given, else `condition`
+(agent-verified YES/NO), else `check("the goal is fully achieved: {goal}")`.
+No loop, no retries, no sympathy.
+
+**Vacuous-green pre-check.** Identical to `until()`: the gate is evaluated
+*before* any agent work. A gate that is already green returns immediately and
+runs NO agent work:
+
+```python
+{
+  "passed": True,
+  "already_green": True,   # the goal was already satisfied — no agent work
+  "goal": goal,            # happened and none is claimed
+  "report": "",
+  "last_gate": {"kind": "gate_cmd", "ok": True, "output": "..."},
+}
+```
+
+Normal returns:
+
+```python
+{
+  "passed": bool,          # the mechanical verdict — never the agent's opinion
+  "already_green": False,
+  "goal": str,
+  "report": str,           # the agent's do() report (narration, not a verdict)
+  "last_gate": {           # the mechanical verdict's own evidence
+    "kind": "gate_cmd" | "condition" | "check",
+    "ok": bool,
+    "output": str,         # gate_cmd output tail (clipped); "" for agent verdicts
+  },
+}
+```
+
+Use it when a goal deserves one focused attempt rather than a bounded loop —
+the caller keeps the mechanical verdict and its evidence either way.
+
+```python
+result = agent.attempt("add a regression test for empty input",
+                       gate_cmd="python -m pytest -q tests/test_parser.py -k empty")
+if not result["passed"]:
+    print(result["last_gate"]["output"])   # the diagnosis, not the prose
+```
+
+### `verify_claims(topic, max_claims=5, **ov) -> list[dict]`
+
+Deep-research reasoning command. Two phases, total honesty:
+
+1. **Extraction** — ONE `ask()` pulls up to `max_claims` factual claims
+   about `topic` in the working directory. The prompt contract demands
+   one claim per line, each prefixed `CLAIM:`, each verifiable by reading
+   code or running commands — no opinions or commentary. If no `CLAIM:`
+   lines come back, `RangerError` is raised.
+2. **Verification** — every parsed claim is verified mechanically with a
+   fresh `check()` call. `check` is history- and session-free by
+   contract, so each verdict is an independent fact, not colored by the
+   extraction dialogue.
+
+Returns one dict per claim:
+
+```python
+[
+  {"claim": "retries use exponential backoff of base 2",
+   "verdict": "PASS" | "FAIL" | "UNCERTAIN",
+   "ok": True | False | None},
+]
+```
+
+A `check()` that raises `RangerError` (unparseable or contradictory
+answer) becomes `"UNCERTAIN"` with `ok=None` — verify_claims() never
+guesses.
+
+```python
+results = agent.verify_claims("the retry logic in ranger's _run()")
+for r in results:
+    print(r["verdict"], r["claim"])
+```
 
 ---
 

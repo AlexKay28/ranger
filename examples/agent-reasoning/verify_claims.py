@@ -2,10 +2,11 @@
 """Temporal claim verification — a deep-research pass an agent runs to
 ground its own beliefs before it reports anything.
 
-The pattern: extract verifiable claims about one topic, then verify EVERY
-claim mechanically against the repository. check() is memory-free, so each
-verdict is about the code, never about the conversation; an unparseable
-or uncertain answer raises RangerError instead of guessing.
+The pattern is now one shipped command: verify_claims() extracts
+verifiable claims about one topic, then verifies EVERY claim mechanically
+against the repository. Each check() is memory-free, so each verdict is
+about the code, never about the conversation; an unparseable or uncertain
+answer becomes UNCERTAIN instead of a guess.
 
     python examples/agent-reasoning/verify_claims.py /path/to/project \
         "the config parser handles errors"
@@ -14,7 +15,6 @@ or uncertain answer raises RangerError instead of guessing.
 import sys
 
 import ranger
-from ranger import RangerError
 
 
 def main() -> None:
@@ -23,34 +23,19 @@ def main() -> None:
     project, topic = sys.argv[1], sys.argv[2]
 
     agent = ranger.Ranger(cwd=project, memory=False)
-    # ask() is the only dialogue command here; everything after runs
-    # fact-pure (paradigm law 4).
-    raw = agent.ask(
-        f"Topic: {topic}\n\n"
-        "List up to 5 claims about the CURRENT state of this repository "
-        "that can be verified by reading code or running commands. One "
-        "claim per line, 'CLAIM:' prefix, no commentary."
-    )
-    claims = [ln.split("CLAIM:", 1)[1].strip()
-              for ln in raw.splitlines() if "CLAIM:" in ln][:5]
-    if not claims:
-        sys.exit("no verifiable claims extracted — nothing to verify")
+    results = agent.verify_claims(topic)
 
-    passed, failed = [], []
-    for i, claim in enumerate(claims, 1):
-        try:
-            # each check is a fresh, history-independent verification
-            ok = agent.check(claim)
-        except RangerError as exc:
-            print(f"UNCERTAIN  claim {i}: {claim}\n           {exc}")
-            failed.append(claim)
-            continue
-        mark = "PASS    " if ok else "FAIL    "
-        print(f"{mark} claim {i}: {claim}")
-        (passed if ok else failed).append(claim)
+    passed = 0
+    for i, r in enumerate(results, 1):
+        mark = {"PASS": "PASS    ", "FAIL": "FAIL    "}.get(r["verdict"],
+                                                            "UNCERTAIN")
+        print(f"{mark} claim {i}: {r['claim']}")
+        if r["verdict"] == "PASS":
+            passed += 1
 
-    print(f"\nverified {len(passed)}/{len(claims)}")
-    if failed:
+    bad = [r for r in results if r["verdict"] in ("FAIL", "UNCERTAIN")]
+    print(f"\nverified {passed}/{len(results)}")
+    if bad:
         print("unverified claims — dig deeper before relying on them")
         sys.exit(1)
 
