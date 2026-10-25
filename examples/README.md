@@ -3,8 +3,8 @@
 Runnable applications over `ranger`, organized by the job you want to do.
 Install the package first (`pip install rangers`, or `pip install -e .[dev]`
 from a clone). Every script is main-guarded, so importing it has no side
-effects. All folders except `dummy/` need an authenticated opencode or codex
-CLI and make real agent calls.
+effects. All folders except `dummy/` need an authenticated harness CLI
+(opencode, codex, pi or openhands) and make real agent calls.
 
 | Folder | Example | Use case | Calls |
 |---|---|---|---:|
@@ -18,6 +18,9 @@ CLI and make real agent calls.
 | | `growth_loop.py` | Persona wish -> one goal -> acceptance gate -> log | ~5/cycle |
 | [`monitoring/`](monitoring/) | `project_health.py` | Read-only test status, actionable risks, telemetry | 1 + gate |
 | | `controls.py` | Gates, checks, bounded loops, stats, modes, skills, context | ~6 |
+| [`agent-reasoning/`](agent-reasoning/) | `research_and_plan.py` | Evidence-gathering agent scripts an AI writes for one task: research, red-teamed plan | ~5 |
+| | `verify_claims.py` | Deep-research pass: extract claims, verify each mechanically, honest exit code | 1 + k checks |
+| | `micro_task.py` | Micro-task resolver with the honest protocol: pre-flight, compound gate, tri-state report | 1-7 |
 | [`multiagent/`](multiagent/) | `multi_agent.py` | Second opinion, review, refinement, challenge, debate | ~10 |
 | [`backends/`](backends/) | `backends.py` | Same API over opencode/codex; backend registration | 1 |
 | [`dummy/`](dummy/) | `mechanical_gates.py` | Deterministic `gate()` demo in a temporary project | **0** |
@@ -36,6 +39,12 @@ python examples/code-work/fix_failing_tests.py /path/to/project "python -m pytes
 
 # read-only test status + three actionable risks
 python examples/monitoring/project_health.py /path/to/project "python -m pytest -q"
+
+# an AI agent's pre-work research: evidence -> red-teamed plan
+python examples/agent-reasoning/research_and_plan.py /path/to/project "fix the flaky upload test"
+
+# ground your beliefs: verify claims about a topic, mechanically
+python examples/agent-reasoning/verify_claims.py /path/to/project "the config parser handles errors"
 ```
 
 Examples deliberately use only shipped API — anything marked planned in
