@@ -158,6 +158,8 @@ import ranger
 agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")  # opencode (default)
 gpt   = ranger.Ranger(backend="codex")            # model from ~/.codex/config.toml
 gpt   = ranger.Ranger(backend="codex", model="gpt-5.1-codex")
+pi    = ranger.Ranger(backend="pi")              # minimal, token-frugal harness
+oh    = ranger.Ranger(backend="openhands")       # autonomous headless runs
 
 ranger.register_backend("mine", MyHarnessAdapter)  # your own — one small class
 ```

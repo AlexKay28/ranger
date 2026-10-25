@@ -1044,6 +1044,7 @@ def test_until_validates_max_iter():
 
 def test_registered_backends_listing():
     assert "codex" in ranger.backends() and "opencode" in ranger.backends()
+    assert "pi" in ranger.backends() and "openhands" in ranger.backends()
     assert ranger.backends() == sorted(ranger.backends())
 
 

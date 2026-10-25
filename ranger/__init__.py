@@ -306,8 +306,116 @@ class _CodexBackend(_Backend):
         return answer, info
 
 
+class _PiBackend(_Backend):
+    name = "pi"
+    install_hint = "install it from https://pi.dev (curl -fsSL https://pi.dev/install.sh | sh)"
+    supports_sessions = True
+    native_file_skills = True   # --skill takes files AND directories
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        cmd = ["pi", "--print"]
+        if o["model"]:
+            cmd += ["--model", o["model"]]
+        if o["session"]:
+            # opens the exact session id or creates it if absent
+            cmd += ["--session-id", o["session"]]
+        if o["title"]:
+            cmd += ["--name", o["title"]]
+        if o["thinking"]:
+            cmd += ["--thinking", "high"]
+        elif o["effort"] == "high":
+            cmd += ["--thinking", "high"]
+        elif o["effort"] == "low":
+            cmd += ["--thinking", "low"]
+        for f in skill_files:
+            cmd += ["--skill", str(f)]
+        # agent/mode/pi has no concept of either; pi has no permission
+        # system at all, so o["auto"] maps to nothing — never emit
+        # flags pi does not know (it rejects unknown short options).
+        if o.get("agent") or o.get("mode"):
+            raise self.unavailable(o.get("agent") or o.get("mode"))
+        cmd.append("--")        # prompt is data, never options
+        cmd.append(full_prompt)
+        return cmd, full_prompt
+
+    def parse_output(self, stdout, want_stats):
+        # --print writes the final assistant text to stdout; no
+        # structured telemetry without --mode json (deferred).
+        return stdout.strip(), None
+
+    def list_models(self, match):
+        try:
+            proc = subprocess.run(
+                ["pi", "--list-models"],
+                capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
+            )
+        except FileNotFoundError:
+            raise RangerHarnessError(
+                f"pi CLI not found on PATH — {self.install_hint}"
+            ) from None
+        except subprocess.TimeoutExpired:
+            raise RangerTimeout("pi --list-models timed out after 60s") from None
+        if proc.returncode != 0:
+            raise RangerHarnessError(
+                f"pi --list-models failed:\n{proc.stderr.strip()}"
+            )
+        ids = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        if match:
+            needle = match.lower()
+            ids = [i for i in ids if needle in i.lower()]
+        return ids
+
+
+class _OpenHandsBackend(_Backend):
+    name = "openhands"
+    install_hint = "install the OpenHands CLI from https://docs.openhands.dev"
+    supports_sessions = True
+    native_file_skills = False  # markdown skills are inlined into prompts
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        # headless has no approval flow and no agent/title/thinking/mode
+        # flags; the model is selected via LLM_MODEL env (never as a
+        # CLI flag) together with --override-with-envs.
+        for k in ("agent", "mode", "title", "thinking"):
+            if o.get(k):
+                raise self.unavailable(k)
+        if skill_files:
+            blocks = []
+            for f in skill_files:
+                blocks.append(
+                    f"### Attached skill file: {f}\n"
+                    + Path(f).read_text(encoding="utf-8")
+                )
+            full_prompt = (
+                "## Attached operating instructions (skill files)\n\n"
+                + "\n\n".join(blocks)
+                + "\n\n## Task\n"
+                + full_prompt
+            )
+        cmd = ["openhands", "--headless"]
+        if o["session"]:
+            cmd += ["--resume", o["session"]]
+        # model= never becomes a CLI flag: headless honors LLM_MODEL
+        # only via --override-with-envs, and user settings are never
+        # persisted. Fold it into the env overlay (computed after
+        # build_cmd, so mutating o here reaches the child process).
+        if o.get("model"):
+            o["env"] = {**(o.get("env") or {}), "LLM_MODEL": o["model"]}
+            cmd.append("--override-with-envs")
+        cmd += ["--task", full_prompt]
+        return cmd, full_prompt
+
+    def parse_output(self, stdout, want_stats):
+        # plain headless prints the agent transcript; the JSONL
+        # (--json) event schema is not stable enough to parse yet.
+        return stdout.strip(), None
+
+
 register_backend("opencode", _OpenCodeBackend)
 register_backend("codex", _CodexBackend)
+register_backend("pi", _PiBackend)
+register_backend("openhands", _OpenHandsBackend)
 
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
@@ -468,7 +576,8 @@ class Ranger:
         stats: request runs in JSON mode and record telemetry into
             `agent.last` (wall/model time, part count, answer size,
             opencode session id).
-        backend: which harness to drive — "opencode" (default) or "codex".
+        backend: which harness to drive — "opencode" (default), "codex",
+            "pi" or "openhands".
             The public API is identical; harness differences (CLI flags,
             sessions, stats schemas) are absorbed internally. See the
             Backends section of docs/API.md for the exact behavior map.
@@ -1427,7 +1536,10 @@ class Ranger:
                         proc = subprocess.run(
                             cmd,
                             cwd=self.cwd,
-                            env=self._child_env(opts.get("env")),
+                            # o, not opts: adapters may fold settings into
+                            # the env overlay inside build_cmd (e.g. the
+                            # openhands backend maps model= to LLM_MODEL)
+                            env=self._child_env(o.get("env")),
                             capture_output=True,
                             text=True,
                             encoding="utf-8",
