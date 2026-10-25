@@ -616,7 +616,9 @@ def test_until_exhausts_honestly():
          mock.patch.object(Ranger, "do", side_effect=lambda p, **kw: "nope"):
         outcome = agent.until("impossible goal", max_iter=2)
     assert outcome == {"achieved": False, "iterations": 2,
-                       "steps": ["step", "step"], "report": "nope"}
+                       "steps": ["step", "step"], "report": "nope",
+                       "last_gate": {"kind": "check", "ok": False,
+                                     "output": ""}}
 
 
 
@@ -1035,7 +1037,9 @@ def test_until_validates_max_iter():
         # as a fake exhausted failure
         res = agent.until("goal", max_iter=0, gate_cmd="true")
         assert res == {"achieved": True, "iterations": 0, "steps": [],
-                       "report": "", "already_green": True}
+                       "report": "", "already_green": True,
+                       "last_gate": {"kind": "gate_cmd", "ok": True,
+                                     "output": ""}}
 
 
 def test_registered_backends_listing():

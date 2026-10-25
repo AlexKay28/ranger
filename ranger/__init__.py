@@ -801,9 +801,21 @@ class Ranger:
         conditions in your loops. The command runs in its own process
         group: a timeout (returns False) or an interrupt (re-raises)
         kills the whole group — no orphaned pipeline keeps running.
+        The output tail of the last gate is kept in `self._gate_last`
+        (or None) for until()'s evidence dict.
 
             if agent.gate("python -m pytest -q"):
                 ...
+        """
+        ok, out = self._gate_ev(command, timeout)
+        self._gate_last = (ok, out)
+        return ok
+
+    def _gate_ev(self, command: str, timeout: float | None = None) -> tuple[bool, str]:
+        """gate() with evidence: returns (ok, clipped output tail).
+
+        The tail is stdout+stderr, clipped, so until() can report WHY
+        the gate stayed red — a boolean alone is not a diagnosis.
         """
         try:
             proc = subprocess.Popen(
@@ -825,15 +837,15 @@ class Ranger:
         except OSError as exc:
             raise RangerError(f"gate() could not run {command!r}: {exc}") from None
         try:
-            proc.communicate(
+            out, err = proc.communicate(
                 timeout=timeout if timeout is not None else self.timeout)
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
-            return False
+            return False, f"gate timed out after {timeout if timeout is not None else self.timeout}s"
         except KeyboardInterrupt:
             _kill_tree(proc)
             raise
-        return proc.returncode == 0
+        return proc.returncode == 0, _clip((out or "") + (err or ""), 400)
 
     def until(
         self,
@@ -860,6 +872,11 @@ class Ranger:
         one model run for condition) and is refunded whenever it saves a
         wasted iteration.
 
+        Every return also carries `last_gate`: `{"kind", "ok", "output"}`
+        — the mechanical verdict's own evidence (gate_cmd output tail,
+        or "" for agent-verified conditions), so a red outcome is a
+        diagnosis, not a dead end.
+
         Honesty rule 2 (unchanged): max_iter exhausted -> achieved=False,
         never a sympathy iteration because the agent says it's "almost
         done".
@@ -871,21 +888,28 @@ class Ranger:
             raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
         steps: list[str] = []
         report = ""
+        last_gate: dict = {}    # mechanical evidence of the final verdict
         # -- gate sanity pre-check: vacuous-green detection ------------ #
         if gate_cmd is not None:
+            self._gate_last = None
             pre_ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
+            pre_ev = self._gate_last
             pre_kind = "gate_cmd"
         elif condition is not None:
             pre_ok = self.check(condition, **ov)
+            pre_ev = None
             pre_kind = "condition"
         else:
             pre_ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+            pre_ev = None
             pre_kind = "check"
         if pre_ok:
             _LOG.info("until pre-check · gate(%s) already green — no work needed",
                       pre_kind)
             return {"achieved": True, "iterations": 0, "steps": [],
-                    "report": "", "already_green": True}
+                    "report": "", "already_green": True,
+                    "last_gate": {"kind": pre_kind, "ok": True,
+                                  "output": pre_ev[1] if pre_ev else ""}}
         try:
             for i in range(1, max_iter + 1):
                 step = self.ask(
@@ -899,27 +923,33 @@ class Ranger:
                 report = self.do(step, **ov)
                 steps.append(step)
                 if gate_cmd is not None:
+                    self._gate_last = None
                     ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
+                    gate_out = self._gate_last[1] if self._gate_last else ""
                     gate_kind = "gate_cmd"
                 elif condition is not None:
                     ok = self.check(condition, **ov)
+                    gate_out = ""
                     gate_kind = "condition"
                 else:
                     ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+                    gate_out = ""
                     gate_kind = "check"
+                last_gate = {"kind": gate_kind, "ok": ok, "output": gate_out}
                 _LOG.info("until iteration %d/%d · gate(%s) → %s",
                           i, max_iter, gate_kind, "achieved" if ok else "not achieved")
                 if ok:
                     return {"achieved": True, "iterations": i, "steps": steps,
-                            "report": report}
+                            "report": report, "last_gate": last_gate}
         except KeyboardInterrupt:
             # cancelled, not failed: nothing is claimed achieved, but the
             # progress already paid for survives in the exception message
             raise KeyboardInterrupt(_interrupt_payload(
                 "until", {"achieved": False, "iterations": len(steps),
-                          "steps": steps, "report": report})) from None
+                          "steps": steps, "report": report,
+                          "last_gate": last_gate})) from None
         return {"achieved": False, "iterations": len(steps),
-                "steps": steps, "report": report}
+                "steps": steps, "report": report, "last_gate": last_gate}
 
     # ------------------------------------------------------------------ #
     # multi-agent interactions

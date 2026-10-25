@@ -261,7 +261,9 @@ def test_until_gate_precedence_and_counting():
                    return_value=fake_popen(1)):   # gate never passes
         res = agent.until("goal", max_iter=2, gate_cmd="false")
     assert res == {"achieved": False, "iterations": 2,
-                   "steps": ["s1", "s2"], "report": "r"}
+                   "steps": ["s1", "s2"], "report": "r",
+                   "last_gate": {"kind": "gate_cmd", "ok": False,
+                                 "output": ""}}
 
 
 # ==================================================================== #

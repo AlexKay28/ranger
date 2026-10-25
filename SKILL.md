@@ -120,6 +120,37 @@ frozen grammars and raise `RangerError` on malformed or conflicting replies.
 - Run `python -m pytest -q`; for releases also run `python -m build` and
   `python -m twine check --strict dist/*`. See [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
+## Tips — hard-won, from real agent-driven projects
+
+These come from ranger resolving its own sprint (issue #1, three runs,
+two false-greens caught). Follow them when a ranger loop does real work.
+
+- **The caller owns the verdict.** An agent's `do()` report is narration:
+  it can be true, stale, or empty — and string-identical in all three cases.
+  Never branch on the report; branch on a mechanical gate.
+- **Compound your gates.** `gate_cmd="python -m pytest -q"` is vacuously
+  green if no failing test demands the feature. Demand the feature:
+  `pytest -q && pytest -q tests/test_X.py -k feature && python -c "assert …"`
+  (`pytest -k` exits 5 when nothing matches — the gate stays red until the
+  feature's own tests exist).
+- **Read `last_gate`, not `report`, on failure.** `until()`'s result carries
+  `last_gate: {"kind", "ok", "output"}` — the gate's clipped output is the
+  diagnosis; the agent's prose about its own work is not.
+- **One task, one context.** `context` recall turns consecutive tasks into
+  one blurry dialogue: task N+1's planning answer can be piped straight from
+  task N's completed report ("already done"), wasting iterations on
+  self-doubt. Isolate: `agent.ask(..., memory=False)`, a fresh `Ranger()`,
+  or (0.8) snapshot/restore per task.
+- **Verify even PASSes.** After a loop claims `achieved`, re-check the
+  feature mechanically yourself. Trust, then verify — in that order only
+  when the stampede of a deadline demands it; ideally verify, then trust.
+- **Budget `retries` for blips, not config.** Auth/token failures are
+  transport-class too: `retries` will re-attempt a permanently failing
+  model and burn tokens. Fix expired credentials; don't retry them.
+- **Don't bake model ids into committed scripts.** They expire, leak
+  internals, and rot — pass the id per run (argv/env). (Tested by this
+  very repo's hygiene gate.)
+
 ## Execution-bug feedback for maintainers
 
 If a user asks you to use ranger and you encounter a reproducible library or

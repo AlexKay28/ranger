@@ -249,12 +249,20 @@ Normal returns:
 
 ```python
 {
-  "achieved": bool,     # False if max_iter was exhausted — honestly
-  "iterations": int,    # 1..max_iter
-  "steps": [str, ...],  # the next-step lines the agent chose
-  "report": str,        # the agent's last do() report
+  "achieved": bool,       # False if max_iter was exhausted — honestly
+  "iterations": int,      # 1..max_iter
+  "steps": [str, ...],    # the next-step lines the agent chose
+  "report": str,          # the agent's last do() report
+  "last_gate": {          # the mechanical verdict's own evidence
+    "kind": "gate_cmd" | "condition" | "check",
+    "ok": bool,
+    "output": str,        # gate_cmd output tail (clipped); "" for agent verdicts
+  },
 }
 ```
+
+A red `last_gate.output` turns a failure into a diagnosis you can print
+or log without re-running the command yourself.
 
 There is no sympathy iteration: an agent claiming "almost done" cannot buy a
 fifth round — only the gate can.

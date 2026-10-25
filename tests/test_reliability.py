@@ -26,6 +26,16 @@ def fake_run(stdout: str, stderr: str = "", returncode: int = 0):
     )
 
 
+def fake_popen(returncode=0, pid=4321, communicate=None):
+    """Mock Popen for gate() (its own subprocess seam)."""
+    p = mock.Mock()
+    p.pid = pid
+    p.returncode = returncode
+    p.communicate = (mock.Mock(side_effect=communicate) if communicate
+                     else mock.Mock(return_value=("", "")))
+    return p
+
+
 class TestTaxonomy:
     def test_subclass_relations(self):
         assert issubclass(RangerError, RuntimeError)
@@ -432,3 +442,47 @@ class TestEnvLayering:
         agent = Ranger(cwd=".", env={"FOO": "1"})
         assert agent._child_env()["FOO"] == "1"
         assert agent._child_env(None)["FOO"] == "1"  # None never clears
+
+
+class TestGateEvidence:
+    """until() must carry WHY the gate said what it said.
+
+    Run 2 of the issue-#1 experiment: callers had to re-run the gate
+    themselves to see a red outcome's stderr. last_gate fixes that:
+    {"kind", "ok", "output"} — the mechanical verdict's own evidence.
+    """
+
+    def test_red_gate_until_carries_output_tail(self):
+        agent = Ranger(cwd=".")
+        popens = iter([
+            fake_popen(1, communicate=[("", "AssertionError: missing __repr__")]),
+            fake_popen(1, communicate=[("", "AssertionError: missing __repr__")]),
+            fake_popen(1, communicate=[("", "AssertionError: missing __repr__")]),
+        ])
+        outs = [fake_run("step 1"), fake_run("r1"),
+                fake_run("step 2"), fake_run("r2")]
+        with mock.patch("ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)), \
+                mock.patch("ranger.subprocess.run", side_effect=outs):
+            res = agent.until("add __repr__", gate_cmd="pytest", max_iter=2)
+        assert res["achieved"] is False
+        lg = res["last_gate"]
+        assert lg["kind"] == "gate_cmd" and lg["ok"] is False
+        assert "missing __repr__" in lg["output"]
+
+    def test_precheck_green_carries_evidence_too(self):
+        agent = Ranger(cwd=".")
+        popens = iter([fake_popen(0, communicate=[("all good", "")])])
+        with mock.patch("ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)), \
+                mock.patch("ranger.subprocess.run") as run_mock:
+            res = agent.until("goal", gate_cmd="pytest", max_iter=2)
+        assert res["already_green"] is True
+        assert res["last_gate"] == {"kind": "gate_cmd", "ok": True,
+                                    "output": "all good"}
+        run_mock.assert_not_called()
+
+    def test_gate_records_last_evidence_readonly(self):
+        agent = Ranger(cwd=".")
+        popens = iter([fake_popen(0, communicate=[("hello evidence", "")])])
+        with mock.patch("ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)):
+            assert agent.gate("true") is True
+        assert agent._gate_last == (True, "hello evidence")
