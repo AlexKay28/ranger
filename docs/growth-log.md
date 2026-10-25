@@ -99,4 +99,22 @@ documentation + tests). This is the loop's only cross-cycle memory.
   name, badge presence).
 - **Verification:** full local suite green (134 + 4 new gates) before push.
 
+## Cycle 5 — sprint 0.7 resolved by ranger itself + four backends (2026-10-25)
+
+- **What:** `rangers 0.7.0` — reliability core (exception taxonomy,
+  transport-only retries, stdlib logging, env overlay, __repr__),
+  the vacuous-green pre-check and gate-evidence (`last_gate`) in
+  `until()`, SKILL.md tips, and two new harness backends: `pi`
+  and `openhands` (issues #1, #2). Suite: 196 mocked tests, green
+  in under 2s.
+- **How:** issues #1/#2 resolved by an agent-driven resolver script
+  (untracked by design) under the hardened protocol — compound
+  per-task gates, independent post-loop verification, honest
+  tri-state reporting. Two false-greens were caught across three
+  runs; both lessons became library features. One post-merge bug
+  (per-call env replacing instance env) was caught by human
+  spot-check after agent-verified PASS.
+- **Release:** version bumped to 0.7.0, built, twine-checked,
+  smoke-tested, uploaded and verified from pypi.org/simple.
+
 

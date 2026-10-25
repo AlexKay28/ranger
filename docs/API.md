@@ -4,7 +4,7 @@ Complete reference for everything `ranger` ships. Every public name on this
 page is enforced by `tests/test_docs.py` — if a method or setting is added
 to the code but missing here, the suite fails.
 
-Version 0.6.1 · Module: `ranger` · Single class: `ranger.Ranger`
+Version 0.7.0 · Module: `ranger` · Single class: `ranger.Ranger`
 
 ---
 
