@@ -244,7 +244,9 @@ def test_until_gate_precedence_and_counting():
         calls.append(cmd)
         return fake_run("do a step" if len(calls) == 1 else "done report")
     with mock.patch("ranger.subprocess.run", side_effect=fake), \
-         mock.patch("ranger.subprocess.Popen", return_value=fake_popen(0)):
+         mock.patch("ranger.subprocess.Popen",
+                    side_effect=[fake_popen(1),   # vacuous pre-check: red
+                                 fake_popen(0)]):  # iteration-1 gate: green
         res = agent.until("goal", max_iter=3, gate_cmd="test -f x")
     # gate_cmd path: one ask (step) + one do per iteration; gate is shell
     assert res["achieved"] is True      # mocked gate exit 0

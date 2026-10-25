@@ -596,7 +596,9 @@ def test_stats_off_by_default():
 
 def test_until_loop_untils_gate_passes():
     agent = Ranger()
-    results = iter([False, False, True])
+    # first False = the vacuous-gate pre-check (red = real work needed),
+    # then two red gates, then green on the third work iteration
+    results = iter([False, False, False, True])
     with mock.patch.object(Ranger, "gate", side_effect=lambda cmd, **kw: next(results)), \
          mock.patch.object(Ranger, "ask", side_effect=lambda p, **kw: "a step"), \
          mock.patch.object(Ranger, "do", side_effect=lambda p, **kw: f"did {p}"):
@@ -1028,10 +1030,12 @@ def test_until_validates_max_iter():
         for bad in (-1, "three", 2.5):
             with pytest.raises(ValueError):
                 agent.until("goal", max_iter=bad, gate_cmd="true")
-        # zero is a valid, immediately-honest no-iteration result
+        # zero is a valid, immediately-honest no-iteration result; with a
+        # green gate the vacuous case is reported as already_green, not
+        # as a fake exhausted failure
         res = agent.until("goal", max_iter=0, gate_cmd="true")
-        assert res == {"achieved": False, "iterations": 0, "steps": [],
-                       "report": ""}
+        assert res == {"achieved": True, "iterations": 0, "steps": [],
+                       "report": "", "already_green": True}
 
 
 def test_registered_backends_listing():

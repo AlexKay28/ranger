@@ -38,7 +38,9 @@ pointed the agent.
 | Name | Kind | Meaning |
 |---|---|---|
 | `ranger.Ranger` | class | The agent class (below). |
-| `ranger.RangerError` | exception | Subclass of `RuntimeError`; raised for every harness failure. |
+| `ranger.RangerError` | exception | Subclass of `RuntimeError`; the base of ranger's exception taxonomy. |
+| `ranger.RangerTimeout` | exception | Subclass of `RangerError`; a run exceeded its `timeout`. |
+| `ranger.RangerHarnessError` | exception | Subclass of `RangerError`; the harness CLI is missing or exits with an unexpected failure. |
 | `ranger.DEFAULT_MODEL` | str | Package-default model ID (opencode backend). |
 | `ranger.backends()` | function | Sorted names of all registered harness backends. |
 | `ranger.register_backend(name, cls)` | function | Register a custom harness adapter — see Backends below. |
@@ -68,6 +70,7 @@ ranger.Ranger(
     skills=None,           # allow-list: md files/dirs via --file, prose grants
     effort="medium",       # "low" | "medium" | "high" depth directive
     stats=False,           # JSON-mode runs; telemetry in agent.last
+    retries=0,             # transport-failure re-attempts per run
 )
 ```
 
@@ -91,6 +94,7 @@ ranger.Ranger(
 | `effort` | `"medium"` | "low"/"medium"/"high" depth directive |
 | `stats` | `False` | JSON-mode runs + telemetry in `agent.last` |
 | `backend` | `"opencode"` | which harness to drive — see Backends below |
+| `retries` | `0` | re-attempts a failed run, transport failures only (`RangerTimeout`, `RangerHarnessError`); prompt-contract failures (`RangerError`) never retry |
 
 ### Per-call overrides
 
@@ -192,7 +196,28 @@ the goal → `do` executes it → mechanical verdict. The verdict is `gate_cmd`
 (pure exit-code gate) if given, else `condition` (agent-verified YES/NO),
 else `check("the goal is fully achieved: {goal}")`.
 
-Returns:
+**Vacuous-green pre-check.** The gate is evaluated *before* any agent work.
+A gate that is green before iteration 1 returns immediately:
+
+```python
+{
+  "achieved": True,
+  "iterations": 0,
+  "steps": [],
+  "report": "",
+  "already_green": True,   # the goal was already satisfied — no agent
+}                         # work happened and none is claimed
+```
+
+This is the honesty rule born of a real false-green: a `gate_cmd` that
+passes vacuously (e.g. `pytest -q` when no failing test demands the
+feature) must not masquerade as an agent achievement. The pre-check costs
+one gate evaluation and is refunded whenever it saves a wasted iteration.
+Compound your gates when precision matters — e.g.
+`python -m pytest -q && python -m pytest -q tests/test_x.py -k feature`
+goes red until the feature's own tests exist.
+
+Normal returns:
 
 ```python
 {
@@ -425,6 +450,26 @@ failure. Output is **stderr-only**: returned strings and your stdout stay
 byte-clean. Auto-off in pipes/tests; `NO_COLOR` strips colors; `pretty=False`
 silences.
 
+## Logging
+
+ranger records its work on the stdlib logger `logging.getLogger("ranger")`:
+
+- **One DEBUG record per run start and one per run finish**, carrying the
+  model, the command label and the wall-clock duration.
+- **One INFO one-liner per iteration** inside `until()` (iteration number
+  and the mechanical gate outcome) and `refine_with()` (iteration number
+  and the reviewer verdict).
+
+ranger configures **no handlers** — records go wherever your application
+(or stdlib's last-resort) sends them, and the pretty stderr spinner UI is
+completely separate and unchanged. Observe runs with:
+
+```python
+import logging
+logging.getLogger("ranger").addHandler(logging.StreamHandler())
+logging.getLogger("ranger").setLevel(logging.DEBUG)
+```
+
 ## Timeouts & cancellation — what is actually guaranteed
 
 When a run exceeds `timeout`, ranger kills the harness CLI process and
@@ -463,13 +508,23 @@ strays.
 
 ## Errors
 
+ranger's exceptions form a small taxonomy rooted at `RangerError`
+(itself a `RuntimeError`), so existing `except RangerError` handlers
+keep working:
+
+- `RangerTimeout` — a run exceeded its `timeout`.
+- `RangerHarnessError` — the harness CLI is missing (not on PATH),
+  could not be spawned, or exited with an unexpected failure.
+- plain `RangerError` — parse/prompt-contract failures (e.g. an
+  unparseable `check()` verdict) and configuration mistakes.
+
 | Situation | Raised |
 |---|---|
-| harness CLI not on PATH | `RangerError("<backend> CLI not found…")` |
+| harness CLI not on PATH | `RangerHarnessError("<backend> CLI not found…")` |
 | agent `cwd` does not exist | `RangerError` |
-| harness process could not be spawned (permissions, ENOEXEC, ...) | `RangerError` with cause |
-| run exits non-zero (bad model, harness error) | `RangerError` with stderr |
-| run exceeds `timeout` | `RangerError("… timed out …")` |
+| harness process could not be spawned (permissions, ENOEXEC, ...) | `RangerHarnessError` with cause |
+| run exits non-zero (bad model, harness error) | `RangerHarnessError` with stderr |
+| run exceeds `timeout` | `RangerTimeout("… timed out …")` |
 | `write()` target is missing **or not a regular file** after the run | `RangerError` |
 | `check()` unparseable, unconfident or contradictory verdict | `RangerError` |
 | unknown per-call keyword | `TypeError` |

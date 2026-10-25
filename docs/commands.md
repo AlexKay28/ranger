@@ -69,7 +69,10 @@ configured copy.
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
 mechanical verdict — `gate_cmd` (pure exit code) or `condition` (agent YES/NO).
 Returns `{"achieved", "iterations", "steps", "report"}`; exhausted budget means
-`achieved: False`, honestly, never a sympathy iteration.
+`achieved: False`, honestly, never a sympathy iteration. The gate is also
+evaluated **before** any work: a green-up-front gate returns
+`already_green: True` with zero iterations — a vacuous gate can never
+masquerade as an agent achievement.
 
 ### `ask(prompt) -> str`
 Raw prompt, raw answer. The escape hatch every other method is built on.

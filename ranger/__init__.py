@@ -32,6 +32,7 @@ Discover available models and configure runs:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import signal
@@ -42,16 +43,22 @@ import time
 import uuid
 from pathlib import Path
 
-__all__ = ["Ranger", "RangerError", "DEFAULT_MODEL", "register_backend",
-           "backends", "debate"]
+__all__ = ["Ranger", "RangerError", "RangerTimeout", "RangerHarnessError",
+           "DEFAULT_MODEL", "register_backend", "backends", "debate"]
 __version__ = "0.6.1"
 
 DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
+
+# Module-level logger. ranger configures NO handlers: stdlib logging's
+# last-resort stderr handler (or the host app's own config) decides where
+# records go. The pretty stderr spinner UI is separate and untouched.
+_LOG = logging.getLogger("ranger")
 
 # Settings every run accepts as a per-call override.
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
     "pretty", "memory", "skills", "effort", "stats", "backend", "memory_budget",
+    "retries",
 )
 
 # ====================================================================== #
@@ -191,13 +198,13 @@ class _OpenCodeBackend(_Backend):
                 encoding="utf-8", errors="replace",
             )
         except FileNotFoundError:
-            raise RangerError(
+            raise RangerHarnessError(
                 f"opencode CLI not found on PATH — {self.install_hint}"
             ) from None
         except subprocess.TimeoutExpired:
-            raise RangerError("opencode models timed out after 60s") from None
+            raise RangerTimeout("opencode models timed out after 60s") from None
         if proc.returncode != 0:
-            raise RangerError(f"opencode models failed:\n{proc.stderr.strip()}")
+            raise RangerHarnessError(f"opencode models failed:\n{proc.stderr.strip()}")
         ids = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
         if match:
             needle = match.lower()
@@ -313,6 +320,23 @@ _MEMORY_BUDGET = 20000
 
 class RangerError(RuntimeError):
     """Raised when the underlying opencode run fails."""
+
+
+class RangerTimeout(RangerError):
+    """Raised when a run exceeds its `timeout`.
+
+    A subclass of `RangerError`, so existing `except RangerError` code
+    keeps working unchanged.
+    """
+
+
+class RangerHarnessError(RangerError):
+    """Raised when the harness CLI is missing or fails unexpectedly.
+
+    Covers a CLI that is not on PATH, cannot be spawned, or exits with
+    an unexpected failure. Subclass of `RangerError`, so existing
+    `except RangerError` code keeps working unchanged.
+    """
 
 
 # ---------------------------------------------------------------------- #
@@ -448,6 +472,12 @@ class Ranger:
             The public API is identical; harness differences (CLI flags,
             sessions, stats schemas) are absorbed internally. See the
             Backends section of docs/API.md for the exact behavior map.
+        retries: how many times to re-attempt a failed run when the
+            failure is transport-class (`RangerTimeout` — the run
+            exceeded its timeout, or `RangerHarnessError` — the CLI is
+            missing or exited unexpectedly). Prompt-contract failures
+            (plain `RangerError`) never retry and raise immediately.
+            Default 0.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -471,6 +501,7 @@ class Ranger:
         effort: str = "medium",
         stats: bool = False,
         backend: str = "opencode",
+        retries: int = 0,
     ) -> None:
         if effort not in ("low", "medium", "high"):
             raise ValueError(f"effort must be low|medium|high, got {effort!r}")
@@ -502,6 +533,7 @@ class Ranger:
         self.skills = skills
         self.effort = effort
         self.stats = stats
+        self.retries = retries
         self.last: dict = {}
         #: OpenAI-format conversation state: {"role", "content"} dicts.
         self.context: list[dict] = []
@@ -784,10 +816,18 @@ class Ranger:
         `condition` (agent-verified YES/NO). With neither, the gate falls
         back to `check("the goal is fully achieved: {goal}")`.
 
-        Returns {"achieved": bool, "iterations": n, "steps": [...],
-        "report": last agent answer}. Honest by construction: max_iter
-        exhausted -> achieved=False, never a fifth iteration because the
-        agent says it's "almost done".
+        Honesty rule 1: the gate is evaluated BEFORE any agent work. A
+        gate that is green before iteration 1 is vacuous — the return is
+        `{"achieved": True, "iterations": 0, "steps": [],
+        "report": "", "already_green": True}` so "it was green all
+        along" can never masquerade as "the agent made it green". The
+        pre-check costs one gate evaluation (a shell run for gate_cmd,
+        one model run for condition) and is refunded whenever it saves a
+        wasted iteration.
+
+        Honesty rule 2 (unchanged): max_iter exhausted -> achieved=False,
+        never a sympathy iteration because the agent says it's "almost
+        done".
 
             agent.until("tests folder has coverage for parse()",
                         gate_cmd="python -m pytest -q")
@@ -796,6 +836,21 @@ class Ranger:
             raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
         steps: list[str] = []
         report = ""
+        # -- gate sanity pre-check: vacuous-green detection ------------ #
+        if gate_cmd is not None:
+            pre_ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
+            pre_kind = "gate_cmd"
+        elif condition is not None:
+            pre_ok = self.check(condition, **ov)
+            pre_kind = "condition"
+        else:
+            pre_ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+            pre_kind = "check"
+        if pre_ok:
+            _LOG.info("until pre-check · gate(%s) already green — no work needed",
+                      pre_kind)
+            return {"achieved": True, "iterations": 0, "steps": [],
+                    "report": "", "already_green": True}
         try:
             for i in range(1, max_iter + 1):
                 step = self.ask(
@@ -810,10 +865,15 @@ class Ranger:
                 steps.append(step)
                 if gate_cmd is not None:
                     ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
+                    gate_kind = "gate_cmd"
                 elif condition is not None:
                     ok = self.check(condition, **ov)
+                    gate_kind = "condition"
                 else:
                     ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+                    gate_kind = "check"
+                _LOG.info("until iteration %d/%d · gate(%s) → %s",
+                          i, max_iter, gate_kind, "achieved" if ok else "not achieved")
                 if ok:
                     return {"achieved": True, "iterations": i, "steps": steps,
                             "report": report}
@@ -1140,6 +1200,8 @@ class Ranger:
                 report = self.do(task, **work_ov)
                 rev = critic.review(subject=goal, author=report, **review_ov)
                 reviews.append(rev)
+                _LOG.info("refine_with iteration %d/%d · verdict=%s",
+                          i, max_iter, rev["verdict"])
                 if rev["passed"]:
                     return {"approved": True, "iterations": i,
                             "report": report, "reviews": reviews}
@@ -1287,48 +1349,65 @@ class Ranger:
             )
             sys.stderr.flush()
 
-        try:
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    cwd=self.cwd,
-                    env={**os.environ, "PWD": self.cwd} if self.cwd else None,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,  # own pg → contained blast
-                    timeout=opts["timeout"],
-                )
-            except FileNotFoundError:
-                # attribute the failure to its real cause: a missing agent
-                # cwd also raises FileNotFoundError from the spawn
-                if self.cwd and not Path(self.cwd).is_dir():
-                    _finish("✗", "red", "agent cwd does not exist")
-                    raise RangerError(
-                        f"agent cwd does not exist: {self.cwd}"
-                    ) from None
-                _finish("✗", "red", f"{backend_name} CLI not found")
-                raise RangerError(
-                    f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
-                ) from None
-            except subprocess.TimeoutExpired:
-                _finish("✗", "red", f"timed out after {opts['timeout']}s")
-                raise RangerError(
-                    f"{backend_name} run timed out after {opts['timeout']}s"
-                ) from None
-            except OSError as exc:
-                _finish("✗", "red", _clip(str(exc), 90))
-                raise RangerError(
-                    f"{backend_name} run could not be spawned: {exc}"
-                ) from None
+        _LOG.debug("run start · label=%s model=%s backend=%s",
+                   label, o["model"], backend_name)
 
-            if proc.returncode != 0:
-                _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
-                raise RangerError(
-                    f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
-                )
+        try:
+            retries = int(opts.get("retries") or 0)
+            attempt = 0
+            proc = None
+            while True:
+                try:
+                    try:
+                        proc = subprocess.run(
+                            cmd,
+                            cwd=self.cwd,
+                            env={**os.environ, "PWD": self.cwd} if self.cwd else None,
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            stdin=subprocess.DEVNULL,
+                            start_new_session=True,  # own pg → contained blast
+                            timeout=opts["timeout"],
+                        )
+                    except FileNotFoundError:
+                        # attribute the failure to its real cause: a missing agent
+                        # cwd also raises FileNotFoundError from the spawn
+                        if self.cwd and not Path(self.cwd).is_dir():
+                            _finish("✗", "red", "agent cwd does not exist")
+                            raise RangerError(
+                                f"agent cwd does not exist: {self.cwd}"
+                            ) from None
+                        _finish("✗", "red", f"{backend_name} CLI not found")
+                        raise RangerHarnessError(
+                            f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
+                        ) from None
+                    except subprocess.TimeoutExpired:
+                        _finish("✗", "red", f"timed out after {opts['timeout']}s")
+                        raise RangerTimeout(
+                            f"{backend_name} run timed out after {opts['timeout']}s"
+                        ) from None
+                    except OSError as exc:
+                        _finish("✗", "red", _clip(str(exc), 90))
+                        raise RangerHarnessError(
+                            f"{backend_name} run could not be spawned: {exc}"
+                        ) from None
+
+                    if proc.returncode != 0:
+                        _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
+                        raise RangerHarnessError(
+                            f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
+                        )
+                    break
+                except (RangerTimeout, RangerHarnessError) as exc:
+                    # transport-class failure only: prompt-contract failures
+                    # (plain RangerError) never reach this handler
+                    if attempt < retries:
+                        attempt += 1
+                        _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), 70)}")
+                        continue
+                    raise
             answer, info = adapter.parse_output(proc.stdout, use_stats)
             if use_stats and info is not None:
                 self.last = {
@@ -1352,6 +1431,8 @@ class Ranger:
         finally:
             # fires on EVERY exit path — success, error, interrupt — so the
             # spinner thread can never outlive the call
+            _LOG.debug("run finish · label=%s model=%s duration=%.2fs",
+                       label, o["model"], time.time() - t0)
             if spinner is not None:
                 spinner.stop()
 
