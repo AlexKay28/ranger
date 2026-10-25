@@ -118,3 +118,27 @@ documentation + tests). This is the loop's only cross-cycle memory.
   smoke-tested, uploaded and verified from pypi.org/simple.
 
 
+## Cycle 6 — dogfooding recursion and the honesty triad completed (2026-10-25)
+
+- **What:** code → examples → dogfood → library features. The session's
+  arc: (1) three temporal agent-reasoning examples; (2) the same patterns
+  as shipped commands — `plan()`, `attempt()`, `verify_claims()` —
+  implemented BY a ranger agent driven by a temporal resolver script;
+  (3) the run exposed a **false-red** (the gate grepped prose instead of
+  contract — the agent had done the work, the FAIL was the caller's);
+  (4) both lessons went back into the library: `resolve()` (the
+  hand-rolled resolver protocol as one call) and gate sequences
+  (`gate_cmd` lists, short-circuit + per-part `last_gate` breakdown so a
+  red names the exact sub-check that failed).
+- **Learned:** the honesty triad is complete — false-greens (compound
+  gates + `already_green`), false-reds (parts evidence), caller-side
+  check bugs (gates must assert contracts, not prose).
+- **API:** core commands 8 → 12 (`plan`, `attempt`, `verify_claims`,
+  `resolve`; `gate_cmd` widened to `str | list` in the loop family). The
+  four copy-pasted verdict blocks collapsed into `_gate_evidence` +
+  `_verdict` — net code simpler, public seams untouched, all prior
+  gate tests pass unchanged.
+- **Verification:** 219 tests green (~1.6s); live contract checks on the
+  new methods; fresh-venv wheel verification before upload.
+- **Release:** `rangers 0.7.1` on PyPI (maintainer-picked patch number),
+  verified from pypi.org/simple. Commits: `13274e6`, `07e1532`.
