@@ -323,6 +323,51 @@ if not result["passed"]:
     print(result["last_gate"]["output"])   # the diagnosis, not the prose
 ```
 
+**Gate sequences (in `until`, `attempt`, `resolve`).** `gate_cmd` also
+accepts a list of commands. Parts run in order and short-circuit on the
+first red — `a && b && ...` semantics — and `last_gate` gains a `parts`
+breakdown naming the exact sub-check that failed (the false-red lesson:
+never diagnose a compound gate from one blended blob). A plain string
+gate keeps the exact three-key `last_gate`, so nothing downstream breaks.
+
+```python
+res = agent.attempt("ship the fix", gate_cmd=["python -m pytest -q",
+                                             "test -f CHANGELOG.md"])
+res["last_gate"]["parts"]   # [{"cmd", "ok", "output"}, ...] — only for lists
+```
+
+### `resolve(goal, max_iter=3, gate_cmd=None, condition=None, **ov) -> dict`
+
+The resolver distilled into one command — the protocol the hand-rolled
+resolver scripts follow, with every honesty rule intact:
+
+1. **Pre-flight** — the gate is evaluated *before* any work. Already
+   green → `status: "ALREADY_GREEN"`, **zero** model runs.
+2. **Plan once** — `plan(goal)`: think without touching, before any file
+   changes.
+3. **Bounded loop (max_iter)** — each round is one plan-guided `do()`
+   followed by a mechanical verdict. The plan travels with every
+   iteration; the loop ends at the budget, never at the agent's word.
+
+```python
+{
+  "status": "ALREADY_GREEN" | "PASS" | "FAILED",   # tri-state, no guessing
+  "goal": str,
+  "plan": str,            # the plan() output the rounds followed
+  "iterations": int,     # rounds actually run
+  "report": str,          # the last do() report (narration, not a verdict)
+  "last_gate": {...},     # same evidence contract as until()/attempt()
+}
+```
+
+```python
+res = agent.resolve("add coverage for parse()",
+                    gate_cmd=["python -m pytest -q",
+                              "python -m pytest -q -k parse"])
+if res["status"] == "FAILED":
+    print(res["last_gate"]["output"])   # which sub-check stayed red, and why
+```
+
 ### `verify_claims(topic, max_claims=5, **ov) -> list[dict]`
 
 Deep-research reasoning command. Two phases, total honesty:

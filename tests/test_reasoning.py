@@ -247,3 +247,115 @@ class TestVerifyClaims:
                 agent.verify_claims("t")
 
 
+def popen_seq(*specs):
+    """Iterator of mocked Popens from (returncode, output) tuples."""
+    return iter([fake_popen(rc, communicate=[(out, "")])
+                 for rc, out in specs])
+
+
+class TestResolve:
+    """resolve(): pre-flight → plan() → bounded plan-guided attempts."""
+
+    def test_resolve_precheck_green_runs_no_model(self, tmp_path):
+        agent = Ranger(cwd=tmp_path)
+        popens = popen_seq((0, "already good"))
+        with mock.patch(
+            "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
+        ), mock.patch("ranger.subprocess.run") as run_mock:
+            res = agent.resolve("the goal", gate_cmd="pytest")
+        assert res["status"] == "ALREADY_GREEN"
+        assert res["iterations"] == 0 and res["plan"] == ""
+        run_mock.assert_not_called()          # zero model runs
+
+    def test_resolve_pass_in_one_round(self, tmp_path):
+        agent = Ranger(cwd=tmp_path)
+        popens = popen_seq((1, "red pre-check"), (0, "green now"))
+        answers = iter([fake_run("1. make it so"), fake_run("did step 1")])
+        with mock.patch(
+            "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
+        ), mock.patch("ranger.subprocess.run",
+                      side_effect=lambda *a, **k: next(answers)):
+            res = agent.resolve("the goal", gate_cmd="pytest")
+        assert res["status"] == "PASS"
+        assert res["iterations"] == 1
+        assert res["plan"].startswith("1.")     # plan() text travels
+        assert res["report"] == "did step 1"
+
+    def test_resolve_failed_honestly_at_budget(self, tmp_path):
+        agent = Ranger(cwd=tmp_path)
+        popens = popen_seq((1, "red"), (1, "still red"), (1, "still red"))
+        answers = iter([fake_run("1. try"),
+                       fake_run("tried once"), fake_run("tried twice")])
+        with mock.patch(
+            "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
+        ), mock.patch("ranger.subprocess.run",
+                      side_effect=lambda *a, **k: next(answers)):
+            res = agent.resolve("the goal", max_iter=2, gate_cmd="pytest")
+        assert res["status"] == "FAILED"        # budget ends the loop
+        assert res["iterations"] == 2
+        assert res["last_gate"]["ok"] is False
+        assert "tried" in res["report"]
+
+    def test_resolve_rejects_bad_max_iter(self, tmp_path):
+        import pytest
+        agent = Ranger(cwd=tmp_path)
+        with pytest.raises(ValueError):
+            agent.resolve("g", max_iter=-1)
+        with pytest.raises(ValueError):
+            agent.resolve("g", max_iter="three")
+
+
+class TestGateSequence:
+    """gate_cmd as a list: short-circuit on first red + parts evidence."""
+
+    def test_list_gate_all_green_has_parts_breakdown(self, tmp_path):
+        agent = Ranger(cwd=tmp_path)
+        popens = popen_seq((0, "suite green"), (0, "chmod green"))
+        with mock.patch(
+            "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
+        ), mock.patch("ranger.subprocess.run", return_value=fake_run("did")):
+            res = agent.attempt("the goal",
+                                gate_cmd=["pytest -q", "test -f x"])
+        assert res["passed"] is True
+        lg = res["last_gate"]
+        assert lg["kind"] == "gate_cmd" and lg["ok"] is True
+        assert len(lg["parts"]) == 2
+        assert lg["parts"][0] == {"cmd": "pytest -q", "ok": True,
+                                  "output": "suite green"}
+
+    def test_list_gate_short_circuits_and_names_the_red_part(self, tmp_path):
+        agent = Ranger(cwd=tmp_path)
+        popens = popen_seq((0, "suite green"),     # pre: part 1 ok
+                           (1, "boom no xfile"),   # pre: part 2 red — stop
+                           (0, "suite green"),     # post: part 1 ok
+                           (1, "boom no xfile"))   # post: part 2 red — stop
+        with mock.patch(
+            "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
+        ), mock.patch("ranger.subprocess.run", return_value=fake_run("tried")):
+            res = agent.attempt("make x", gate_cmd=["pytest -q", "test -f x"])
+        assert res["passed"] is False
+        parts = res["last_gate"]["parts"]
+        assert len(parts) == 2                    # part 3 never ran
+        assert parts[1]["ok"] is False and "boom" in parts[1]["output"]
+        assert "boom" in res["last_gate"]["output"]  # tail = the red part
+
+    def test_string_gate_last_gate_stays_three_keys(self, tmp_path):
+        """Backward compatibility: no parts key for a plain string gate."""
+        agent = Ranger(cwd=tmp_path)
+        popens = popen_seq((1, "red"), (0, "ok"))
+        with mock.patch(
+            "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
+        ), mock.patch("ranger.subprocess.run", return_value=fake_run("did")):
+            res = agent.attempt("the goal", gate_cmd="pytest")
+        assert set(res["last_gate"]) == {"kind", "ok", "output"}
+
+    def test_empty_gate_sequence_raises(self, tmp_path):
+        import pytest
+        from ranger import RangerError
+        agent = Ranger(cwd=tmp_path)
+        with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+            with pytest.raises(RangerError):
+                agent.attempt("the goal", gate_cmd=[])
+
+
+

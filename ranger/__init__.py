@@ -979,11 +979,66 @@ class Ranger:
             raise
         return proc.returncode == 0, _clip((out or "") + (err or ""), 400)
 
+    def _gate_evidence(self, gate_cmd, timeout: float | None = None):
+        """Evaluate gate_cmd — a single command string OR a sequence.
+
+        A sequence short-circuits on the first red part — the semantics
+        of `part1 && part2 && ...` — and returns a per-part breakdown so
+        a red verdict names the exact sub-check that failed (the false-red
+        lesson: never diagnose a compound gate from one blended blob).
+
+        Returns (ok, output_tail, parts) — parts is None for a plain
+        string gate, and a list of {"cmd", "ok", "output"} for a list.
+        """
+        if isinstance(gate_cmd, str):
+            self._gate_last = None
+            ok = self.gate(gate_cmd, timeout=timeout)
+            ev = self._gate_last
+            return ok, (ev[1] if ev else ""), None
+        if not gate_cmd:
+            raise RangerError("gate_cmd sequence must not be empty")
+        parts = []
+        for cmd in gate_cmd:
+            self._gate_last = None
+            ok = self.gate(cmd, timeout=timeout)
+            ev = self._gate_last
+            parts.append({"cmd": cmd, "ok": ok,
+                          "output": ev[1] if ev else ""})
+            _LOG.info("gate sequence %d/%d · %s · %s", len(parts),
+                      len(gate_cmd), cmd, "ok" if ok else "RED")
+            if not ok:
+                break
+        failed = next((p for p in parts if not p["ok"]), None)
+        all_ok = failed is None
+        out = failed["output"] if failed else parts[-1]["output"]
+        return all_ok, out, parts
+
+    def _verdict(self, goal, gate_cmd, condition, **ov):
+        """One mechanical verdict, shared by until()/attempt()/resolve().
+
+        Returns (ok, last_gate_dict). For a gate_cmd sequence, last_gate
+        gains a "parts" breakdown naming the sub-check that failed — for
+        a plain string gate the dict stays exactly {"kind", "ok",
+        "output"} (backward compatible).
+        """
+        if gate_cmd is not None:
+            ok, out, parts = self._gate_evidence(gate_cmd,
+                                                 timeout=ov.get("timeout"))
+            last_gate = {"kind": "gate_cmd", "ok": ok, "output": out}
+            if parts is not None:
+                last_gate["parts"] = parts
+            return ok, last_gate
+        if condition is not None:
+            ok = self.check(condition, **ov)
+            return ok, {"kind": "condition", "ok": ok, "output": ""}
+        ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+        return ok, {"kind": "check", "ok": ok, "output": ""}
+
     def until(
         self,
         goal: str,
         max_iter: int = 5,
-        gate_cmd: str | None = None,
+        gate_cmd: str | list | None = None,
         condition: str | None = None,
         **ov,
     ) -> dict:
@@ -991,8 +1046,10 @@ class Ranger:
 
         Each iteration asks for ONE concrete next step toward the goal,
         executes it with do(), then decides achieved/not via a mechanical
-        gate — either `gate_cmd` (shell command, exit code decides) or
-        `condition` (agent-verified YES/NO). With neither, the gate falls
+        gate — either `gate_cmd` (shell command, exit code decides; or a
+        list of commands, run in order, short-circuiting on the first
+        red — last_gate then carries a per-part breakdown) or `condition`
+        (agent-verified YES/NO). With neither, the gate falls
         back to `check("the goal is fully achieved: {goal}")`.
 
         Honesty rule 1: the gate is evaluated BEFORE any agent work. A
@@ -1022,26 +1079,13 @@ class Ranger:
         report = ""
         last_gate: dict = {}    # mechanical evidence of the final verdict
         # -- gate sanity pre-check: vacuous-green detection ------------ #
-        if gate_cmd is not None:
-            self._gate_last = None
-            pre_ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
-            pre_ev = self._gate_last
-            pre_kind = "gate_cmd"
-        elif condition is not None:
-            pre_ok = self.check(condition, **ov)
-            pre_ev = None
-            pre_kind = "condition"
-        else:
-            pre_ok = self.check(f"the goal is fully achieved: {goal}", **ov)
-            pre_ev = None
-            pre_kind = "check"
+        pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("until pre-check · gate(%s) already green — no work needed",
-                      pre_kind)
+                      pre_gate["kind"])
             return {"achieved": True, "iterations": 0, "steps": [],
                     "report": "", "already_green": True,
-                    "last_gate": {"kind": pre_kind, "ok": True,
-                                  "output": pre_ev[1] if pre_ev else ""}}
+                    "last_gate": pre_gate}
         try:
             for i in range(1, max_iter + 1):
                 step = self.ask(
@@ -1054,22 +1098,10 @@ class Ranger:
                 ).strip()
                 report = self.do(step, **ov)
                 steps.append(step)
-                if gate_cmd is not None:
-                    self._gate_last = None
-                    ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
-                    gate_out = self._gate_last[1] if self._gate_last else ""
-                    gate_kind = "gate_cmd"
-                elif condition is not None:
-                    ok = self.check(condition, **ov)
-                    gate_out = ""
-                    gate_kind = "condition"
-                else:
-                    ok = self.check(f"the goal is fully achieved: {goal}", **ov)
-                    gate_out = ""
-                    gate_kind = "check"
-                last_gate = {"kind": gate_kind, "ok": ok, "output": gate_out}
+                ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
                 _LOG.info("until iteration %d/%d · gate(%s) → %s",
-                          i, max_iter, gate_kind, "achieved" if ok else "not achieved")
+                          i, max_iter, last_gate["kind"],
+                          "achieved" if ok else "not achieved")
                 if ok:
                     return {"achieved": True, "iterations": i, "steps": steps,
                             "report": report, "last_gate": last_gate}
@@ -1086,16 +1118,17 @@ class Ranger:
     def attempt(
         self,
         goal: str,
-        gate_cmd: str | None = None,
+        gate_cmd: str | list | None = None,
         condition: str | None = None,
         **ov,
     ) -> dict:
         """The single-shot honest sibling of until(): ONE do(), one verdict.
 
         Runs `do(goal)` exactly once, then decides passed/not via the
-        same mechanical gate as until() — `gate_cmd` (shell command,
-        exit code decides), else `condition` (agent-verified YES/NO),
-        else `check("the goal is fully achieved: {goal}")`.
+        same mechanical gate as until() — `gate_cmd` (shell command, or
+        a list of commands run in order with a per-part breakdown in
+        last_gate, exit code decides), else `condition` (agent-verified
+        YES/NO), else `check("the goal is fully achieved: {goal}")`.
 
         Like until(), the gate is evaluated BEFORE any agent work: an
         already-green gate returns
@@ -1112,45 +1145,92 @@ class Ranger:
                           gate_cmd="python -m pytest -q tests/test_parser.py")
         """
         # -- gate sanity pre-check: vacuous-green detection -------------- #
-        if gate_cmd is not None:
-            self._gate_last = None
-            pre_ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
-            pre_ev = self._gate_last
-            pre_kind = "gate_cmd"
-        elif condition is not None:
-            pre_ok = self.check(condition, **ov)
-            pre_ev = None
-            pre_kind = "condition"
-        else:
-            pre_ok = self.check(f"the goal is fully achieved: {goal}", **ov)
-            pre_ev = None
-            pre_kind = "check"
+        pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("attempt pre-check · gate(%s) already green — no work needed",
-                      pre_kind)
+                      pre_gate["kind"])
             return {"passed": True, "already_green": True, "goal": goal,
-                    "report": "",
-                    "last_gate": {"kind": pre_kind, "ok": True,
-                                  "output": pre_ev[1] if pre_ev else ""}}
+                    "report": "", "last_gate": pre_gate}
         report = self.do(goal, **ov)
-        if gate_cmd is not None:
-            self._gate_last = None
-            ok = self.gate(gate_cmd, timeout=ov.get("timeout"))
-            gate_out = self._gate_last[1] if self._gate_last else ""
-            gate_kind = "gate_cmd"
-        elif condition is not None:
-            ok = self.check(condition, **ov)
-            gate_out = ""
-            gate_kind = "condition"
-        else:
-            ok = self.check(f"the goal is fully achieved: {goal}", **ov)
-            gate_out = ""
-            gate_kind = "check"
-        last_gate = {"kind": gate_kind, "ok": ok, "output": gate_out}
-        _LOG.info("attempt · gate(%s) → %s", gate_kind,
+        ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
+        _LOG.info("attempt · gate(%s) → %s", last_gate["kind"],
                   "passed" if ok else "not passed")
         return {"passed": ok, "already_green": False, "goal": goal,
                 "report": report, "last_gate": last_gate}
+
+    def resolve(
+        self,
+        goal: str,
+        max_iter: int = 3,
+        gate_cmd: str | list | None = None,
+        condition: str | None = None,
+        **ov,
+    ) -> dict:
+        """The resolver distilled: plan once, then bounded honest attempts.
+
+        The command the resolved-sprint scripts were hand-rolling every
+        time. Protocol — all honesty rules of until()/attempt() intact:
+
+        1. pre-flight: the gate runs BEFORE any work; an already-green
+           goal returns status "ALREADY_GREEN" with zero model calls
+        2. plan() once: think without touching, before any file changes
+        3. bounded do()→verdict loop (max_iter times): the plan travels
+           with every iteration, every verdict is mechanical, never a
+           sympathy pass — the loop ends at the budget, not at the
+           agent's word
+
+        status is exactly one of "ALREADY_GREEN" | "PASS" | "FAILED".
+        The result carries the plan, the iteration count, the last do()
+        report and last_gate evidence ({"kind", "ok", "output"}, plus a
+        "parts" breakdown when gate_cmd is a list — a red names the
+        exact sub-check that failed). gates must assert contracts, not
+        prose.
+
+            agent.resolve("add coverage for parse()",
+                          gate_cmd=["python -m pytest -q",
+                                    "python -m pytest -q -k parse"])
+        """
+        if not isinstance(max_iter, int) or max_iter < 0:
+            raise ValueError(
+                f"max_iter must be a non-negative int, got {max_iter!r}")
+        pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
+        if pre_ok:
+            _LOG.info("resolve pre-check · gate(%s) already green — no work needed",
+                      pre_gate["kind"])
+            return {"status": "ALREADY_GREEN", "goal": goal, "plan": "",
+                    "iterations": 0, "report": "", "last_gate": pre_gate}
+        plan_text = self.plan(goal, **ov)
+        report = ""
+        last_gate = pre_gate
+        iters = 0
+        try:
+            for i in range(1, max_iter + 1):
+                iters = i
+                report = self.do(
+                    f"Goal: {goal}\n\n"
+                    f"Approved plan to follow:\n{plan_text}\n\n"
+                    "Execute the next unfinished step of the plan (or redo "
+                    "a step that stayed red) and report what you changed.",
+                    **ov,
+                )
+                ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
+                _LOG.info("resolve iteration %d/%d · gate(%s) → %s", i,
+                          max_iter, last_gate["kind"],
+                          "PASS" if ok else "not yet")
+                if ok:
+                    return {"status": "PASS", "goal": goal,
+                            "plan": plan_text, "iterations": i,
+                            "report": report, "last_gate": last_gate}
+        except KeyboardInterrupt:
+            # cancelled, not failed: progress already paid for survives
+            raise KeyboardInterrupt(_interrupt_payload(
+                "resolve",
+                {"status": "FAILED", "goal": goal, "plan": plan_text,
+                 "iterations": iters, "report": report,
+                 "last_gate": last_gate})) from None
+        return {"status": "FAILED", "goal": goal, "plan": plan_text,
+                "iterations": iters, "report": report,
+                "last_gate": last_gate}
 
     def verify_claims(self, topic: str, max_claims: int = 5, **ov) -> list:
         """Extract verifiable claims about a topic, then verify each.

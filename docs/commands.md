@@ -63,7 +63,7 @@ configured copy.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
   `wall_s`, `model_s`, `parts`, `chars`, `session`.
 
-## ✅ Shipped — core commands (11)
+## ✅ Shipped — core commands (12)
 
 ### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
@@ -129,7 +129,10 @@ reads) and answer with YES/NO as the first word; unparseable answers raise
 
 ### `gate(command) -> bool`
 Fully mechanical sibling of `check` — no model at all: a shell command whose
-exit code decides. `agent.gate("python -m pytest -q")`.
+exit code decides. `agent.gate("python -m pytest -q")`. In `until`, `attempt`
+and `resolve`, `gate_cmd` also accepts a **list** of commands — run in order,
+short-circuiting on the first red, with a per-part breakdown in `last_gate`
+so a failure names the exact sub-check that tripped.
 
 ### `attempt(goal, gate_cmd=None, condition=None) -> dict`
 The single-shot honest sibling of `until`: ONE `do()` of the goal, then a
@@ -143,6 +146,20 @@ carries the gate's own evidence, so a red outcome is a diagnosis.
 ```python
 agent.attempt("add __repr__ to Parser",
               gate_cmd="python -m pytest -q tests/test_parser.py")
+```
+
+### `resolve(goal, max_iter=3, gate_cmd=None, condition=None) -> dict`
+The resolver distilled into one call: pre-flight gate check (already green →
+`status: "ALREADY_GREEN"`, zero model runs), then ONE `plan()` (think before
+touching), then a bounded loop of plan-guided `do()` rounds with a mechanical
+verdict each — no sympathy pass when the budget ends. Returns
+`{"status": "ALREADY_GREEN"|"PASS"|"FAILED", "goal", "plan", "iterations",
+"report", "last_gate"}`. Gates must assert contracts, not prose.
+
+```python
+agent.resolve("add coverage for parse()",
+              gate_cmd=["python -m pytest -q",
+                        "python -m pytest -q -k parse"])
 ```
 
 ### `verify_claims(topic, max_claims=5) -> list[dict]`

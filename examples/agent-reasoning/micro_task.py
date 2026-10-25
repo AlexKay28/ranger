@@ -9,13 +9,18 @@ Three honesty rules from the field (see issue #1 in the repository history):
    attempt() both report already_green for a vacuously green gate instead
    of faking agent work
 2. compound gate: bare "tests pass" is not a goal; the gate must demand
-   the feature itself AND leave the rest of the suite green
+   the feature itself AND leave the rest of the suite green — pass a
+   LIST of commands and last_gate.parts will name the exact red part
 3. tri-state report: pass the caller's verdict on achieved/FAILED plus
    last_gate evidence — never trust the agent's own narration alone
 
 Default mode is the bounded multi-iteration repair loop until(max_iter=3);
 pass --attempt for the single-shot sibling attempt() — ONE do(), then the
 mechanical verdict, honest PASS or FAIL either way.
+
+For new code, check agent.resolve() first — it ships this entire protocol
+(pre-flight + one plan + bounded plan-guided rounds, tri-state status) as a
+single library call; this script stays as the transparent, inspectable form.
 
     python examples/agent-reasoning/micro_task.py /path/to/project \
         "write CHANGELOG.md with today's date in the header" \
