@@ -63,7 +63,7 @@ configured copy.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
   `wall_s`, `model_s`, `parts`, `chars`, `session`.
 
-## ✅ Shipped (8)
+## ✅ Shipped — core commands (8)
 
 ### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
@@ -118,6 +118,29 @@ reads) and answer with YES/NO as the first word; unparseable answers raise
 Fully mechanical sibling of `check` — no model at all: a shell command whose
 exit code decides. `agent.gate("python -m pytest -q")`.
 
+## ✅ Shipped — multi-agent interactions (5)
+
+Verdicts are grammar, budgets are honest, reviewers run free of their own
+chat history. Full contracts in [API.md](API.md#multi-agent-interactions).
+
+### `second_opinion(other, prompt) -> dict`
+Same prompt, two agents: `{"mine", "theirs", "differs"}`.
+
+### `review(subject, author=None) -> dict` *(method on the REVIEWER)*
+APPROVE/REJECT/REQUEST_CHANGES verdict with findings; unparseable answers
+raise `RangerError` — review never guesses. The reviewer sees the subject,
+not the author's chat history.
+
+### `refine_with(critic, goal, max_iter=3) -> dict`
+The two-agent `until`: do → review → fix → repeat, until the critic approves
+or the budget runs out.
+
+### `challenge(other, claim=None, rounds=2) -> dict` *(method on the CHALLENGER)*
+Adversarial attack on another agent's claim or last answer.
+
+### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` *(module-level)*
+Symmetric exchange, optionally refereed by a third agent.
+
 ## 🔜 Next batch (planned, same pattern) (5)
 
 ### `plan(goal) -> str`
@@ -127,8 +150,10 @@ Think without touching. Produces a step-by-step plan, no filesystem changes.
 Targeted fine-grained change to one file only (vs. `do`, which is free-roaming).
 Prompt pins the file; returns what changed and why. Post-check: file mtime.
 
-### `review(file_or_diff) -> str`
-Code review: bugs, smells, security, missing tests. Read-only.
+### `critique(file_or_diff) -> str`
+Read-only code review of a file or diff: bugs, smells, security, missing
+tests. (Distinct from the shipped multi-agent `review`, which renders an
+APPROVE/REJECT verdict between agents; this is a prose critique of code.)
 
 ### `test() -> str`
 Run the project's tests, report failures with root-cause guesses, and propose
@@ -170,4 +195,7 @@ agent.until("parser.py: implement the TODO, all tests green",
             gate_cmd="python -m pytest -q")
 ```
 
-The 🌱 tier that remains (fix/transform/commit) composes on top of it.
+Shipped surface today: **13 commands** (8 core + 5 multi-agent) plus the
+context/memory trio (`context_summarize`/`context_compact`/`context_clear`)
+and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The 🌱 tier
+that remains (fix/transform/commit) composes on top of it.

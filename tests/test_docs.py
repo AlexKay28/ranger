@@ -24,6 +24,7 @@ from ranger import Ranger
 REPO = Path(__file__).resolve().parent.parent
 API_TEXT = (REPO / "docs" / "API.md").read_text()
 README_TEXT = (REPO / "README.md").read_text()
+COMMANDS_TEXT = (REPO / "docs" / "commands.md").read_text()
 CHEATSHEET_SOURCE = (REPO / "scripts" / "cheatsheet.py").read_text()
 SKILL_TEXT = (REPO / "SKILL.md").read_text()
 
@@ -141,3 +142,81 @@ def test_every_shipped_command_has_an_example_usage():
         assert f".{command}(" in all_example_text or f"Ranger.{command}" in all_example_text, (
             f"no example demonstrates .{command}()"
         )
+
+
+# --- commands.md catalog gates -------------------------------------------
+
+# Methods the catalog may legitimately list as planned (🔜/🌱 tiers).
+PLANNED_COMMANDS = {"plan", "edit", "critique", "test", "read",
+                   "fix", "transform", "commit"}
+
+_CATALOG_HEADER = re.compile(r"^### `(?:ranger\.)?(?:Ranger\.|agent\.)?(\w+)\s*\(",
+                             re.MULTILINE)
+
+
+def _catalog_sections(text):
+    """Split commands.md into (shipped_area, planned_area) by tier headers."""
+    planned_from = text.find("## 🔜")
+    return text[:planned_from], text[planned_from:]
+
+
+def test_commands_catalog_matches_shipped_surface():
+    """The ✅ tier of commands.md must equal the real public API, no drift."""
+    shipped_area, planned_area = _catalog_sections(COMMANDS_TEXT)
+    catalog = set(_CATALOG_HEADER.findall(shipped_area))
+    expected = set(PUBLIC_METHODS) | {"debate"}
+    assert catalog == expected, (
+        f"commands.md ✅ tier drifted: undocumented {expected - catalog}, "
+        f"ghost entries {catalog - expected} — sync docs/commands.md with "
+        f"ranger/__init__.py"
+    )
+
+
+def test_commands_catalog_planned_tier_only_lists_known_planned():
+    """The 🔜/🌱 tiers may only list names that are not shipped yet."""
+    _, planned_area = _catalog_sections(COMMANDS_TEXT)
+    listed = set(_CATALOG_HEADER.findall(planned_area))
+    shipped = set(PUBLIC_METHODS) | {"debate"}
+    assert not (listed & shipped), (
+        f"commands.md lists shipped methods as planned: {listed & shipped}"
+    )
+    assert not (listed - PLANNED_COMMANDS), (
+        f"commands.md plans unknown commands {listed - PLANNED_COMMANDS} — "
+        f"add them to PLANNED_COMMANDS or remove the section"
+    )
+
+
+# --- README gates ----------------------------------------------------------
+
+def test_readme_examples_use_only_shipped_api():
+    """Code blocks in README must not reference unshipped methods."""
+    shipped = set(dir(Ranger)) | {"models", "Ranger"} | set(dir(ranger))
+    shipped = {s for s in shipped if not s.startswith("_")}
+    used = {
+        name
+        for tup in re.findall(
+            r"agent\.(\w+)\(|ranger\.Ranger\.(\w+)\(|ranger\.(\w+)",
+            README_TEXT,
+        )
+        for name in tup
+        if name and not name.startswith("_")
+    }
+    unshipped = used - shipped - {"Path"}
+    assert not unshipped, f"README uses unshipped API: {unshipped}"
+
+
+def test_readme_install_command_matches_pypi_distribution():
+    """README's pip install line must match the actual PyPI project name."""
+    pyproject = (REPO / "pyproject.toml").read_text()
+    match = re.search(r'^name\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+    assert match, "cannot find project name in pyproject.toml"
+    dist_name = match.group(1)
+    assert f"pip install {dist_name}" in README_TEXT, (
+        f"README must show `pip install {dist_name}` (the PyPI distribution)"
+    )
+
+
+def test_readme_carries_pypi_badges():
+    """Version + downloads badges keep the README/PyPI landing page honest."""
+    assert "img.shields.io/pypi/v/" in README_TEXT, "PyPI version badge missing"
+    assert "img.shields.io/pypi/dm/" in README_TEXT, "downloads badge missing"

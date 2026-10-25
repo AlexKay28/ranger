@@ -77,4 +77,26 @@ documentation + tests). This is the loop's only cross-cycle memory.
   cosmetic findings from cycle 1; PyPI publish prep.
 - Iteration ceiling was treated as a maximum, not a quota; loop stops here.
 
+## Cycle 4 — first PyPI release + automated publishing (2026-10-25)
+
+- **What:** `rangers 0.6.1` (import `ranger`) published to PyPI — the
+  package's first public release: <https://pypi.org/project/rangers/>
+- **How:** full docs/PUBLISHING.md checklist from a clean main checkout —
+  134 tests green, `python -m build`, `twine check --strict`, wheel
+  smoke-tested in a fresh venv, uploaded, verified by installing from
+  pypi.org/simple in a second fresh venv. Tag `v0.6.1` pushed.
+- **Automation:** `.github/workflows/publish.yml` added — any `v*` tag now
+  runs the test matrix, rebuilds, validates, asserts tag==pyproject version,
+  and uploads to PyPI via the `PYPI_TOKEN` secret (`--skip-existing`).
+  ci.yml's wheel smoke-test no longer hardcodes the version.
+- **Hygiene:** `.env.local` (release token storage) excluded via
+  `.gitignore`; token never committed or printed.
+- **Docs:** commands.md ✅ tier re-synced with the real 17-method surface
+  (multi-agent five moved into shipped; planned code-review command renamed
+  `critique` to avoid collision with shipped `review`); README gained PyPI
+  version+downloads badges; new doc gates in tests/test_docs.py lock all of
+  it (catalog↔code set equality, README code blocks, install-command↔dist
+  name, badge presence).
+- **Verification:** full local suite green (134 + 4 new gates) before push.
+
 

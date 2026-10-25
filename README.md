@@ -1,6 +1,8 @@
 # ranger
 
 ![CI](https://github.com/AlexKay28/ranger/actions/workflows/ci.yml/badge.svg)
+[![PyPI](https://img.shields.io/pypi/v/rangers)](https://pypi.org/project/rangers/)
+[![Downloads](https://img.shields.io/pypi/dm/rangers)](https://pypi.org/project/rangers/)
 
 Agent-as-a-library. Run the [opencode](https://opencode.ai) or
 [codex](https://github.com/openai/codex) coding agents headlessly from plain
