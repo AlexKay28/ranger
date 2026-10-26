@@ -159,6 +159,7 @@ def test_purity_map_for_every_command():
         ("search", lambda a: a.search("x")),
         ("summarize", lambda a: a.summarize("x.py")),
         ("test", lambda a: a.test()),
+        ("lint", lambda a: a.lint()),
         ("review", lambda a: a.review("x")),
     ]
     import tempfile
@@ -180,8 +181,9 @@ def test_purity_map_for_every_command():
                 prompt = m.call_args.args[0][-1]
             recalls = "HIST" in prompt
             expectations = {"ask": True, "do": True, "edit": True, "write": True,
-                              "check": False, "search": False,
-                              "summarize": False, "test": False, "review": False}
+                               "check": False, "search": False,
+                               "summarize": False, "test": False, "lint": False,
+                               "review": False}
             assert recalls == expectations[label], (
                 f"{label}: recall={recalls}, expected {expectations[label]}")
         # write needs a real target; summarize needs the cwd to exist

@@ -22,6 +22,7 @@ def main() -> None:
     agent = ranger.Ranger(cwd=target, timeout=180)
 
     print(agent.test())  # read-only diagnosis before choosing a repair loop
+    print(agent.lint())  # read-only lint and format diagnosis
 
     if agent.gate(command):
         print("already green; no agent run needed")

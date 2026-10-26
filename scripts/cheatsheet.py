@@ -90,7 +90,7 @@ CARDS = [
         "code_step": 24,
     },
     {
-        "bounds": (609, 428, 547, 202),
+        "bounds": (609, 428, 547, 226),
         "num": "03", "title": "FACTS",
         "desc": "Memory-free facts and verdicts.",
         "code": [
@@ -98,6 +98,7 @@ CARDS = [
             "a.read(file, question) -> answer",
             "a.search/summarize(goal) -> findings",
             "a.test()            -> test diagnosis",
+            "a.lint()            -> lint/format diagnosis",
             "a.critique(file_or_diff) -> review",
         ],
     },

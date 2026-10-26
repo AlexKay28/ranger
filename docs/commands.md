@@ -42,7 +42,7 @@ Wipe recorded context; returns what was cleared.
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`, `critique`,
-`read`, `search`, `summarize`, `test`) always run history- and session-independent — context
+`lint`, `read`, `search`, `summarize`, `test`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
 constructor or any single call disables recording and recall.
 
@@ -148,6 +148,16 @@ It never modifies files and runs without recalled history or a harness session.
 
 ```python
 agent.test()
+```
+
+### `lint() -> str`
+Run the project's configured lint and format checks and return a concise,
+read-only diagnosis: the failing check and error evidence plus minimal
+remediation. It never modifies files and runs without recalled history or a
+harness session.
+
+```python
+agent.lint()
 ```
 
 ### `critique(file_or_diff) -> str`
