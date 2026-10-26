@@ -79,6 +79,7 @@ package default.
 ```python
 agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
 agent.summarize("notes.md")          # -> str summary of the file
+agent.read("notes.md", "What decision does it make?")  # -> focused file answer
 agent.write("a one-page report on X")  # -> path of the file the agent wrote
 agent.do("rename all *.txt files in data/ to *.md")  # -> report of CLI-like work
 agent.edit("src/parser.py", "Handle empty input")   # -> one bounded file change
@@ -145,7 +146,7 @@ ranger.Ranger(memory=False)      # or a fully stateless agent
 ```
 
 Context memory colors your dialogues, never your facts: `ask`/`do`/`edit`/`write`
-recall the recent conversation; `check`/`search`/`summarize`/`test` always run
+recall the recent conversation; `check`/`read`/`search`/`summarize`/`test` always run
 history-independent, so a verdict is about the repo, not the chat
 ([PARADIGM.md](docs/PARADIGM.md), law 4).
 

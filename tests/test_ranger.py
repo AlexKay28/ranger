@@ -281,6 +281,7 @@ def test_command_prompt_contents(tmp_path):
 
     with mock.patch("ranger.subprocess.run", side_effect=capture):
         agent.summarize(target)
+        assert agent.read("notes.md", "What is the heading?", timeout=42) == "ok"
         agent.do("rename the files")
         target.write_text("before")
         agent.edit(target, "replace the text")
@@ -288,15 +289,18 @@ def test_command_prompt_contents(tmp_path):
         assert agent.test(timeout=42) == "ok"
 
     assert str(target.resolve()) in prompts[0]
-    assert "rename the files" in prompts[1]
-    assert str(target.resolve()) in prompts[2]
-    assert "replace the text" in prompts[2]
-    assert "only that file" in prompts[2]
-    assert "where is config parsed" in prompts[3]
-    assert "No code changes" in prompts[3]
-    assert "test suite" in prompts[4]
-    assert "do NOT modify" in prompts[4]
-    assert "root cause" in prompts[4]
+    assert str(target.resolve()) in prompts[1]
+    assert "What is the heading?" in prompts[1]
+    assert "do NOT modify" in prompts[1]
+    assert "rename the files" in prompts[2]
+    assert str(target.resolve()) in prompts[3]
+    assert "replace the text" in prompts[3]
+    assert "only that file" in prompts[3]
+    assert "where is config parsed" in prompts[4]
+    assert "No code changes" in prompts[4]
+    assert "test suite" in prompts[5]
+    assert "do NOT modify" in prompts[5]
+    assert "root cause" in prompts[5]
 
 
 def test_test_returns_harness_diagnosis_and_forwards_overrides():
@@ -310,6 +314,26 @@ def test_test_returns_harness_diagnosis_and_forwards_overrides():
     assert cmd[cmd.index("--model") + 1] == "fast/model"
     assert m.call_args.kwargs["timeout"] == 42
     assert agent.last["label"] == "test"
+
+
+def test_read_answers_one_file_question_and_forwards_overrides(tmp_path):
+    agent = Ranger(cwd=tmp_path, stats=True, session="ses_hist")
+    agent.context = [{"role": "user", "content": "previous answer"}]
+    payload = ('{"sessionID":"ses_read","part":{"type":"text",'
+               '"text":"It accepts strings."}}')
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+        assert agent.read("parser.py", "What inputs does it accept?",
+                          model="fast/model", timeout=42) == "It accepts strings."
+    cmd = m.call_args.args[0]
+    prompt = cmd[-1]
+    assert str(tmp_path / "parser.py") in prompt
+    assert "What inputs does it accept?" in prompt
+    assert "do NOT modify" in prompt
+    assert "Previous interaction" not in prompt
+    assert "ses_hist" not in cmd
+    assert cmd[cmd.index("--model") + 1] == "fast/model"
+    assert m.call_args.kwargs["timeout"] == 42
+    assert agent.last["label"] == "read"
 
 
 def test_edit_requires_a_changed_target_and_forwards_overrides(tmp_path):
@@ -942,13 +966,14 @@ def test_check_accepts_verdict_line_after_chatter():
 # paradigm law: context memory colors dialogues, never facts
 
 def test_recall_is_skipped_for_pure_commands():
-    """check/search/summarize run history-independent; ask/do recall."""
+    """check/read/search/summarize run history-independent; ask/do recall."""
     agent = Ranger()
     agent.context = [
         {"role": "user", "content": "we agreed the PORT is 8080"},
         {"role": "assistant", "content": "okay, 8080 it is"},
     ]
     for label, method in (("check", lambda: agent.check("port is 8080")),
+                           ("read", lambda: agent.read("x.py", "What port is used?")),
                            ("search", lambda: agent.search("PORT usage")),
                            ("summarize", lambda: agent.summarize("x.py"))):
         with mock.patch("ranger.subprocess.run",

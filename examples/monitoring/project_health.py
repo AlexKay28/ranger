@@ -25,6 +25,9 @@ def main() -> None:
         "or unhandled error paths. Include file paths and line numbers."
     )
     print("\nrisks:\n", findings)
+    print("\nhealth script role:\n", agent.read(
+        "project_health.py", "What read-only checks does this script perform?"
+    ))
     print("\nagent telemetry:", agent.last)
 
 

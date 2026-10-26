@@ -20,7 +20,7 @@ import ranger  # noqa: E402  (version string comes from the source of truth)
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
-W, H = 1200, 1510
+W, H = 1200, 1534
 PAD = 24
 RADIUS = 16
 
@@ -90,18 +90,19 @@ CARDS = [
         "code_step": 24,
     },
     {
-        "bounds": (609, 428, 547, 178),
+        "bounds": (609, 428, 547, 202),
         "num": "03", "title": "FACTS",
         "desc": "Memory-free facts and verdicts.",
         "code": [
             "a.check(condition)  -> bool",
+            "a.read(file, question) -> answer",
             "a.search(goal)      -> findings",
             "a.summarize(file)   -> summary",
             "a.test()            -> test diagnosis",
         ],
     },
     {
-        "bounds": (44, 624, 1112, 202),
+        "bounds": (44, 648, 1112, 202),
         "num": "04", "title": "LOOPS",
         "desc": "Plan -> act -> verify. Bounded rounds; explicit gates.",
         "code": [
@@ -112,7 +113,7 @@ CARDS = [
         ],
     },
     {
-        "bounds": (44, 844, 1112, 194),
+        "bounds": (44, 868, 1112, 194),
         "num": "05", "title": "MULTI-AGENT",
         "desc": "Compose peers; reviewers and judges ignore their own chat history.",
         "note": "debate: import ranger",
@@ -126,7 +127,7 @@ CARDS = [
         "code_step": 23,
     },
     {
-        "bounds": (44, 1056, 1112, 222),
+        "bounds": (44, 1080, 1112, 222),
         "num": "06", "title": "CONFIGURATION",
         "desc": "Constructor defaults; per-call overrides. cwd: constructor/with_config only.",
         "columns": [
@@ -147,7 +148,7 @@ CARDS = [
         ],
     },
     {
-        "bounds": (44, 1296, 1112, 142),
+        "bounds": (44, 1320, 1112, 142),
         "num": "07", "title": "REPLACE THE HARNESS",
         "desc": "opencode (default) or codex. Same API; different harness.",
         "code": [
@@ -242,7 +243,7 @@ def render():
 
     footer_f = mono(18)
     fw = d.textlength(FOOTER, font=footer_f)
-    d.text(((W - fw) / 2, 1460), FOOTER, font=footer_f, fill=COMMENT)
+    d.text(((W - fw) / 2, 1484), FOOTER, font=footer_f, fill=COMMENT)
 
     out = REPO / "docs" / "cheatsheet.png"
     img.save(out, optimize=True)

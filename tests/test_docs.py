@@ -81,7 +81,7 @@ def test_cheatsheet_is_embedded_and_covers_the_shipped_surface():
     assert width >= 1000 and height >= 1200
     # Public commands and the extensibility seam must occur in the source
     # data that renders the card. New API -> this gate reminds us to redraw.
-    for command in ("ask", "do", "edit", "write", "check", "search", "summarize", "test",
+    for command in ("ask", "do", "edit", "write", "check", "read", "search", "summarize", "test",
                     "gate", "until", "review", "challenge", "second_opinion",
                     "refine_with", "debate", "register_backend"):
         assert command in CHEATSHEET_SOURCE, (
@@ -134,7 +134,7 @@ def test_every_shipped_command_has_an_example_usage():
     all_example_text = "\n".join(
         p.read_text() for p in sorted((REPO / "examples").rglob("*.py"))
     )
-    for command in ("ask", "summarize", "write", "do", "edit", "search", "test", "check",
+    for command in ("ask", "read", "summarize", "write", "do", "edit", "search", "test", "check",
                     "gate", "until", "models", "with_config",
                     # multi-agent interactions (v0.6)
                     "review", "challenge", "second_opinion", "refine_with",
@@ -147,7 +147,7 @@ def test_every_shipped_command_has_an_example_usage():
 # --- commands.md catalog gates -------------------------------------------
 
 # Methods the catalog may legitimately list as planned (🔜/🌱 tiers).
-PLANNED_COMMANDS = {"critique", "read",
+PLANNED_COMMANDS = {"critique",
                    "fix", "transform", "commit"}
 
 _CATALOG_HEADER = re.compile(r"^### `(?:ranger\.)?(?:Ranger\.|agent\.)?(\w+)\s*\(",

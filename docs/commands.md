@@ -41,7 +41,7 @@ Wipe recorded context; returns what was cleared.
 
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
-recent history within a character budget, while fact commands (`check`,
+recent history within a character budget, while fact commands (`check`, `read`,
 `search`, `summarize`, `test`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
 constructor or any single call disables recording and recall.
@@ -63,7 +63,7 @@ configured copy.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
   `wall_s`, `model_s`, `parts`, `chars`, `session`.
 
-## ✅ Shipped — core commands (14)
+## ✅ Shipped — core commands
 
 ### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
@@ -87,6 +87,15 @@ bigger call.
 
 ```python
 agent.summarize("notes.md")
+```
+
+### `read(file, question) -> str`
+Ask a precise, read-only question about one file instead of receiving a general
+summary. The path resolves against the agent cwd; the call is history- and
+session-independent and its prompt forbids filesystem changes.
+
+```python
+agent.read("src/parser.py", "What input shapes can raise ValueError?")
 ```
 
 ### `write(task, path=None) -> str` *(returns file path)*
@@ -217,16 +226,12 @@ Adversarial attack on another agent's claim or last answer.
 ### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` *(module-level)*
 Symmetric exchange, optionally refereed by a third agent.
 
-## 🔜 Next batch (planned, same pattern) (3)
+## 🔜 Next batch (planned, same pattern) (2)
 
 ### `critique(file_or_diff) -> str`
 Read-only code review of a file or diff: bugs, smells, security, missing
 tests. (Distinct from the shipped multi-agent `review`, which renders an
 APPROVE/REJECT verdict between agents; this is a prose critique of code.)
-
-### `read(file, question) -> str`
-Pointed Q&A about one file ("what inputs can crash this?"), vs `summarize`'s
-general digest.
 
 ## 🌱 Later (3)
 

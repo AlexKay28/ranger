@@ -100,7 +100,7 @@ ranger.Ranger(
 
 ### Child process environment
 
-Every harness child process (the `ask`/`do`/`edit`/`write`/`search`/`summarize`/`test`/`check`
+Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`test`/`check`
 CLI runs, and the `gate()` shell command) sees exactly this environment:
 
 1. **The full inherited `os.environ` of your Python process** — nothing is
@@ -126,7 +126,7 @@ the child by design.
 
 ### Per-call overrides
 
-Every command method (`ask`, `summarize`, `write`, `do`, `edit`, `search`, `test`, `check`,
+Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `test`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
@@ -143,7 +143,7 @@ immediately — typos fail loudly, never silently. Priority rules:
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
   was requested; `effort` ∈ {low, medium, high} — anything else raises
   (`ValueError` at construction, `TypeError` per-call).
-- **Fact commands run pure**: `check`, `search`, `summarize` and `test` drop
+- **Fact commands run pure**: `check`, `read`, `search`, `summarize` and `test` drop
   `session=` and skip history recall — a verdict is about the repo, not
   the chat.
 
@@ -172,6 +172,14 @@ Raw prompt in, raw answer out. The escape hatch all other commands build on.
 Reads a file (path may be absolute or relative) and returns a concise
 summary. **Relative paths resolve against the agent's `cwd`, never the
 Python process's.**
+
+### `read(file, question, **ov) -> str`
+
+Answers a specific question using only one file, rather than producing
+`summarize()`'s general digest. `file` may be absolute or relative to the
+agent's `cwd`; relative paths resolve against that cwd. The prompt forbids
+modifying, creating, deleting, or renaming files. Like every fact command,
+`read()` runs without recalled history or a harness session.
 
 ### `write(task, path=None, **ov) -> str`
 
@@ -431,7 +439,7 @@ for r in results:
   recall the most recent messages that fit inside `memory_budget`
   characters, prepended as a `## Previous interaction` block before the
   `## Current request`.
-- **Fact commands run pure**: `check`, `search`, `summarize` and `test` never see
+- **Fact commands run pure**: `check`, `read`, `search`, `summarize` and `test` never see
   conversation history — a verdict must not be a function of chat
   (paradigm law: context memory colors your dialogues, never your facts).
 - `memory=False` (constructor or single call) disables both recording and
@@ -740,6 +748,7 @@ keep working:
 Each command wraps your input in a frozen prompt the agent must honor:
 
 - `summarize`: read `{absolute path}`, reply summary only.
+- `read`: answer `{question}` from `{absolute path}` only, **no file changes**.
 - `write`: write the file at `{path}`, reply with the path only.
 - `do`: accomplish `{goal}` with tools, report what changed.
 - `edit`: modify only the existing `{absolute path}`, report what changed.

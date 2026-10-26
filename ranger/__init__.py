@@ -420,7 +420,7 @@ register_backend("openhands", _OpenHandsBackend)
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
 # never facts). Recall is skipped for these; recording still happens.
-_PURE_LABELS = frozenset({"check", "search", "summarize", "test"})
+_PURE_LABELS = frozenset({"check", "read", "search", "summarize", "test"})
 
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
@@ -772,6 +772,24 @@ class Ranger:
             "Reply with the summary text only, no preamble."
         )
         return self._run(prompt, label="summarize", **ov)
+
+    def read(self, file: str | Path, question: str, **ov) -> str:
+        """Answer a specific question about one file without modifying it.
+
+        Relative paths resolve against the agent's cwd, not the Python
+        process's. This command is history- and session-independent.
+        """
+        path = Path(file)
+        if not path.is_absolute():
+            path = Path(self.cwd or Path.cwd()) / path
+        prompt = (
+            f"Read only the file at {path.resolve()}.\n\n"
+            f"Question: {question}\n\n"
+            "Reading and analysis only — do NOT modify, create, delete, or "
+            "rename any file. Answer the question directly using evidence from "
+            "that file."
+        )
+        return self._run(prompt, label="read", **ov)
 
     def write(self, task: str, path: str | Path | None = None, **ov) -> str:
         """Have the agent produce a written document/answer as a file.
