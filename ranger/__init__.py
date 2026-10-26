@@ -420,7 +420,7 @@ register_backend("openhands", _OpenHandsBackend)
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
 # never facts). Recall is skipped for these; recording still happens.
-_PURE_LABELS = frozenset({"check", "search", "summarize"})
+_PURE_LABELS = frozenset({"check", "search", "summarize", "test"})
 
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
@@ -879,6 +879,17 @@ class Ranger:
             "No code changes."
         )
         return self._run(prompt, label="search", **ov)
+
+    def test(self, **ov) -> str:
+        """Run the project's test suite and diagnose failures without mutation."""
+        prompt = (
+            "Run this project's existing test suite in the current directory. "
+            "Reading and analysis only — do NOT modify, create, delete, or rename "
+            "any file. Diagnose any failures concisely: identify likely root cause(s), "
+            "include relevant failing test or error evidence, and propose the minimal "
+            "fix direction. If tests pass, report that outcome and the command run."
+        )
+        return self._run(prompt, label="test", **ov)
 
     def check(self, condition: str, **ov) -> bool:
         """Verify a claim about repo state; return True or False.

@@ -285,6 +285,7 @@ def test_command_prompt_contents(tmp_path):
         target.write_text("before")
         agent.edit(target, "replace the text")
         agent.search("where is config parsed")
+        assert agent.test(timeout=42) == "ok"
 
     assert str(target.resolve()) in prompts[0]
     assert "rename the files" in prompts[1]
@@ -293,6 +294,22 @@ def test_command_prompt_contents(tmp_path):
     assert "only that file" in prompts[2]
     assert "where is config parsed" in prompts[3]
     assert "No code changes" in prompts[3]
+    assert "test suite" in prompts[4]
+    assert "do NOT modify" in prompts[4]
+    assert "root cause" in prompts[4]
+
+
+def test_test_returns_harness_diagnosis_and_forwards_overrides():
+    agent = Ranger(stats=True)
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run(
+                        '{"sessionID":"ses_test","part":{"type":"text",'
+                        '"text":"parser test fails: bad token"}}')) as m:
+        assert agent.test(model="fast/model", timeout=42) == "parser test fails: bad token"
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "fast/model"
+    assert m.call_args.kwargs["timeout"] == 42
+    assert agent.last["label"] == "test"
 
 
 def test_edit_requires_a_changed_target_and_forwards_overrides(tmp_path):

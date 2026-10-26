@@ -100,7 +100,7 @@ ranger.Ranger(
 
 ### Child process environment
 
-Every harness child process (the `ask`/`do`/`edit`/`write`/`search`/`summarize`/`check`
+Every harness child process (the `ask`/`do`/`edit`/`write`/`search`/`summarize`/`test`/`check`
 CLI runs, and the `gate()` shell command) sees exactly this environment:
 
 1. **The full inherited `os.environ` of your Python process** — nothing is
@@ -126,7 +126,7 @@ the child by design.
 
 ### Per-call overrides
 
-Every command method (`ask`, `summarize`, `write`, `do`, `edit`, `search`, `check`,
+Every command method (`ask`, `summarize`, `write`, `do`, `edit`, `search`, `test`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
@@ -143,7 +143,7 @@ immediately — typos fail loudly, never silently. Priority rules:
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
   was requested; `effort` ∈ {low, medium, high} — anything else raises
   (`ValueError` at construction, `TypeError` per-call).
-- **Fact commands run pure**: `check`, `search` and `summarize` drop
+- **Fact commands run pure**: `check`, `search`, `summarize` and `test` drop
   `session=` and skip history recall — a verdict is about the repo, not
   the chat.
 
@@ -217,6 +217,13 @@ multiline `file:line` report. The prompt forbids code changes. **Local
 files only — the prompt contract steers away from web tools; there is no
 technical wall.** For web work, use `ask()` with an explicit web-research
 prompt.
+
+### `test(**ov) -> str`
+
+Runs the project's existing test suite and returns a concise diagnosis. The
+agent must not modify, create, delete, or rename files; on failure it reports
+relevant evidence, likely root causes, and minimal fix direction. Like other
+fact commands, `test()` runs history- and harness-session-independent.
 
 ### `check(condition, **ov) -> bool`
 
@@ -424,7 +431,7 @@ for r in results:
   recall the most recent messages that fit inside `memory_budget`
   characters, prepended as a `## Previous interaction` block before the
   `## Current request`.
-- **Fact commands run pure**: `check`, `search` and `summarize` never see
+- **Fact commands run pure**: `check`, `search`, `summarize` and `test` never see
   conversation history — a verdict must not be a function of chat
   (paradigm law: context memory colors your dialogues, never your facts).
 - `memory=False` (constructor or single call) disables both recording and
@@ -737,6 +744,7 @@ Each command wraps your input in a frozen prompt the agent must honor:
 - `do`: accomplish `{goal}` with tools, report what changed.
 - `edit`: modify only the existing `{absolute path}`, report what changed.
 - `search`: grep for `{goal}`, reply `file:line` report, **no code changes**.
+- `test`: run the project's test suite, diagnose failures, **no file changes**.
 - `check`: decide TRUE/FALSE for `{condition}`, must verify, answer a standalone YES/NO line.
 - `until`: each iteration, "name ONE concrete next step, one line."
 

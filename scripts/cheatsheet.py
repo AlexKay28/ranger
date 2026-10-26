@@ -97,6 +97,7 @@ CARDS = [
             "a.check(condition)  -> bool",
             "a.search(goal)      -> findings",
             "a.summarize(file)   -> summary",
+            "a.test()            -> test diagnosis",
         ],
     },
     {

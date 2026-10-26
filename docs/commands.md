@@ -42,7 +42,7 @@ Wipe recorded context; returns what was cleared.
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`,
-`search`, `summarize`) always run history- and session-independent — context
+`search`, `summarize`, `test`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
 constructor or any single call disables recording and recall.
 
@@ -63,7 +63,7 @@ configured copy.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
   `wall_s`, `model_s`, `parts`, `chars`, `session`.
 
-## ✅ Shipped — core commands (13)
+## ✅ Shipped — core commands (14)
 
 ### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
@@ -130,6 +130,15 @@ Read-only codebase search. Returns a `file:line` multiline report. Never edits.
 
 ```python
 agent.search("where do we parse config files?")
+```
+
+### `test() -> str`
+Run the project's existing test suite and return a concise, read-only failure
+diagnosis: relevant evidence, likely root causes, and minimal fix direction.
+It never modifies files and runs without recalled history or a harness session.
+
+```python
+agent.test()
 ```
 
 ### `check(condition) -> bool`
@@ -214,10 +223,6 @@ Symmetric exchange, optionally refereed by a third agent.
 Read-only code review of a file or diff: bugs, smells, security, missing
 tests. (Distinct from the shipped multi-agent `review`, which renders an
 APPROVE/REJECT verdict between agents; this is a prose critique of code.)
-
-### `test() -> str`
-Run the project's tests, report failures with root-cause guesses, and propose
-minimal fixes. Pairs with `fix` for the repair loop.
 
 ### `read(file, question) -> str`
 Pointed Q&A about one file ("what inputs can crash this?"), vs `summarize`'s
