@@ -813,6 +813,36 @@ class Ranger:
         )
         return self._run(prompt, label="do", **ov)
 
+    def edit(self, file: str | Path, instruction: str, **ov) -> str:
+        """Make one requested change to exactly one existing file.
+
+        Relative paths resolve against the agent's cwd. Raises RangerError if
+        the target was not modified during the agent run.
+        """
+        target = Path(file)
+        if not target.is_absolute():
+            target = Path(self.cwd or Path.cwd()) / target
+        target = target.resolve()
+        try:
+            before = target.stat().st_mtime_ns
+        except FileNotFoundError:
+            raise RangerError(f"edit() target does not exist: {target}") from None
+        prompt = (
+            f"Edit exactly this existing file: {target}\n\n"
+            f"Instruction: {instruction}\n\n"
+            "You may modify only that file. Do not create, edit, rename, or "
+            "delete any other file. When finished, reply with a short report "
+            "of the change and anything that failed."
+        )
+        report = self._run(prompt, label="edit", **ov)
+        try:
+            after = target.stat().st_mtime_ns
+        except FileNotFoundError:
+            raise RangerError(f"agent removed the edit() target: {target}") from None
+        if after == before:
+            raise RangerError(f"agent did not modify the edit() target: {target}")
+        return report
+
     def plan(self, goal: str, **ov) -> str:
         """Produce a numbered implementation plan for a goal.
 

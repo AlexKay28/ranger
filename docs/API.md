@@ -100,7 +100,7 @@ ranger.Ranger(
 
 ### Child process environment
 
-Every harness child process (the `ask`/`do`/`write`/`search`/`summarize`/`check`
+Every harness child process (the `ask`/`do`/`edit`/`write`/`search`/`summarize`/`check`
 CLI runs, and the `gate()` shell command) sees exactly this environment:
 
 1. **The full inherited `os.environ` of your Python process** — nothing is
@@ -126,7 +126,7 @@ the child by design.
 
 ### Per-call overrides
 
-Every command method (`ask`, `summarize`, `write`, `do`, `search`, `check`,
+Every command method (`ask`, `summarize`, `write`, `do`, `edit`, `search`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
@@ -191,6 +191,15 @@ Empty tasks fall back to slug `ranger_out`.
 Free-roaming filesystem work: the agent may create/edit/delete files and
 run shell commands in its cwd, then reports what it did, which files
 changed, and what failed. This is "run it like from the CLI".
+
+### `edit(file, instruction, **ov) -> str`
+
+Bounded single-file mutation. `file` may be absolute or relative to the
+agent's `cwd`; ranger resolves it to an absolute existing path, instructs the
+agent to modify **only** that file, and returns the agent report only after its
+mtime changed. A missing, removed, or unchanged target raises `RangerError`.
+Use `do()` when the task legitimately needs to create, edit, rename, or delete
+multiple files.
 
 ### `plan(goal, **ov) -> str`
 
@@ -411,7 +420,7 @@ for r in results:
 
 - Every command automatically records its **raw** request and answer (never
   the context-prefixed prompt, so transcripts cannot nest/explode).
-- Subsequent **dialogue** commands (`ask`, `do`, `write`, `context_*`)
+- Subsequent **dialogue** commands (`ask`, `do`, `edit`, `write`, `context_*`)
   recall the most recent messages that fit inside `memory_budget`
   characters, prepended as a `## Previous interaction` block before the
   `## Current request`.
@@ -726,6 +735,7 @@ Each command wraps your input in a frozen prompt the agent must honor:
 - `summarize`: read `{absolute path}`, reply summary only.
 - `write`: write the file at `{path}`, reply with the path only.
 - `do`: accomplish `{goal}` with tools, report what changed.
+- `edit`: modify only the existing `{absolute path}`, report what changed.
 - `search`: grep for `{goal}`, reply `file:line` report, **no code changes**.
 - `check`: decide TRUE/FALSE for `{condition}`, must verify, answer a standalone YES/NO line.
 - `until`: each iteration, "name ONE concrete next step, one line."

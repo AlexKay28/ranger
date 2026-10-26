@@ -40,7 +40,7 @@ runs recall the bounded summary instead of the full transcript.
 Wipe recorded context; returns what was cleared.
 
 All commands auto-record their exchange into `agent.context` (OpenAI message
-format); dialogue commands (`ask`, `do`, `plan`, `write`, `context_*`) also recall
+format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`,
 `search`, `summarize`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
@@ -63,7 +63,7 @@ configured copy.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
   `wall_s`, `model_s`, `parts`, `chars`, `session`.
 
-## ✅ Shipped — core commands (12)
+## ✅ Shipped — core commands (13)
 
 ### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
@@ -103,6 +103,16 @@ commands) like a human with a shell, return a report of what changed.
 
 ```python
 agent.do("rename all *.txt in data/ to *.md")
+```
+
+### `edit(file, instruction) -> str`
+Make one bounded change to one existing file. The prompt pins its absolute
+path and forbids other filesystem changes; ranger also verifies that target's
+mtime changed before returning the agent report. Use `do()` for free-roaming
+work across files.
+
+```python
+agent.edit("src/parser.py", "Handle empty input with a clear error")
 ```
 
 ### `plan(goal) -> str`
@@ -198,11 +208,7 @@ Adversarial attack on another agent's claim or last answer.
 ### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` *(module-level)*
 Symmetric exchange, optionally refereed by a third agent.
 
-## 🔜 Next batch (planned, same pattern) (4)
-
-### `edit(file, instruction) -> str`
-Targeted fine-grained change to one file only (vs. `do`, which is free-roaming).
-Prompt pins the file; returns what changed and why. Post-check: file mtime.
+## 🔜 Next batch (planned, same pattern) (3)
 
 ### `critique(file_or_diff) -> str`
 Read-only code review of a file or diff: bugs, smells, security, missing
@@ -249,7 +255,8 @@ agent.until("parser.py: implement the TODO, all tests green",
             gate_cmd="python -m pytest -q")
 ```
 
-Shipped surface today: **16 commands** (11 core + 5 multi-agent) plus the
+Shipped surface today includes bounded `edit()` alongside free-roaming `do()`,
+plus the multi-agent interactions, the
 context/memory trio (`context_summarize`/`context_compact`/`context_clear`)
 and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The 🌱 tier
 that remains (fix/transform/commit) composes on top of it.

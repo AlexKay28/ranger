@@ -153,6 +153,7 @@ def test_purity_map_for_every_command():
     plan = [
         ("ask", lambda a: a.ask("x")),
         ("do", lambda a: a.do("x")),
+        ("edit", lambda a: a.edit(edit_target, "change it")),
         ("write", lambda a: a.write("x", path="f.md")),
         ("check", lambda a: a.check("x")),
         ("search", lambda a: a.search("x")),
@@ -161,16 +162,23 @@ def test_purity_map_for_every_command():
     ]
     import tempfile
     with tempfile.TemporaryDirectory() as d:
+        edit_target = Path(d) / "edit.txt"
+        edit_target.write_text("before")
         for label, method in plan:
-            with mock.patch("ranger.subprocess.run",
-                            return_value=fake_run("VERTEX:\nVERTEX")) as m:
+            def run(cmd, **kw):
+                if label == "edit":
+                    edit_target.write_text("after")
+                    stamp = edit_target.stat().st_mtime_ns
+                    os.utime(edit_target, ns=(stamp, stamp + 1))
+                return fake_run("VERTEX:\nVERTEX")
+            with mock.patch("ranger.subprocess.run", side_effect=run) as m:
                 try:
                     method(agent)
                 except RangerError:
                     pass  # answers here are garbage — parse may fail, fine
                 prompt = m.call_args.args[0][-1]
             recalls = "HIST" in prompt
-            expectations = {"ask": True, "do": True, "write": True,
+            expectations = {"ask": True, "do": True, "edit": True, "write": True,
                              "check": False, "search": False,
                              "summarize": False, "review": False}
             assert recalls == expectations[label], (

@@ -81,6 +81,7 @@ agent = ranger.Ranger(model="openrouter/anthropic/claude-sonnet-4.5")
 agent.summarize("notes.md")          # -> str summary of the file
 agent.write("a one-page report on X")  # -> path of the file the agent wrote
 agent.do("rename all *.txt files in data/ to *.md")  # -> report of CLI-like work
+agent.edit("src/parser.py", "Handle empty input")   # -> one bounded file change
 agent.search("where do we parse config?")            # -> multiline findings report
 agent.ask("anything at all")         # -> raw prompt, raw answer
 agent.check("all tests pass")        # -> YES/NO verdict as a bool
@@ -142,7 +143,7 @@ agent.ask("...", memory=False)  # one stateless run
 ranger.Ranger(memory=False)      # or a fully stateless agent
 ```
 
-Context memory colors your dialogues, never your facts: `ask`/`do`/`write`
+Context memory colors your dialogues, never your facts: `ask`/`do`/`edit`/`write`
 recall the recent conversation; `check`/`search`/`summarize` always run
 history-independent, so a verdict is about the repo, not the chat
 ([PARADIGM.md](docs/PARADIGM.md), law 4).

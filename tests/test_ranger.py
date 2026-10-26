@@ -6,6 +6,7 @@ Contract (cycle 2 of the growth loop): >=12 tests, exit 0, no changes to
 ranger/__init__.py, no network, no real agent calls.
 """
 
+import os
 import re
 import signal
 import subprocess
@@ -272,17 +273,49 @@ def test_command_prompt_contents(tmp_path):
 
     def capture(cmd, **kw):
         prompts.append(cmd[-1])
+        if "Edit exactly this existing file" in cmd[-1]:
+            target.write_text("after")
+            stamp = target.stat().st_mtime_ns
+            os.utime(target, ns=(stamp, stamp + 1))
         return fake_run("ok")
 
     with mock.patch("ranger.subprocess.run", side_effect=capture):
         agent.summarize(target)
         agent.do("rename the files")
+        target.write_text("before")
+        agent.edit(target, "replace the text")
         agent.search("where is config parsed")
 
     assert str(target.resolve()) in prompts[0]
     assert "rename the files" in prompts[1]
-    assert "where is config parsed" in prompts[2]
-    assert "No code changes" in prompts[2]
+    assert str(target.resolve()) in prompts[2]
+    assert "replace the text" in prompts[2]
+    assert "only that file" in prompts[2]
+    assert "where is config parsed" in prompts[3]
+    assert "No code changes" in prompts[3]
+
+
+def test_edit_requires_a_changed_target_and_forwards_overrides(tmp_path):
+    target = tmp_path / "notes.md"
+    target.write_text("before")
+    agent = Ranger(cwd=tmp_path)
+
+    def edit_target(cmd, **kw):
+        assert "Edit exactly this existing file" in cmd[-1]
+        target.write_text("after")
+        stamp = target.stat().st_mtime_ns
+        os.utime(target, ns=(stamp, stamp + 1))
+        return fake_run("changed it")
+
+    with mock.patch("ranger.subprocess.run", side_effect=edit_target) as m:
+        assert agent.edit("notes.md", "replace the text", timeout=42) == "changed it"
+    assert m.call_args.kwargs["timeout"] == 42
+    assert agent.last == {}
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("claimed")):
+        with pytest.raises(RangerError, match="did not modify"):
+            agent.edit(target, "do nothing")
+    with pytest.raises(RangerError, match="does not exist"):
+        agent.edit("missing.md", "make one")
 
 
 def test_write_slug_fallback_for_empty_task(tmp_path):

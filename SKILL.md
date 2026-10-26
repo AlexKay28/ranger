@@ -24,6 +24,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 |---|---|---|
 | Open-ended answer or one small plan | `ask(prompt)` | A custom chat loop |
 | Make a filesystem change | `do(goal)` | A claim that a change happened |
+| Change one existing file only | `edit(file, instruction)` | `do()` free rein |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
 | Read-only codebase findings | `search(goal)` / `summarize(file)` | `do()` |
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
@@ -54,7 +55,7 @@ an exit-code boolean and does not call a model.
 - Ctrl+C / notebook interrupt raises `KeyboardInterrupt`, stops the CLI client,
   and retires the progress spinner. Long loops put honest partial state in the
   interrupt message; nothing is claimed complete.
-- `ask`, `do`, and `write` record and recall bounded `agent.context`. Treat it
+- `ask`, `do`, `edit`, and `write` record and recall bounded `agent.context`. Treat it
   as conversational color, never as a fact store.
 - `check`, `search`, `summarize`, `review`, challenge judgments, and debate
   judges are memory- and session-free by contract. Do not try to override that
