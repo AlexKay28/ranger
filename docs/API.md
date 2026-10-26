@@ -100,7 +100,7 @@ ranger.Ranger(
 
 ### Child process environment
 
-Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`test`/`lint`/`critique`/`check`
+Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`test`/`lint`/`diagnose`/`critique`/`check`
 CLI runs, and the `gate()` shell command) sees exactly this environment:
 
 1. **The full inherited `os.environ` of your Python process** — nothing is
@@ -126,7 +126,7 @@ the child by design.
 
 ### Per-call overrides
 
-Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `test`, `lint`, `critique`, `check`,
+Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `test`, `lint`, `diagnose`, `critique`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
@@ -143,7 +143,7 @@ immediately — typos fail loudly, never silently. Priority rules:
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
   was requested; `effort` ∈ {low, medium, high} — anything else raises
   (`ValueError` at construction, `TypeError` per-call).
-- **Fact commands run pure**: `check`, `critique`, `lint`, `read`, `search`, `summarize` and `test` drop
+- **Fact commands run pure**: `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize` and `test` drop
   `session=` and skip history recall — a verdict is about the repo, not
   the chat.
 
@@ -240,6 +240,14 @@ diagnosis. The agent must not modify, create, delete, or rename files; on
 failure it reports the relevant check and error evidence plus minimal
 remediation. Like other fact commands, `lint()` runs history- and
 harness-session-independent.
+
+### `diagnose(error, **ov) -> str`
+
+Diagnoses pasted traceback or error-log text without rerunning a command. The
+agent may inspect relevant local code to establish the cause, then returns an
+evidence-backed likely root cause and minimal fix direction. It must not
+modify, create, delete, or rename files; like other fact commands, `diagnose()`
+runs without recalled history or a harness session.
 
 ### `critique(file_or_diff, **ov) -> str`
 
@@ -457,7 +465,7 @@ for r in results:
   recall the most recent messages that fit inside `memory_budget`
   characters, prepended as a `## Previous interaction` block before the
   `## Current request`.
-- **Fact commands run pure**: `check`, `critique`, `lint`, `read`, `search`, `summarize` and `test` never see
+- **Fact commands run pure**: `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize` and `test` never see
   conversation history — a verdict must not be a function of chat
   (paradigm law: context memory colors your dialogues, never your facts).
 - `memory=False` (constructor or single call) disables both recording and
@@ -773,6 +781,7 @@ Each command wraps your input in a frozen prompt the agent must honor:
 - `search`: grep for `{goal}`, reply `file:line` report, **no code changes**.
 - `test`: run the project's test suite, diagnose failures, **no file changes**.
 - `lint`: run existing lint and format checks, diagnose failures, **no file changes**.
+- `diagnose`: inspect pasted `{error}` text and relevant local code, report root cause and minimal fix direction, **no file changes**.
 - `critique`: review `{file_or_diff}` for bugs, risks, security, and missing tests, **no file changes**.
 - `check`: decide TRUE/FALSE for `{condition}`, must verify, answer a standalone YES/NO line.
 - `until`: each iteration, "name ONE concrete next step, one line."

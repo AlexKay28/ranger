@@ -50,7 +50,7 @@ Python control flow**. No DSL, no graph JSON, no hidden runtime.
    ambient identity: sessions are opt-in continuation, not hidden state.
    Corollary — **context memory colors your dialogues, never your facts**:
    recall applies only to dialogue commands (`ask`, `do`, `write`,
-    `context_*`); `check`, `critique`, `read`, `search`, `summarize` and `test` always run
+     `context_*`); `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize` and `test` always run
    history-independent, because a verdict must not be a function of chat.
    The same corollary governs multi-agent interactions: reviewers,
    challengers and judges run memory- and session-free, and one agent's

@@ -59,9 +59,10 @@ register) from plain Python. You write code, not chat.
    implement `build_cmd()` (options → CLI argv) and `parse_output()`
    (stream → answer + optional telemetry).
 3. **State is explicit and pure where it matters.** `agent.context` is
-   a visible message list; dialogue commands recall bounded recent
-    history, while fact commands (`check`, `read`, `search`, `summarize`,
-   `review`) and judges run history- and session-free — a verdict must
+    a visible message list; dialogue commands recall bounded recent
+     history, while fact commands (`check`, `critique`, `diagnose`, `lint`,
+    `read`, `search`, `summarize`, `test`, `review`) and judges run history-
+    and session-free — a verdict must
    not be a function of chat. One agent's words reach another only as
    explicitly-labeled *claims to verify*.
 

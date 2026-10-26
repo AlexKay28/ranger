@@ -28,6 +28,9 @@ def main() -> None:
     print("\nhealth script role:\n", agent.read(
         "project_health.py", "What read-only checks does this script perform?"
     ))
+    print("\nexample error diagnosis:\n", agent.diagnose(
+        "Traceback (most recent call last):\nValueError: invalid project config"
+    ))
     print("\nagent telemetry:", agent.last)
 
 

@@ -99,8 +99,12 @@ CARDS = [
             "a.search/summarize(goal) -> findings",
             "a.test()            -> test diagnosis",
             "a.lint()            -> lint/format diagnosis",
+            "a.diagnose(error)   -> root-cause direction",
             "a.critique(file_or_diff) -> review",
         ],
+        "code_size": 18,
+        "code_y": 86,
+        "code_step": 20,
     },
     {
         "bounds": (44, 648, 1112, 202),

@@ -288,6 +288,7 @@ def test_command_prompt_contents(tmp_path):
         agent.search("where is config parsed")
         assert agent.test(timeout=42) == "ok"
         assert agent.lint(timeout=42) == "ok"
+        assert agent.diagnose("ValueError: bad token", timeout=42) == "ok"
         assert agent.critique("src/parser.py", timeout=42) == "ok"
 
     assert str(target.resolve()) in prompts[0]
@@ -306,10 +307,14 @@ def test_command_prompt_contents(tmp_path):
     assert "lint and format checks" in prompts[6]
     assert "do NOT modify" in prompts[6]
     assert "minimal remediation" in prompts[6]
-    assert "src/parser.py" in prompts[7]
+    assert "ValueError: bad token" in prompts[7]
     assert "do NOT modify" in prompts[7]
-    assert "security" in prompts[7]
-    assert "missing tests" in prompts[7]
+    assert "root cause" in prompts[7]
+    assert "minimal fix direction" in prompts[7]
+    assert "src/parser.py" in prompts[8]
+    assert "do NOT modify" in prompts[8]
+    assert "security" in prompts[8]
+    assert "missing tests" in prompts[8]
 
 
 def test_test_returns_harness_diagnosis_and_forwards_overrides():
@@ -341,6 +346,29 @@ def test_lint_is_pure_and_forwards_overrides():
     assert cmd[cmd.index("--model") + 1] == "fast/model"
     assert m.call_args.kwargs["timeout"] == 42
     assert agent.last["label"] == "lint"
+
+
+def test_diagnose_is_pure_and_forwards_overrides():
+    agent = Ranger(stats=True, session="ses_hist")
+    agent.context = [{"role": "user", "content": "previous answer"}]
+    payload = ('{"sessionID":"ses_diagnose","part":{"type":"text",'
+               '"text":"The parser rejects an empty token."}}')
+    error = "Traceback (most recent call last):\nValueError: bad token"
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+        assert agent.diagnose(error, model="fast/model", timeout=42) == (
+            "The parser rejects an empty token."
+        )
+    cmd = m.call_args.args[0]
+    prompt = cmd[-1]
+    assert error in prompt
+    assert "do NOT modify" in prompt
+    assert "evidence-backed" in prompt
+    assert "root cause" in prompt
+    assert "Previous interaction" not in prompt
+    assert "ses_hist" not in cmd
+    assert cmd[cmd.index("--model") + 1] == "fast/model"
+    assert m.call_args.kwargs["timeout"] == 42
+    assert agent.last["label"] == "diagnose"
 
 
 def test_critique_is_pure_and_forwards_overrides():

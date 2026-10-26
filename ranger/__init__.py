@@ -420,7 +420,7 @@ register_backend("openhands", _OpenHandsBackend)
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
 # never facts). Recall is skipped for these; recording still happens.
-_PURE_LABELS = frozenset({"check", "critique", "lint", "read", "search", "summarize", "test"})
+_PURE_LABELS = frozenset({"check", "critique", "diagnose", "lint", "read", "search", "summarize", "test"})
 
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
@@ -919,6 +919,22 @@ class Ranger:
             "that outcome and the command(s) run."
         )
         return self._run(prompt, label="lint", **ov)
+
+    def diagnose(self, error: str, **ov) -> str:
+        """Diagnose pasted traceback or error-log text without modifying files.
+
+        The agent may inspect relevant local code, but this command is
+        history- and session-independent and never permits filesystem changes.
+        """
+        prompt = (
+            "Diagnose this pasted traceback or error log from the current project:\n\n"
+            f"{error}\n\n"
+            "You may inspect relevant local code to establish the cause. Reading and "
+            "analysis only — do NOT modify, create, delete, or rename any file. Give "
+            "an evidence-backed likely root cause, cite the relevant error or code "
+            "evidence, and propose the minimal fix direction."
+        )
+        return self._run(prompt, label="diagnose", **ov)
 
     def critique(self, file_or_diff: str, **ov) -> str:
         """Review a file path or diff for risks without modifying anything.

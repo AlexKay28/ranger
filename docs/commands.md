@@ -42,7 +42,7 @@ Wipe recorded context; returns what was cleared.
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`, `critique`,
-`lint`, `read`, `search`, `summarize`, `test`) always run history- and session-independent — context
+`diagnose`, `lint`, `read`, `search`, `summarize`, `test`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
 constructor or any single call disables recording and recall.
 
@@ -158,6 +158,16 @@ harness session.
 
 ```python
 agent.lint()
+```
+
+### `diagnose(error) -> str`
+Diagnose a pasted traceback or error log without rerunning a command. The agent
+may inspect relevant local code, then returns an evidence-backed likely root
+cause and minimal fix direction. It never modifies files and runs without
+recalled history or a harness session.
+
+```python
+agent.diagnose("ValueError: invalid token")
 ```
 
 ### `critique(file_or_diff) -> str`
