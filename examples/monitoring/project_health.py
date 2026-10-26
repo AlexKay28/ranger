@@ -25,6 +25,7 @@ def main() -> None:
         "or unhandled error paths. Include file paths and line numbers."
     )
     print("\nrisks:\n", findings)
+    print("\nconfig call path:\n", agent.trace("Ranger._run"))
     print("\nhealth script role:\n", agent.read(
         "project_health.py", "What read-only checks does this script perform?"
     ))

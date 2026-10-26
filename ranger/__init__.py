@@ -420,7 +420,7 @@ register_backend("openhands", _OpenHandsBackend)
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
 # never facts). Recall is skipped for these; recording still happens.
-_PURE_LABELS = frozenset({"check", "critique", "diagnose", "lint", "read", "search", "summarize", "test"})
+_PURE_LABELS = frozenset({"check", "critique", "diagnose", "lint", "read", "search", "summarize", "test", "trace"})
 
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
@@ -897,6 +897,20 @@ class Ranger:
             "No code changes."
         )
         return self._run(prompt, label="search", **ov)
+
+    def trace(self, symbol: str, **ov) -> str:
+        """Trace a symbol's definition, callers, and data flow without mutation.
+
+        This repository-wide analysis is history- and session-independent.
+        """
+        prompt = (
+            f"Trace this symbol across the current repository: {symbol}\n\n"
+            "Inspect the codebase and report the symbol's definition, callers, and "
+            "relevant data-flow relationships. Cite every finding with `file:line` "
+            "evidence. Reading and analysis only — do NOT modify, create, delete, "
+            "or rename any file."
+        )
+        return self._run(prompt, label="trace", **ov)
 
     def test(self, **ov) -> str:
         """Run the project's test suite and diagnose failures without mutation."""

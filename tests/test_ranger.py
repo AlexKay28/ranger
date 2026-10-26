@@ -286,6 +286,7 @@ def test_command_prompt_contents(tmp_path):
         target.write_text("before")
         agent.edit(target, "replace the text")
         agent.search("where is config parsed")
+        assert agent.trace("parse_config", timeout=42) == "ok"
         assert agent.test(timeout=42) == "ok"
         assert agent.lint(timeout=42) == "ok"
         assert agent.diagnose("ValueError: bad token", timeout=42) == "ok"
@@ -301,20 +302,25 @@ def test_command_prompt_contents(tmp_path):
     assert "only that file" in prompts[3]
     assert "where is config parsed" in prompts[4]
     assert "No code changes" in prompts[4]
-    assert "test suite" in prompts[5]
+    assert "parse_config" in prompts[5]
+    assert "definition, callers" in prompts[5]
+    assert "data-flow" in prompts[5]
+    assert "file:line" in prompts[5]
     assert "do NOT modify" in prompts[5]
-    assert "root cause" in prompts[5]
-    assert "lint and format checks" in prompts[6]
+    assert "test suite" in prompts[6]
     assert "do NOT modify" in prompts[6]
-    assert "minimal remediation" in prompts[6]
-    assert "ValueError: bad token" in prompts[7]
+    assert "root cause" in prompts[6]
+    assert "lint and format checks" in prompts[7]
     assert "do NOT modify" in prompts[7]
-    assert "root cause" in prompts[7]
-    assert "minimal fix direction" in prompts[7]
-    assert "src/parser.py" in prompts[8]
+    assert "minimal remediation" in prompts[7]
+    assert "ValueError: bad token" in prompts[8]
     assert "do NOT modify" in prompts[8]
-    assert "security" in prompts[8]
-    assert "missing tests" in prompts[8]
+    assert "root cause" in prompts[8]
+    assert "minimal fix direction" in prompts[8]
+    assert "src/parser.py" in prompts[9]
+    assert "do NOT modify" in prompts[9]
+    assert "security" in prompts[9]
+    assert "missing tests" in prompts[9]
 
 
 def test_test_returns_harness_diagnosis_and_forwards_overrides():
@@ -346,6 +352,29 @@ def test_lint_is_pure_and_forwards_overrides():
     assert cmd[cmd.index("--model") + 1] == "fast/model"
     assert m.call_args.kwargs["timeout"] == 42
     assert agent.last["label"] == "lint"
+
+
+def test_trace_is_pure_and_forwards_overrides():
+    agent = Ranger(stats=True, session="ses_hist")
+    agent.context = [{"role": "user", "content": "previous answer"}]
+    payload = ('{"sessionID":"ses_trace","part":{"type":"text",'
+               '"text":"src/parser.py:12 defines parse_config."}}')
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+        assert agent.trace("parse_config", model="fast/model", timeout=42) == (
+            "src/parser.py:12 defines parse_config."
+        )
+    cmd = m.call_args.args[0]
+    prompt = cmd[-1]
+    assert "parse_config" in prompt
+    assert "definition, callers" in prompt
+    assert "data-flow" in prompt
+    assert "file:line" in prompt
+    assert "do NOT modify" in prompt
+    assert "Previous interaction" not in prompt
+    assert "ses_hist" not in cmd
+    assert cmd[cmd.index("--model") + 1] == "fast/model"
+    assert m.call_args.kwargs["timeout"] == 42
+    assert agent.last["label"] == "trace"
 
 
 def test_diagnose_is_pure_and_forwards_overrides():
@@ -1053,7 +1082,8 @@ def test_recall_is_skipped_for_pure_commands():
                            ("lint", lambda: agent.lint()),
                            ("read", lambda: agent.read("x.py", "What port is used?")),
                            ("search", lambda: agent.search("PORT usage")),
-                           ("summarize", lambda: agent.summarize("x.py"))):
+                           ("summarize", lambda: agent.summarize("x.py")),
+                           ("trace", lambda: agent.trace("serve"))):
         with mock.patch("ranger.subprocess.run",
                         return_value=fake_run("YES")) as m:
             method()

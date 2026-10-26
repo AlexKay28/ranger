@@ -84,6 +84,7 @@ agent.write("a one-page report on X")  # -> path of the file the agent wrote
 agent.do("rename all *.txt files in data/ to *.md")  # -> report of CLI-like work
 agent.edit("src/parser.py", "Handle empty input")   # -> one bounded file change
 agent.search("where do we parse config?")            # -> multiline findings report
+agent.trace("parse_config")                 # -> definition, callers, and data flow
 agent.test()                              # -> read-only test failure diagnosis
 agent.lint()                              # -> read-only lint/format diagnosis
 agent.diagnose("ValueError: invalid token")  # -> root cause and minimal fix direction
@@ -149,7 +150,7 @@ ranger.Ranger(memory=False)      # or a fully stateless agent
 ```
 
 Context memory colors your dialogues, never your facts: `ask`/`do`/`edit`/`write`
-recall the recent conversation; `check`/`critique`/`diagnose`/`lint`/`read`/`search`/`summarize`/`test` always run
+recall the recent conversation; `check`/`critique`/`diagnose`/`lint`/`read`/`search`/`summarize`/`test`/`trace` always run
 history-independent, so a verdict is about the repo, not the chat
 ([PARADIGM.md](docs/PARADIGM.md), law 4).
 

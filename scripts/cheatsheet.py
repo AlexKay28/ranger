@@ -90,13 +90,14 @@ CARDS = [
         "code_step": 24,
     },
     {
-        "bounds": (609, 428, 547, 226),
+        "bounds": (609, 428, 547, 246),
         "num": "03", "title": "FACTS",
         "desc": "Memory-free facts and verdicts.",
         "code": [
             "a.check(condition)  -> bool",
             "a.read(file, question) -> answer",
             "a.search/summarize(goal) -> findings",
+            "a.trace(symbol)       -> call-path findings",
             "a.test()            -> test diagnosis",
             "a.lint()            -> lint/format diagnosis",
             "a.diagnose(error)   -> root-cause direction",
@@ -107,7 +108,7 @@ CARDS = [
         "code_step": 20,
     },
     {
-        "bounds": (44, 648, 1112, 202),
+        "bounds": (44, 668, 1112, 202),
         "num": "04", "title": "LOOPS",
         "desc": "Plan -> act -> verify. Bounded rounds; explicit gates.",
         "code": [
@@ -118,7 +119,7 @@ CARDS = [
         ],
     },
     {
-        "bounds": (44, 868, 1112, 194),
+        "bounds": (44, 888, 1112, 194),
         "num": "05", "title": "MULTI-AGENT",
         "desc": "Compose peers; reviewers and judges ignore their own chat history.",
         "note": "debate: import ranger",
@@ -132,7 +133,7 @@ CARDS = [
         "code_step": 23,
     },
     {
-        "bounds": (44, 1080, 1112, 222),
+        "bounds": (44, 1100, 1112, 222),
         "num": "06", "title": "CONFIGURATION",
         "desc": "Constructor defaults; per-call overrides. cwd: constructor/with_config only.",
         "columns": [
@@ -153,7 +154,7 @@ CARDS = [
         ],
     },
     {
-        "bounds": (44, 1320, 1112, 142),
+        "bounds": (44, 1340, 1112, 142),
         "num": "07", "title": "REPLACE THE HARNESS",
         "desc": "opencode (default) or codex. Same API; different harness.",
         "code": [

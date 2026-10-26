@@ -100,7 +100,7 @@ ranger.Ranger(
 
 ### Child process environment
 
-Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`test`/`lint`/`diagnose`/`critique`/`check`
+Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`trace`/`test`/`lint`/`diagnose`/`critique`/`check`
 CLI runs, and the `gate()` shell command) sees exactly this environment:
 
 1. **The full inherited `os.environ` of your Python process** — nothing is
@@ -126,7 +126,7 @@ the child by design.
 
 ### Per-call overrides
 
-Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `test`, `lint`, `diagnose`, `critique`, `check`,
+Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `trace`, `test`, `lint`, `diagnose`, `critique`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
@@ -143,7 +143,7 @@ immediately — typos fail loudly, never silently. Priority rules:
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
   was requested; `effort` ∈ {low, medium, high} — anything else raises
   (`ValueError` at construction, `TypeError` per-call).
-- **Fact commands run pure**: `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize` and `test` drop
+- **Fact commands run pure**: `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize`, `test` and `trace` drop
   `session=` and skip history recall — a verdict is about the repo, not
   the chat.
 
@@ -225,6 +225,18 @@ multiline `file:line` report. The prompt forbids code changes. **Local
 files only — the prompt contract steers away from web tools; there is no
 technical wall.** For web work, use `ask()` with an explicit web-research
 prompt.
+
+### `trace(symbol, **ov) -> str`
+
+Read-only repository-wide call-path analysis. The agent inspects the symbol's
+definition, callers, and relevant data-flow relationships, citing each finding
+with `file:line` evidence. It must not modify, create, delete, or rename files;
+like every fact command, `trace()` runs without recalled history or a harness
+session.
+
+```python
+agent.trace("parse_config")
+```
 
 ### `test(**ov) -> str`
 
@@ -465,7 +477,7 @@ for r in results:
   recall the most recent messages that fit inside `memory_budget`
   characters, prepended as a `## Previous interaction` block before the
   `## Current request`.
-- **Fact commands run pure**: `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize` and `test` never see
+- **Fact commands run pure**: `check`, `critique`, `diagnose`, `lint`, `read`, `search`, `summarize`, `test` and `trace` never see
   conversation history — a verdict must not be a function of chat
   (paradigm law: context memory colors your dialogues, never your facts).
 - `memory=False` (constructor or single call) disables both recording and
@@ -779,6 +791,7 @@ Each command wraps your input in a frozen prompt the agent must honor:
 - `do`: accomplish `{goal}` with tools, report what changed.
 - `edit`: modify only the existing `{absolute path}`, report what changed.
 - `search`: grep for `{goal}`, reply `file:line` report, **no code changes**.
+- `trace`: inspect `{symbol}` repository-wide; report definition, callers, and data flow with `file:line` evidence, **no file changes**.
 - `test`: run the project's test suite, diagnose failures, **no file changes**.
 - `lint`: run existing lint and format checks, diagnose failures, **no file changes**.
 - `diagnose`: inspect pasted `{error}` text and relevant local code, report root cause and minimal fix direction, **no file changes**.

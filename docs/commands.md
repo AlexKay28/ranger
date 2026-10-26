@@ -42,7 +42,7 @@ Wipe recorded context; returns what was cleared.
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`, `critique`,
-`diagnose`, `lint`, `read`, `search`, `summarize`, `test`) always run history- and session-independent — context
+`diagnose`, `lint`, `read`, `search`, `summarize`, `test`, `trace`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
 constructor or any single call disables recording and recall.
 
@@ -139,6 +139,15 @@ Read-only codebase search. Returns a `file:line` multiline report. Never edits.
 
 ```python
 agent.search("where do we parse config files?")
+```
+
+### `trace(symbol) -> str`
+Read-only repository-wide call-path analysis. Reports a symbol's definition,
+callers, and relevant data-flow relationships with `file:line` evidence; it
+runs without recalled history or a harness session.
+
+```python
+agent.trace("parse_config")
 ```
 
 ### `test() -> str`
@@ -290,7 +299,7 @@ agent.until("parser.py: implement the TODO, all tests green",
             gate_cmd="python -m pytest -q")
 ```
 
-Shipped surface today includes targeted `critique()` and bounded `edit()` alongside free-roaming `do()`,
+Shipped surface today includes targeted `critique()` and `trace()` alongside bounded `edit()` and free-roaming `do()`,
 plus the multi-agent interactions, the
 context/memory trio (`context_summarize`/`context_compact`/`context_clear`)
 and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The 🌱 tier
