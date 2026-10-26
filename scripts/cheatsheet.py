@@ -79,10 +79,11 @@ CARDS = [
     {
         "bounds": (44, 428, 547, 178),
         "num": "02", "title": "DIALOGUE",
-        "desc": "Recall conversation; answer or act.",
+        "desc": "Recall conversation; answer, act, or edit one file.",
         "code": [
             "a.ask(prompt)       -> str",
             "a.do(goal)          -> report",
+            "a.edit(file, instruction) -> report",
             "a.write(task)       -> file path",
         ],
         "code_y": 88,
