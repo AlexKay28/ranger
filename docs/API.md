@@ -100,7 +100,7 @@ ranger.Ranger(
 
 ### Child process environment
 
-Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`test`/`check`
+Every harness child process (the `ask`/`do`/`edit`/`write`/`read`/`search`/`summarize`/`test`/`critique`/`check`
 CLI runs, and the `gate()` shell command) sees exactly this environment:
 
 1. **The full inherited `os.environ` of your Python process** — nothing is
@@ -126,7 +126,7 @@ the child by design.
 
 ### Per-call overrides
 
-Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `test`, `check`,
+Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search`, `test`, `critique`, `check`,
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
@@ -143,7 +143,7 @@ immediately — typos fail loudly, never silently. Priority rules:
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
   was requested; `effort` ∈ {low, medium, high} — anything else raises
   (`ValueError` at construction, `TypeError` per-call).
-- **Fact commands run pure**: `check`, `read`, `search`, `summarize` and `test` drop
+- **Fact commands run pure**: `check`, `critique`, `read`, `search`, `summarize` and `test` drop
   `session=` and skip history recall — a verdict is about the repo, not
   the chat.
 
@@ -232,6 +232,16 @@ Runs the project's existing test suite and returns a concise diagnosis. The
 agent must not modify, create, delete, or rename files; on failure it reports
 relevant evidence, likely root causes, and minimal fix direction. Like other
 fact commands, `test()` runs history- and harness-session-independent.
+
+### `critique(file_or_diff, **ov) -> str`
+
+Performs a focused, read-only code review of a file path or diff. The target is
+passed through as prompt data (ranger does not parse or validate its format).
+The agent checks for bugs, risks, security issues, and missing tests, then
+returns prose findings with evidence. It must not modify, create, delete, or
+rename files; like other fact commands, `critique()` runs without recalled
+history or a harness session. For a strict APPROVE/REJECT interaction between
+agents, use `review()` instead.
 
 ### `check(condition, **ov) -> bool`
 
@@ -439,7 +449,7 @@ for r in results:
   recall the most recent messages that fit inside `memory_budget`
   characters, prepended as a `## Previous interaction` block before the
   `## Current request`.
-- **Fact commands run pure**: `check`, `read`, `search`, `summarize` and `test` never see
+- **Fact commands run pure**: `check`, `critique`, `read`, `search`, `summarize` and `test` never see
   conversation history — a verdict must not be a function of chat
   (paradigm law: context memory colors your dialogues, never your facts).
 - `memory=False` (constructor or single call) disables both recording and
@@ -754,6 +764,7 @@ Each command wraps your input in a frozen prompt the agent must honor:
 - `edit`: modify only the existing `{absolute path}`, report what changed.
 - `search`: grep for `{goal}`, reply `file:line` report, **no code changes**.
 - `test`: run the project's test suite, diagnose failures, **no file changes**.
+- `critique`: review `{file_or_diff}` for bugs, risks, security, and missing tests, **no file changes**.
 - `check`: decide TRUE/FALSE for `{condition}`, must verify, answer a standalone YES/NO line.
 - `until`: each iteration, "name ONE concrete next step, one line."
 

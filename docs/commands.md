@@ -41,8 +41,8 @@ Wipe recorded context; returns what was cleared.
 
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
-recent history within a character budget, while fact commands (`check`, `read`,
-`search`, `summarize`, `test`) always run history- and session-independent — context
+recent history within a character budget, while fact commands (`check`, `critique`,
+`read`, `search`, `summarize`, `test`) always run history- and session-independent — context
 memory colors your dialogues, never your facts. `memory=False` on the
 constructor or any single call disables recording and recall.
 
@@ -150,6 +150,16 @@ It never modifies files and runs without recalled history or a harness session.
 agent.test()
 ```
 
+### `critique(file_or_diff) -> str`
+Read-only, focused code review of a file path or diff. It reports concrete bugs,
+risks, security issues, and missing tests without editing files; it is history-
+and session-independent. Unlike multi-agent `review()`, it returns prose rather
+than a structured verdict.
+
+```python
+agent.critique("src/parser.py")
+```
+
 ### `check(condition) -> bool`
 Boolean verdict on repo state. The agent must actually verify (commands, file
 reads) and answer with YES/NO as the first word; unparseable answers raise
@@ -226,12 +236,7 @@ Adversarial attack on another agent's claim or last answer.
 ### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` *(module-level)*
 Symmetric exchange, optionally refereed by a third agent.
 
-## 🔜 Next batch (planned, same pattern) (2)
-
-### `critique(file_or_diff) -> str`
-Read-only code review of a file or diff: bugs, smells, security, missing
-tests. (Distinct from the shipped multi-agent `review`, which renders an
-APPROVE/REJECT verdict between agents; this is a prose critique of code.)
+## 🔜 Next batch (planned, same pattern) (1)
 
 ## 🌱 Later (3)
 
@@ -265,7 +270,7 @@ agent.until("parser.py: implement the TODO, all tests green",
             gate_cmd="python -m pytest -q")
 ```
 
-Shipped surface today includes bounded `edit()` alongside free-roaming `do()`,
+Shipped surface today includes targeted `critique()` and bounded `edit()` alongside free-roaming `do()`,
 plus the multi-agent interactions, the
 context/memory trio (`context_summarize`/`context_compact`/`context_clear`)
 and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The 🌱 tier

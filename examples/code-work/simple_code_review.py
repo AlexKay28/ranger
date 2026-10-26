@@ -1,11 +1,9 @@
-"""Review one file with one agent call and a structured verdict.
+"""Critique one file with one read-only agent call.
 
     python simple_code_review.py /path/to/project ranger/__init__.py
 
-The reviewer reads the real file and returns APPROVE, REJECT, or
-REQUEST_CHANGES with findings and concrete changes. This script makes no
-edits. Its exit code is 0 only for APPROVE, so it also works as a small
-pre-commit or CI-adjacent manual check.
+The reviewer reads the real file and returns concrete findings about bugs,
+risks, security issues, and missing tests. This script makes no edits.
 """
 
 import sys
@@ -28,15 +26,7 @@ def main() -> None:
         raise SystemExit(f"not a file: {subject}")
 
     critic = ranger.Ranger(cwd=target, timeout=120)
-    result = critic.review(
-        f"{subject}: check correctness, edge cases, regressions, and tests. "
-        "Read the file and relevant local code; do not edit anything."
-    )
-    print("verdict:", result["verdict"])
-    print("findings:\n", result["findings"])
-    print("changes:\n", result["changes"])
-    if not result["passed"]:
-        raise SystemExit("review needs changes")
+    print(critic.critique(str(subject)))
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Make a filesystem change | `do(goal)` | A claim that a change happened |
 | Change one existing file only | `edit(file, instruction)` | `do()` free rein |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
-| Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `test()` | `do()` |
+| Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `test()` / `critique(file_or_diff)` | `do()` |
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
 | Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
 | Bounded repair loop | `until(..., gate_cmd=..., max_iter=N)` | An unbounded `while` loop |
@@ -57,7 +57,7 @@ an exit-code boolean and does not call a model.
   interrupt message; nothing is claimed complete.
 - `ask`, `do`, `edit`, and `write` record and recall bounded `agent.context`. Treat it
   as conversational color, never as a fact store.
-- `check`, `read`, `search`, `summarize`, `test`, `review`, challenge judgments, and debate
+- `check`, `critique`, `read`, `search`, `summarize`, `test`, `review`, challenge judgments, and debate
   judges are memory- and session-free by contract. Do not try to override that
   purity with `session=`.
 - A model answer is not a success signal. `check()` rejects ambiguous,

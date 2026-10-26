@@ -287,6 +287,7 @@ def test_command_prompt_contents(tmp_path):
         agent.edit(target, "replace the text")
         agent.search("where is config parsed")
         assert agent.test(timeout=42) == "ok"
+        assert agent.critique("src/parser.py", timeout=42) == "ok"
 
     assert str(target.resolve()) in prompts[0]
     assert str(target.resolve()) in prompts[1]
@@ -301,6 +302,10 @@ def test_command_prompt_contents(tmp_path):
     assert "test suite" in prompts[5]
     assert "do NOT modify" in prompts[5]
     assert "root cause" in prompts[5]
+    assert "src/parser.py" in prompts[6]
+    assert "do NOT modify" in prompts[6]
+    assert "security" in prompts[6]
+    assert "missing tests" in prompts[6]
 
 
 def test_test_returns_harness_diagnosis_and_forwards_overrides():
@@ -314,6 +319,27 @@ def test_test_returns_harness_diagnosis_and_forwards_overrides():
     assert cmd[cmd.index("--model") + 1] == "fast/model"
     assert m.call_args.kwargs["timeout"] == 42
     assert agent.last["label"] == "test"
+
+
+def test_critique_is_pure_and_forwards_overrides():
+    agent = Ranger(stats=True, session="ses_hist")
+    agent.context = [{"role": "user", "content": "previous answer"}]
+    payload = ('{"sessionID":"ses_critique","part":{"type":"text",'
+               '"text":"Missing a boundary test."}}')
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+        assert agent.critique("src/parser.py", model="fast/model", timeout=42) == (
+            "Missing a boundary test."
+        )
+    cmd = m.call_args.args[0]
+    prompt = cmd[-1]
+    assert "src/parser.py" in prompt
+    assert "bugs, risks, security issues, and missing tests" in prompt
+    assert "do NOT modify" in prompt
+    assert "Previous interaction" not in prompt
+    assert "ses_hist" not in cmd
+    assert cmd[cmd.index("--model") + 1] == "fast/model"
+    assert m.call_args.kwargs["timeout"] == 42
+    assert agent.last["label"] == "critique"
 
 
 def test_read_answers_one_file_question_and_forwards_overrides(tmp_path):
@@ -966,13 +992,14 @@ def test_check_accepts_verdict_line_after_chatter():
 # paradigm law: context memory colors dialogues, never facts
 
 def test_recall_is_skipped_for_pure_commands():
-    """check/read/search/summarize run history-independent; ask/do recall."""
+    """Fact commands run history-independent; ask/do recall."""
     agent = Ranger()
     agent.context = [
         {"role": "user", "content": "we agreed the PORT is 8080"},
         {"role": "assistant", "content": "okay, 8080 it is"},
     ]
     for label, method in (("check", lambda: agent.check("port is 8080")),
+                           ("critique", lambda: agent.critique("x.py")),
                            ("read", lambda: agent.read("x.py", "What port is used?")),
                            ("search", lambda: agent.search("PORT usage")),
                            ("summarize", lambda: agent.summarize("x.py"))):

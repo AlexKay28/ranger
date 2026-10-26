@@ -12,7 +12,7 @@ effects. All folders except `dummy/` need an authenticated harness CLI
 | | `model_discovery.py` | Discover models and make configured agent copies | 1 |
 | [`code-work/`](code-work/) | `fix_failing_tests.py` | Repair a known test command; the command is a hard gate | <= 2 repair attempts |
 | | `edit_one_file.py` | Make one bounded change to an existing file | 1 |
-| | `simple_code_review.py` | One file -> one strict review verdict | 1 |
+| | `simple_code_review.py` | One file -> focused read-only critique | 1 |
 | | `review_before_merge.py` | Evidence report + independent critic for a local diff | 2 |
 | | `draft_release_notes.py` | Git history -> exact Markdown release-note draft | 2 |
 | | `agentic_loop.py` | Search -> choose one work order -> do, for N passes | 3/pass |

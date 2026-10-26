@@ -420,7 +420,7 @@ register_backend("openhands", _OpenHandsBackend)
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
 # never facts). Recall is skipped for these; recording still happens.
-_PURE_LABELS = frozenset({"check", "read", "search", "summarize", "test"})
+_PURE_LABELS = frozenset({"check", "critique", "read", "search", "summarize", "test"})
 
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
@@ -908,6 +908,23 @@ class Ranger:
             "fix direction. If tests pass, report that outcome and the command run."
         )
         return self._run(prompt, label="test", **ov)
+
+    def critique(self, file_or_diff: str, **ov) -> str:
+        """Review a file path or diff for risks without modifying anything.
+
+        The target is passed through as prompt data; ranger does not parse or
+        validate whether it is a path or a diff. This command is history- and
+        session-independent.
+        """
+        prompt = (
+            "Review this file path or diff for bugs, risks, security issues, and "
+            f"missing tests:\n\n{file_or_diff}\n\n"
+            "Reading and analysis only — do NOT modify, create, delete, or rename "
+            "any file. If the target is a file path, read it and relevant local code. "
+            "If it is a diff, review its contents and relevant local code. Report "
+            "findings directly, prioritizing concrete issues with evidence."
+        )
+        return self._run(prompt, label="critique", **ov)
 
     def check(self, condition: str, **ov) -> bool:
         """Verify a claim about repo state; return True or False.

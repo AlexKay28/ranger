@@ -96,9 +96,9 @@ CARDS = [
         "code": [
             "a.check(condition)  -> bool",
             "a.read(file, question) -> answer",
-            "a.search(goal)      -> findings",
-            "a.summarize(file)   -> summary",
+            "a.search/summarize(goal) -> findings",
             "a.test()            -> test diagnosis",
+            "a.critique(file_or_diff) -> review",
         ],
     },
     {
