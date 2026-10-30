@@ -2723,13 +2723,12 @@ class Ranger:
                 + " — the working tree is LEFT MUTATED; pair rails with "
                   "snapshots=True / rollback() to recover")
 
-    def _prepare_run(self, prompt: str, label: str, ov: dict) -> dict:
-        """Resolve options, recall, prompt contracts and the backend argv.
+    def _resolve_run_options(self, label: str, ov: dict) -> tuple:
+        """Merge ctor + per-call run options into `o`; validate everything.
 
-        The SHARED SEAM: the sync `_run()` and the async `_run_async()`
-        execute exactly this preparation, so their argv are byte-identical
-        by construction (law 1) — the async twins are a shell over the
-        same contract, never a fork of it.
+        Returns (opts, o, adapter, backend_name). Raises TypeError for
+        unknown keywords / unknown backends / bad effort, and validates
+        the safety-rail specs — all BEFORE any outside world is touched.
         """
         opts = {k: getattr(self, k) for k in _RUN_KEYS}
         opts.update({k: v for k, v in ov.items() if k in _RUN_KEYS})
@@ -2755,23 +2754,6 @@ class Ranger:
         # harness session is continuation state, so drop it for pure labels
         if label in _PURE_LABELS:
             o["session"] = None
-        # model defaults are backend-specific; resolve AFTER the effective
-        # backend is known so a per-call switch never inherits the wrong
-        # package default (per-call model > explicit ctor > env > backend)
-        if "model" in ov:
-            model_eff = ov["model"]
-        elif self._model_explicit is not None:
-            model_eff = self._model_explicit
-        else:
-            env_model = os.environ.get("RANGER_MODEL")
-            if env_model:
-                model_eff = env_model
-            elif backend_name == "opencode":
-                model_eff = DEFAULT_MODEL
-                _warn_default_model()
-            else:
-                model_eff = None
-        o["model"] = model_eff
         # priority: per-call agent/mode beats constructor mode beats agent
         o["agent"] = (
             ov.get("agent") or ov.get("mode")
@@ -2783,14 +2765,37 @@ class Ranger:
             raise TypeError(f"effort must be low|medium|high, got {effort!r}")
         # high effort implies thinking blocks / reasoning effort
         o["thinking"] = bool(o["thinking"] or effort == "high")
-        use_stats = o["stats"]
+        return opts, o, adapter, backend_name
 
-        # skills allow-list: files/dirs are handed to the adapter (native
-        # attachment flag where one exists, inlined otherwise); prose
-        # entries become operating grants injected into the prompt
+    def _effective_model(self, ov: dict, backend_name: str):
+        """Model precedence: per-call > explicit ctor > env > backend.
+
+        Resolved AFTER the effective backend is known so a per-call
+        backend switch never inherits the wrong package default.
+        """
+        if "model" in ov:
+            return ov["model"]
+        if self._model_explicit is not None:
+            return self._model_explicit
+        env_model = os.environ.get("RANGER_MODEL")
+        if env_model:
+            return env_model
+        if backend_name == "opencode":
+            _warn_default_model()
+            return DEFAULT_MODEL
+        return None
+
+    def _collect_skills(self, granted) -> tuple:
+        """Split the skills allow-list into (prose_grants, skill_files).
+
+        Existing files/dirs become attachment entries (native flag where
+        the backend has one, inlined otherwise); anything else is prose —
+        an operating grant injected into the prompt. Relative paths
+        resolve against the AGENT's cwd, never the process cwd.
+        """
         prose_grants: list[str] = []
         skill_files: list[Path] = []
-        granted = o["skills"] or []
+        granted = granted or []
         if isinstance(granted, (str, Path)):
             granted = [granted]
         for entry in granted:
@@ -2808,10 +2813,17 @@ class Ranger:
                 skill_files.append(p)
             else:
                 prose_grants.append(str(entry))
+        return prose_grants, skill_files
 
-        # context recall: prepend recent recorded history (bounded), then
-        # record the raw request/answer pair after a successful run
-        use_memory = opts["memory"]
+    def _compose_prompt(self, prompt: str, o: dict, label: str,
+                        use_memory: bool, prose_grants: "list[str]",
+                        effort: str) -> str:
+        """Recall block + skill grants + effort directives, in order.
+
+        Context recall first (bounded by memory_budget), prose grants
+        prepended AFTER recall so they can never be overwritten, the
+        effort directive appended last.
+        """
         full_prompt = prompt
         if use_memory and self.context and label not in _PURE_LABELS:
             budget = o.get("memory_budget") or self.memory_budget
@@ -2833,7 +2845,6 @@ class Ranger:
                     + full_prompt
                 )
         if prose_grants:
-            # prepended AFTER recall so it can never be overwritten
             full_prompt = (
                 "## Allowed skills / operating grants for this task\n"
                 + "\n".join(f"- {g}" for g in prose_grants)
@@ -2847,6 +2858,24 @@ class Ranger:
                 "\n\n(Effort directive: high — work carefully and verify "
                 "your answer before replying.)"
             )
+        return full_prompt
+
+    def _prepare_run(self, prompt: str, label: str, ov: dict) -> dict:
+        """Resolve options, recall, prompt contracts and the backend argv.
+
+        The SHARED SEAM: the sync `_run()` and the async `_run_async()`
+        execute exactly this preparation, so their argv are byte-identical
+        by construction (law 1) — the async twins are a shell over the
+        same contract, never a fork of it. The work lives in the named
+        single-purpose helpers this method orchestrates.
+        """
+        opts, o, adapter, backend_name = self._resolve_run_options(label, ov)
+        o["model"] = self._effective_model(ov, backend_name)
+        effort = (o["effort"] or "medium").lower()
+        prose_grants, skill_files = self._collect_skills(o["skills"])
+        use_memory = opts["memory"]
+        full_prompt = self._compose_prompt(
+            prompt, o, label, use_memory, prose_grants, effort)
         cmd, full_prompt = adapter.build_cmd(o, full_prompt, skill_files)
         return {
             "adapter": adapter,
@@ -2855,7 +2884,7 @@ class Ranger:
             "o": o,
             "prompt": prompt,
             "full_prompt": full_prompt,
-            "use_stats": use_stats,
+            "use_stats": o["stats"],
             "use_memory": use_memory,
             "retries": int(opts.get("retries") or 0),
             "timeout": opts["timeout"],

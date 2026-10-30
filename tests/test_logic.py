@@ -813,3 +813,37 @@ def test_costs_until_loop_is_bounded_accounting():
     assert result["achieved"] is False
     # pre-check ask + step ask + do run + verdict ask = 4 completed calls
     assert agent.costs["calls"] == 4
+
+
+# ==================================================================== #
+# 14. _prepare_run seam after the cycle-1 split: the orchestrator equals
+# the named helpers' composition — the refactor is pinned, not vibes
+
+def test_prepare_run_equals_helper_composition():
+    import tempfile
+    from pathlib import Path as _P
+    agent = Ranger(memory=True, effort="high", timeout=30)
+    with tempfile.TemporaryDirectory() as td:
+        skill = _P(td) / "ops.md"
+        skill.write_text("rules", encoding="utf-8")
+        agent2 = Ranger(cwd=td, memory=True, effort="low", timeout=30,
+                        model="m", skills=[skill, "be terse"])
+        agent2.context.append({"role": "user", "content": "earlier turn"})
+        prep = agent2._prepare_run("do the thing", "do", {})
+        opts, o, adapter, backend = agent2._resolve_run_options("do", {})
+        assert o == prep["o"]  # same effective options, zero divergence
+        assert prep["backend"] == backend == "opencode"
+        assert prep["use_stats"] is False and prep["use_memory"] is True
+        # composition: grants prepended after recall, effort appended last
+        assert "be terse" in prep["full_prompt"]
+        assert "Earlier turn".lower() in prep["full_prompt"].lower()
+        assert prep["full_prompt"].endswith(
+            "(Effort directive: low — be brief, minimal ceremony.)")
+        assert prep["o"]["thinking"] is False   # low effort, no thinking
+        eff = (o["effort"] or "medium").lower()
+        _, skill_files = agent2._collect_skills(o["skills"])
+        manual = agent2._compose_prompt(
+            "do the thing", o, "do", True, ["be terse"], eff)
+        cmd, manual_full = adapter.build_cmd(o, manual, skill_files)
+        assert manual_full == prep["full_prompt"]
+        assert cmd == prep["cmd"]

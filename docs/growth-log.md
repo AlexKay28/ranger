@@ -266,3 +266,31 @@ documentation + tests). This is the loop's only cross-cycle memory.
   promoted to ✅ shipped. Suite: 353 mocked tests green in ~2.8s
   (ARCHITECTURE.md tests:353). Issue queue drained: #10, #9, #8, #7,
   #6, #3, #4 — all committed locally, unpushed.
+
+## Cycle 8 — the self-driving enhancement loop begins
+
+The goal is now `docs/ENHANCEMENT-LOOP.md`: the loop
+READ → THINK(web) → PLAN → ENHANCE → CHECK → REVIEW/CRITIC → TEST →
+READ, one cycle = one enhancement = one local commit, until
+pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
+
+- **Loop cycle 1 — split `_prepare_run` (the cc=38 block).** The worst
+  complexity hotspot in the package (radon E, cognitive 38, span 132,
+  pcina's top two check violations) is now a ~20-line orchestrator
+  over four single-purpose helpers: `_resolve_run_options` (merge +
+  validate, returns opts/o/adapter/backend), `_effective_model`
+  (per-call > explicit ctor > RANGER_MODEL > backend default),
+  `_collect_skills` (files/dirs vs prose grants), `_compose_prompt`
+  (recall → grants → effort directive). Behavior byte-identical by
+  construction — the argv-equality/prompt-pin/model-precedence tests
+  are the evidence — and a NEW test pins the refactor itself:
+  test_prepare_run_equals_helper_composition asserts the
+  orchestrator's dict equals the helpers' direct composition
+  (cmd and full_prompt included). Internal refactor → the web step is
+  trivially satisfied (no external API claims). Result: zero pcina
+  violations on the seam, no radon E blocks left in the file; worst
+  remaining is `challenge` C(20) — the next cycles' meat (shared
+  retry/kill transport loop out of _run/_run_async, codex parse
+  helper, _parse_extract_answer, pcina baseline decision, the
+  2809-LOC file split). Suite: 354 mocked tests green in ~2.9s
+  (ARCHITECTURE.md tests:354).
