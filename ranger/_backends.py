@@ -49,6 +49,15 @@ def backends() -> list[str]:
     return sorted(_BACKEND_CLASSES)
 
 
+def _pi_thinking_args(effort):
+    """pi maps effort levels to --thinking flags (nothing for medium)."""
+    if effort == "high":
+        return ["--thinking", "high"]
+    if effort == "low":
+        return ["--thinking", "low"]
+    return []
+
+
 class _Backend:
     """Base class for harness adapters. See the module docstring above."""
 
@@ -148,6 +157,20 @@ class _OpenCodeBackend(_Backend):
     def parse_output(self, stdout, want_stats):
         if not want_stats:
             return stdout.strip(), None
+        parts_text, session, starts, ends = self._scan_jsonl(stdout)
+        answer = "\n".join(parts_text).strip()
+        model_ms = (max(ends) - min(starts)) / 1000 if starts and ends else None
+        info = {
+            "model_s": round(model_ms, 2) if model_ms is not None else None,
+            "parts": len(parts_text),
+            "chars": len(answer),
+            "session": session,
+        }
+        return answer, info
+
+    @staticmethod
+    def _scan_jsonl(stdout):
+        """Collect text parts, the session id and part times from JSONL."""
         parts_text, session, starts, ends = [], None, [], []
         for line in stdout.splitlines():
             try:
@@ -163,15 +186,7 @@ class _OpenCodeBackend(_Backend):
                     starts.append(t["start"])
                 if t.get("end"):
                     ends.append(t["end"])
-        answer = "\n".join(parts_text).strip()
-        model_ms = (max(ends) - min(starts)) / 1000 if starts and ends else None
-        info = {
-            "model_s": round(model_ms, 2) if model_ms is not None else None,
-            "parts": len(parts_text),
-            "chars": len(answer),
-            "session": session,
-        }
-        return answer, info
+        return parts_text, session, starts, ends
 
     def list_models(self, match):
         try:
@@ -338,10 +353,8 @@ class _PiBackend(_Backend):
             cmd += ["--name", o["title"]]
         if o["thinking"]:
             cmd += ["--thinking", "high"]
-        elif o["effort"] == "high":
-            cmd += ["--thinking", "high"]
-        elif o["effort"] == "low":
-            cmd += ["--thinking", "low"]
+        else:
+            cmd += _pi_thinking_args(o["effort"])
         for f in skill_files:
             cmd += ["--skill", str(f)]
         # agent/mode/pi has no concept of either; pi has no permission
@@ -463,18 +476,7 @@ class _ClaudeBackend(_Backend):
     def parse_output(self, stdout, want_stats):
         # --output-format json: one JSON object on stdout with at
         # minimum result, session_id, total_cost_usd and usage fields.
-        obj = None
-        for line in reversed(stdout.splitlines()):
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                cand = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(cand, dict) and "result" in cand:
-                obj = cand
-                break
+        obj = self._find_result_object(stdout)
         if obj is None:
             # not JSON (CLI failure text lands on stdout) — pass through
             return stdout.strip(), None
@@ -496,6 +498,21 @@ class _ClaudeBackend(_Backend):
                 "output_tokens": usage.get("output_tokens"),
             })
         return answer, info
+
+    @staticmethod
+    def _find_result_object(stdout):
+        """The last stdout line holding a JSON object with result, if any."""
+        for line in reversed(stdout.splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                cand = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(cand, dict) and "result" in cand:
+                return cand
+        return None
 
 
 register_backend("opencode", _OpenCodeBackend)

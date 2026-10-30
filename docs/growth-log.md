@@ -560,3 +560,19 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   exactly. Two tool-side hiccups en route (a hallucinated file path
   `ranger/_fulfill.py`, an oldString mismatch from an f-prefix I
   missed) both failed loudly and were corrected inside the cycle.
+
+- **Loop cycle 17 — grind to scan ≥ 9.0 (3/4): interpolation scoring
+  model overtake.** Four highest-cc pure parsing/assembly functions
+  split into helpers, each a pure extraction with zero raises moved
+  (law 5 untouched: par_map/_resolve_run_options deliberately left
+  alone — their raises live at the trust boundary and extracting
+  them would trade honest validation for paranoia warns):
+  `_OpenCodeBackend.parse_output` → `_scan_jsonl` (cc 14, JSONL
+  event scan), `_ClaudeBackend.parse_output` → `_find_result_object`
+  (cc 12), `_PiBackend.build_cmd` → module-level `_pi_thinking_args`
+  (cc 12, effort→flag map), `debate` → `_position_prompt` +
+  `_judge_digest` (cc 13). Result: 8.91 → **9.05 — the scan ≥ 9.0
+  leg of the loop criterion is met** (P 68 → 56 over D=1613).
+  All 358 tests green byte-identically, check exit 0, MI all-A,
+  paranoia findings unchanged (6 baseline warns, verified by
+  file/message key, not line numbers). Baseline re-saved at 9.05.
