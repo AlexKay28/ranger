@@ -254,7 +254,6 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
 
     def __repr__(self) -> str:
         """Return a compact description of the core run settings."""
-        return (
-            f"Ranger(model={self.model!r}, backend={self.backend!r}, "
-            f"memory={self.memory!r}, cwd={self.cwd!r})"
-        )
+        parts = (f"model={self.model!r}", f"backend={self.backend!r}",
+                 f"memory={self.memory!r}", f"cwd={self.cwd!r}")
+        return f"Ranger({', '.join(parts)})"

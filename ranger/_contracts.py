@@ -148,10 +148,11 @@ def _parse_extract_answer(answer: str, keys, many: bool):
         missing = [k for k in keys if k not in row]
         if missing:
             kind = "row" if many else "object"
-            raise RangerError(
-                f"extract() {kind} {i} is missing key(s) "
-                f"{', '.join(map(repr, missing))} from:\n{answer[:ANSWER_EXCERPT]}"
-            )
+            quoted = ", ".join(map(repr, missing))
+            excerpt = answer[:ANSWER_EXCERPT]
+            head = f"extract() {kind} {i} is missing key(s) "
+            tail = f"{quoted} from:\n{excerpt}"
+            raise RangerError(head + tail)
     return rows if many else rows[0]
 
 

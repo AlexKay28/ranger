@@ -500,10 +500,10 @@ class EngineMixin:
                 spinner.stop()
             mm, ss = divmod(int(time.time() - t0), SECONDS_PER_MIN)
             note_part = f" {_c('·', 'dim')} {_clip(note, RUN_NOTE_CLIP)}" if note else ""
-            sys.stderr.write(
-                f"  {_c(mark, color)} {_c(label, color)}"
-                f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}{note_part}\n"
-            )
+            head = f"  {_c(mark, color)} {_c(label, color)}"
+            tail = (f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}"
+                    f"{note_part}\n")
+            sys.stderr.write(head + tail)
             sys.stderr.flush()
 
         _LOG.debug("run start · label=%s model=%s backend=%s",

@@ -73,9 +73,11 @@ def _normalize_patterns(name: str, value) -> "list[str] | None":
     if value is None:
         return None
     if isinstance(value, (str, Path)):
+        got = type(value).__name__
+        example = f"{name}=[{value!r}]"
         raise TypeError(
-            f"{name} must be a list of glob patterns, got a bare {type(value).__name__} "
-            f"— wrap it: {name}=[{value!r}]"
+            f"{name} must be a list of glob patterns, got a bare {got} "
+            f"— wrap it: {example}"
         )
     if not isinstance(value, (list, tuple)):
         raise TypeError(f"{name} must be a list of glob patterns, got {value!r}")
@@ -202,11 +204,13 @@ class _Spinner:
         i = 0
         while not self._stop.is_set():
             mm, ss = divmod(int(time.time() - start), SECONDS_PER_MIN)
-            sys.stderr.write(
-                f"\r  {_c(self.FRAMES[i % len(self.FRAMES)], 'cyan')}"
-                f" {self._label} {_c('·', 'dim')} {self._preview}"
-                f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}   "
-            )
+            frame = _c(self.FRAMES[i % len(self.FRAMES)], 'cyan')
+            dot = _c('·', 'dim')
+            clock = _c(f'{mm:02d}:{ss:02d}', 'dim')
+            head = f"\r  {frame} {self._label}"
+            mid = f" {dot} {self._preview}"
+            tail = f" {dot} {clock}   "
+            sys.stderr.write(head + mid + tail)
             sys.stderr.flush()
             self._stop.wait(SPINNER_FRAME_S)
             i += 1

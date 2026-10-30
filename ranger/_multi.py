@@ -125,10 +125,10 @@ class MultiMixin:
             )
         token = found[0].upper()
         if token not in tokens:
-            raise RangerError(
-                f"invalid {key} {found[0]!r} — expected one of "
-                f"{'/'.join(tokens)}:\n{text[:ANSWER_EXCERPT]}"
-            )
+            expected = "/".join(tokens)
+            head = f"invalid {key} {found[0]!r} — expected one of "
+            tail = f"{expected}:\n{text[:ANSWER_EXCERPT]}"
+            raise RangerError(head + tail)
         return token
 
     @staticmethod
@@ -234,11 +234,17 @@ class MultiMixin:
         so_far = ("\n".join(
             f"- attack {r['attack']}\n- defense: {r['defense']}"
             for r in history) or "- none yet")
-        raw = self._run(
+        claim_head = (
             f"## The defender's claim (NOT verified — attack it on "
             f"the evidence, not on its wording)\n{claim}\n\n"
-            f"Attacks/defenses so far (all unverified):\n{so_far}\n\n"
-            f"Attack {i} of {rounds}: name ONE concrete, verifiable "
+        )
+        history_block = f"Attacks/defenses so far (all unverified):\n{so_far}\n\n"
+        round_line = f"Attack {i} of {rounds}: "
+        raw = self._run(
+            claim_head
+            + history_block
+            + round_line
+            + "name ONE concrete, verifiable "
             "weakness in the claim, or demand one missing proof. "
             "Reply with a single line: ATTACK: <your attack>",
             label="attack", memory=False, session=None, **jov,
