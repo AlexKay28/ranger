@@ -313,3 +313,21 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   into the same timestamp under FS granularity — the fake now
   sets mtime explicitly (os.utime with distinct ns). Suite: 354
   mocked tests green, 8 consecutive full runs.
+
+- **Loop cycle 3 — the codex adapter loses its cognitive load.**
+  `_CodexBackend.build_cmd` (cc 15, cognitive ~19) and
+  `parse_output` (cognitive ~20, nesting 4) — pcina's other two
+  headline violations — split into named single-purpose helpers:
+  `_sandbox_argv` (resume vs fresh exec + read-only/approve policy),
+  `_reasoning_argv` (effort/thinking → model_reasoning_effort flags),
+  `_jsonl_events` (stream iterator skipping non-JSON noise),
+  `_collect_item_text`, `_collect_events` (texts/thread/usage), and a
+  now-tiny `parse_output`. BONUS de-duplication, same law-1 shape:
+  the skill-file inlining block — duplicated verbatim in codex,
+  claude and openhands — moved up into `_Backend._inline_skills`,
+  so the frozen composition can no longer drift between adapters.
+  pcina: zero codex violations (was cognitive 19-20 build/parse);
+  radon: the whole `_CodexBackend` class leaves the C list (16 →
+  max 12 per helper). Behavior byte-identical — argv scaffolding and
+  JSONL event handling pinned by existing backend tests. Suite: 354
+  mocked tests green.

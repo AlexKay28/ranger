@@ -175,6 +175,26 @@ class _Backend:
             "remove it for this backend (see docs/API.md, Backends)"
         )
 
+    def _inline_skills(self, full_prompt: str, skill_files: list) -> str:
+        """Attach markdown skill files by inlining them into the prompt.
+
+        Shared shape for backends without a native file-attachment
+        flag (codex, claude, openhands): one header, the file blocks,
+        then the task — the exact frozen composition.
+        """
+        if not skill_files:
+            return full_prompt
+        blocks = [
+            f"### Attached skill file: {f}\n" + Path(f).read_text(encoding="utf-8")
+            for f in skill_files
+        ]
+        return (
+            "## Attached operating instructions (skill files)\n\n"
+            + "\n\n".join(blocks)
+            + "\n\n## Task\n"
+            + full_prompt
+        )
+
     def build_cmd(self, o: dict, full_prompt: str, skill_files: list):
         """Return (cmd_argv, final_prompt).
 
@@ -286,27 +306,13 @@ class _OpenCodeBackend(_Backend):
 
 
 class _CodexBackend(_Backend):
+    """OpenAI codex CLI adapter: exec subcommand with JSONL events."""
     name = "codex"
     install_hint = "install it from https://github.com/openai/codex"
     native_file_skills = False  # markdown skills are inlined into prompts
 
-    def build_cmd(self, o, full_prompt, skill_files):
-        for k in ("agent", "mode", "title"):
-            if o.get(k):
-                raise self.unavailable(k)
-        if skill_files:
-            blocks = []
-            for f in skill_files:
-                blocks.append(
-                    f"### Attached skill file: {f}\n"
-                    + Path(f).read_text(encoding="utf-8")
-                )
-            full_prompt = (
-                "## Attached operating instructions (skill files)\n\n"
-                + "\n\n".join(blocks)
-                + "\n\n## Task\n"
-                + full_prompt
-            )
+    def _sandbox_argv(self, o):
+        """Per-run sandbox/approval argv: session resume vs fresh exec."""
         if o["session"]:
             # resume shares -m/-c/--json but takes neither -C nor -s
             # flags; requested model and a read-only policy are still
@@ -318,51 +324,79 @@ class _CodexBackend(_Backend):
             # (a permission mode — resume shares -c, not -s)
             if not o["auto"] or o.get("dry_run"):
                 cmd += ["-c", 'sandbox_mode="read-only"']
+            return cmd
+        cmd = ["codex", "exec", "--skip-git-repo-check"]
+        if o["cwd"]:
+            cmd += ["-C", o["cwd"]]
+        # agent autonomy: --approve-for-me routes approvals through
+        # automatic review with its own workspace-write sandbox (it
+        # conflicts with -s); auto=False — or dry_run — pins a
+        # read-only sandbox (exec cannot be interactive)
+        if o["auto"] and not o.get("dry_run"):
+            cmd.append("--approve-for-me")
         else:
-            cmd = ["codex", "exec", "--skip-git-repo-check"]
-            if o["cwd"]:
-                cmd += ["-C", o["cwd"]]
-            # agent autonomy: --approve-for-me routes approvals through
-            # automatic review with its own workspace-write sandbox (it
-            # conflicts with -s); auto=False — or dry_run — pins a
-            # read-only sandbox (exec cannot be interactive)
-            if o["auto"] and not o.get("dry_run"):
-                cmd.append("--approve-for-me")
-            else:
-                cmd += ["-s", "read-only"]
+            cmd += ["-s", "read-only"]
+        return cmd
+
+    def _reasoning_argv(self, o):
+        """Effort/thinking map onto codex reasoning config flags."""
+        if o["thinking"]:
+            return ["-c", 'model_reasoning_effort="high"']
+        if o["effort"] == "low":
+            return ["-c", 'model_reasoning_effort="low"']
+        if o["effort"] == "high":
+            return ["-c", 'model_reasoning_effort="high"']
+        return []
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        for k in ("agent", "mode", "title"):
+            if o.get(k):
+                raise self.unavailable(k)
+        full_prompt = self._inline_skills(full_prompt, skill_files)
+        cmd = self._sandbox_argv(o)
         if o["model"]:
             cmd += ["-m", o["model"]]
-        # effort/thinking map onto codex reasoning config
-        if o["thinking"]:
-            cmd += ["-c", 'model_reasoning_effort="high"']
-        elif o["effort"] == "low":
-            cmd += ["-c", 'model_reasoning_effort="low"']
-        elif o["effort"] == "high":
-            cmd += ["-c", 'model_reasoning_effort="high"']
-        cmd.append("--json")
+        cmd += self._reasoning_argv(o)
+        cmd += ["--json"]
         cmd.append("--")        # prompt is data, never options
         cmd.append(full_prompt)
         return cmd, full_prompt
 
-    def parse_output(self, stdout, want_stats):
-        texts, thread, usage = [], None, None
+    def _jsonl_events(self, stdout):
+        """Yield each parsed JSON object from the event stream.
+
+        codex emits a JSONL of typed events; non-JSON noise (banners,
+        progress lines) is skipped, never fatal.
+        """
         for line in stdout.splitlines():
             line = line.strip()
             if not line.startswith("{"):
                 continue
             try:
-                obj = json.loads(line)
+                yield json.loads(line)
             except ValueError:
                 continue
+
+    def _collect_item_text(self, item, texts) -> None:
+        """Append an item.completed agent message, when there is one."""
+        if item.get("type") == "agent_message" and item.get("text"):
+            texts.append(item["text"])
+
+    def _collect_events(self, stdout):
+        """Scan codex's JSONL event stream: texts, thread id, usage."""
+        texts, thread, usage = [], None, None
+        for obj in self._jsonl_events(stdout):
             kind = obj.get("type")
             if kind == "thread.started":
                 thread = obj.get("thread_id") or thread
             elif kind == "item.completed":
-                item = obj.get("item") or {}
-                if item.get("type") == "agent_message" and item.get("text"):
-                    texts.append(item["text"])
+                self._collect_item_text(obj.get("item") or {}, texts)
             elif kind == "turn.completed":
                 usage = obj.get("usage") or usage
+        return texts, thread, usage
+
+    def parse_output(self, stdout, want_stats):
+        texts, thread, usage = self._collect_events(stdout)
         answer = "\n".join(texts).strip()
         if not want_stats:
             return answer, None
@@ -463,19 +497,7 @@ class _OpenHandsBackend(_Backend):
         # so a read-only dry run cannot be guaranteed — refuse it loudly
         if o.get("dry_run"):
             raise self.unavailable("dry_run")
-        if skill_files:
-            blocks = []
-            for f in skill_files:
-                blocks.append(
-                    f"### Attached skill file: {f}\n"
-                    + Path(f).read_text(encoding="utf-8")
-                )
-            full_prompt = (
-                "## Attached operating instructions (skill files)\n\n"
-                + "\n\n".join(blocks)
-                + "\n\n## Task\n"
-                + full_prompt
-            )
+        full_prompt = self._inline_skills(full_prompt, skill_files)
         cmd = ["openhands", "--headless"]
         if o["session"]:
             cmd += ["--resume", o["session"]]
@@ -517,19 +539,7 @@ class _ClaudeBackend(_Backend):
             # prompt (every edit/write) is denied instead
             if o["auto"]:
                 o = dict(o, auto=False)
-        if skill_files:
-            blocks = []
-            for f in skill_files:
-                blocks.append(
-                    f"### Attached skill file: {f}\n"
-                    + Path(f).read_text(encoding="utf-8")
-                )
-            full_prompt = (
-                "## Attached operating instructions (skill files)\n\n"
-                + "\n\n".join(blocks)
-                + "\n\n## Task\n"
-                + full_prompt
-            )
+        full_prompt = self._inline_skills(full_prompt, skill_files)
         cmd = ["claude"]
         if o["model"]:
             cmd += ["--model", o["model"]]
