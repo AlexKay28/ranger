@@ -513,3 +513,23 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   ✅ tier entries, ARCHITECTURE marker 354 → 358. Gates: 358 green
   in ~2.9s, pcina check exit 0, MI all-A. THINK(web): internal
   feature, zero external claims — trivially satisfied.
+
+- **Loop cycle 14 — caught by honest measurement: the checker moved,
+  not just the code.** The user's "is ranger perfect?" prompted a
+  re-measure, and pcina's scan rating had fallen 9.79 → 8.43 with
+  nearly identical code. Root cause, verified by re-scoring the
+  SAVED BASELINE's own findings with the currently installed model
+  (8.38): pcina's scoring changed on this machine — info findings
+  were "deliberately raised to warn level (was 0.2 before v0.4.0)"
+  (pcina/finding.py), so ~67 info findings now weigh 5× more.
+  ranger's true delta was just +3.5 penalty points, and both were
+  cycle-13 regressions, now repaired: quote() spans 42→33 lines
+  (segment math extracted to `_quote_segments`) and the chars/4
+  estimate divisor named APPROX_CHARS_PER_TOKEN (one constant, one
+  place, matching cycle 9's convention). Baseline re-saved against
+  the new model (8.44); budgets still gate aggravation
+  (pcina check exits 0); MI all-A; 358 tests green. OPEN QUESTION
+  for the user: docs/ENHANCEMENT-LOOP.md's "scan ≥ 9.0" criterion
+  was set under the old model and may be unreachable or require
+  several grind cycles under the new one — decision pending, not
+  silently re-anchored.

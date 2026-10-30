@@ -19,7 +19,7 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
+                    RangerHarnessError, APPROX_CHARS_PER_TOKEN)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -123,6 +123,21 @@ class CommandsMixin:
         old, self.context = self.context, []
         return old
 
+    def _quote_segments(self, prep, prompt: str, label: str,
+                        prose_grants) -> dict:
+        """Break the composed prompt's size into named parts (quote())."""
+        o = prep["o"]
+        effort = (o["effort"] or "medium").lower()
+        chars_total = len(prep["full_prompt"])
+        segments = {
+            "request": len(prompt),
+            "recall": len(self._recall_block(o, label)) if o["memory"] else 0,
+            "grants": len(self._grants_block(prose_grants)),
+            "effort": len(self._effort_directive(effort)),
+        }
+        segments["other"] = chars_total - sum(segments.values())
+        return segments
+
     def quote(self, prompt: str, label: str = "run", **ov) -> dict:
         """Price a run BEFORE paying for it — zero model calls.
 
@@ -135,9 +150,10 @@ class CommandsMixin:
         "segments", "skill_files"}` where `segments` splits the prompt
         into `{"request", "recall", "grants", "effort", "other"}` —
         `other` is the inline skill-file bodies and their headers on
-        backends without native attachment. `est_tokens_in` rounds
-        `chars_total / 4`: a rough estimate, not a bill. Output tokens
-        cannot be quoted honestly — they depend on the model's answer.
+        backends without native attachment. `est_tokens_in` divides the
+        chars by APPROX_CHARS_PER_TOKEN (≈4): a rough estimate, not a
+        bill. Output tokens cannot be quoted honestly — they depend on
+        the model's answer.
 
         Only side effect: the once-per-process stale-DEFAULT_MODEL
         warning, exactly like the real call would emit it.
@@ -149,20 +165,12 @@ class CommandsMixin:
         prep = self._prepare_run(prompt, label, ov)
         o = prep["o"]
         prose_grants, skill_files = self._collect_skills(o["skills"])
-        effort = (o["effort"] or "medium").lower()
-        chars_total = len(prep["full_prompt"])
-        segments = {
-            "request": len(prompt),
-            "recall": len(self._recall_block(o, label)) if o["memory"] else 0,
-            "grants": len(self._grants_block(prose_grants)),
-            "effort": len(self._effort_directive(effort)),
-        }
-        segments["other"] = chars_total - sum(segments.values())
+        segments = self._quote_segments(prep, prompt, label, prose_grants)
         return {
             "backend": prep["backend"],
             "label": label,
-            "chars_total": chars_total,
-            "est_tokens_in": round(chars_total / 4),
+            "chars_total": len(prep["full_prompt"]),
+            "est_tokens_in": round(len(prep["full_prompt"]) / APPROX_CHARS_PER_TOKEN),
             "segments": segments,
             "skill_files": [str(f) for f in skill_files],
         }

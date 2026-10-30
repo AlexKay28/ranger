@@ -35,6 +35,10 @@ UI_RETRY_CLIP = 70        # exception text shown in retry progress lines
 LOG_SHA_CLIP = 10          # commit sha prefix in log lines
 LOG_MSG_CLIP = 60          # commit message shown in log lines
 
+# quote()'s input-token estimate: chars divided by this rough divisor.
+# Plainly an estimate, never a bill — output tokens are unguessable.
+APPROX_CHARS_PER_TOKEN = 4
+
 # git status --porcelain v1 line anatomy: "XY <path>", path starts at col 3,
 # and a shorter line carries no path at all.
 PORCELAIN_MIN = 4
