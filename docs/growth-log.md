@@ -391,3 +391,29 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   byte-identical — pinned by the challenge truth tables. Remaining
   pcina findings are size/params/clever class (debate 22 params,
   long spans) — next backlog tier. Suite: 354 mocked tests green.
+
+- **Loop cycle 8 — the file split (backlog item 5): MI C → all A.**
+  The 3299-LOC `ranger/__init__.py` (radon MI C/0.00) split into 11
+  modules via `scripts/split_module.py` (ast-driven, recorded as the
+  reproducible layout map; historical, not re-runnable):
+  `_util` (constants/exceptions/helpers), `_contracts` (frozen
+  prompt/parse laws), `_backends` (the five CLI adapters),
+  `_safety`/`_snapshots`/`_loops`/`_multi`/`_commands`/`_engine`
+  (six mixins) + `_debate`, with a 260-LOC package root composing
+  `Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
+  CommandsMixin, EngineMixin)`. Tests UNTOUCHED and green because the
+  seams were preserved by construction: stdlib module identity
+  (tests patch `ranger.subprocess`/`ranger.os`/
+  `asyncio.create_subprocess_exec` — submodule `import subprocess`
+  binds the same module object), `_BACKEND_CLASSES`/
+  `_ASYNC_TWIN_METHODS`/exceptions/`debate` re-exported by
+  reference, and the two patchable attributes (`_Spinner`,
+  `_warn_default_model`+`_DEFAULT_MODEL_WARNED`) live on the
+  package, resolved per call via `import ranger` shims
+  (`_spinner_cls()`, forwarder) and `type(self)` for `with_config`.
+  Results: every file MI rank A (worst `_backends` 31.91, package
+  root 73.61); pcina scan 9.74/10, dead_candidates 15→1 after
+  trimming the superset preamble imports. Remaining pcina check
+  findings: size/params class only (debate 22 params, long spans,
+  one 4-operand chain, 2 bare excepts, raises 9.2 intentional per
+  law 5, magic values info). Suite: 354 mocked tests green in ~2.8s.
