@@ -68,8 +68,9 @@ register) from plain Python. You write code, not chat.
 
 ## Quality posture
 
-- 118 tests, ~0.6s, including an *enforced* 60-second suite budget and
-  introspection-based docs gates (an undocumented method reddens CI).
+- 229 tests <!-- tests:229 -->, well under the enforced 60-second suite
+  budget, including introspection-based docs gates (an undocumented method
+  reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before
   shipping; the suite itself fully mocks subprocesses, so CI runs on
   any machine with no CLIs and no API keys.

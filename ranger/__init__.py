@@ -54,6 +54,28 @@ DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
 # records go. The pretty stderr spinner UI is separate and untouched.
 _LOG = logging.getLogger("ranger")
 
+# One-time staleness warning guard: a process that resolves a run to the
+# baked DEFAULT_MODEL is told once (per process) that the id may be stale.
+_DEFAULT_MODEL_WARNED = False
+
+
+def _warn_default_model() -> None:
+    """Warn once per process when the baked DEFAULT_MODEL is chosen.
+
+    The package default is frozen at release time and can go stale; an
+    explicit `model=` or `RANGER_MODEL` always silences this. Uses the
+    module logger only — ranger never adds logging handlers.
+    """
+    global _DEFAULT_MODEL_WARNED
+    if _DEFAULT_MODEL_WARNED:
+        return
+    _DEFAULT_MODEL_WARNED = True
+    _LOG.warning(
+        "ranger: using baked DEFAULT_MODEL '%s' which may be stale; "
+        "pass model= or set RANGER_MODEL", DEFAULT_MODEL,
+    )
+
+
 # Settings every run accepts as a per-call override.
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
@@ -629,11 +651,17 @@ class Ranger:
         # raw explicit choice; effective default is resolved per run so a
         # per-call backend switch never inherits the other backend's default
         self._model_explicit = model
-        self.model = (
-            model
-            or os.environ.get("RANGER_MODEL")
-            or (DEFAULT_MODEL if backend == "opencode" else None)
-        )
+        if model:
+            self.model = model
+        else:
+            env_model = os.environ.get("RANGER_MODEL")
+            if env_model:
+                self.model = env_model
+            elif backend == "opencode":
+                self.model = DEFAULT_MODEL
+                _warn_default_model()
+            else:
+                self.model = None
         self.cwd = str(Path(cwd).resolve()) if cwd else None
         self.timeout = timeout
         self.auto = auto
@@ -1761,10 +1789,14 @@ class Ranger:
         elif self._model_explicit is not None:
             model_eff = self._model_explicit
         else:
-            model_eff = (
-                os.environ.get("RANGER_MODEL")
-                or (DEFAULT_MODEL if backend_name == "opencode" else None)
-            )
+            env_model = os.environ.get("RANGER_MODEL")
+            if env_model:
+                model_eff = env_model
+            elif backend_name == "opencode":
+                model_eff = DEFAULT_MODEL
+                _warn_default_model()
+            else:
+                model_eff = None
         o["model"] = model_eff
         # priority: per-call agent/mode beats constructor mode beats agent
         o["agent"] = (

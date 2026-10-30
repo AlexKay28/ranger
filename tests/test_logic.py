@@ -8,6 +8,7 @@ Budget rule (a commitment, enforced below): the whole suite finishes in
 well under one minute.
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -114,6 +115,83 @@ def test_model_precedence_matrix(monkeypatch):
     with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
         Ranger(model="a/m").with_config(backend="codex").ask("x")
     assert _model_of(m.call_args.args[0]) == "a/m"   # explicit survives switch
+
+
+@pytest.fixture
+def default_model_warning_reset(monkeypatch):
+    """Reset the once-per-process guard so test order does not matter."""
+    monkeypatch.setattr(ranger, "_DEFAULT_MODEL_WARNED", False)
+
+
+def _default_warnings(caplog):
+    return [r for r in caplog.records
+            if r.name == "ranger" and r.levelno >= logging.WARNING
+            and "DEFAULT_MODEL" in r.getMessage()]
+
+
+def test_default_model_warning_truth_table(caplog, monkeypatch,
+                                           default_model_warning_reset):
+    """One-time DEFAULT_MODEL staleness warning, per resolution path."""
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    run = "ranger.subprocess.run"
+    caplog.set_level(logging.WARNING, logger="ranger")
+
+    # (1) default resolution -> exactly one warning, right content
+    with mock.patch(run, return_value=fake_run("ok")):
+        Ranger().ask("x")
+    recs = _default_warnings(caplog)
+    assert len(recs) == 1
+    msg = recs[0].getMessage()
+    assert DEFAULT_MODEL in msg and "RANGER_MODEL" in msg and "model=" in msg
+
+    # (4) a second default-resolution call -> no duplicate (once/process)
+    caplog.clear()
+    with mock.patch(run, return_value=fake_run("ok")):
+        Ranger().ask("x")
+    assert not _default_warnings(caplog)
+
+    # (2) explicit model= (ctor) -> no warning
+    caplog.clear()
+    with mock.patch(run, return_value=fake_run("ok")):
+        Ranger(model="explicit/m").ask("x")
+    assert not _default_warnings(caplog)
+
+    # (2b) explicit per-call model= -> no warning
+    caplog.clear()
+    with mock.patch(run, return_value=fake_run("ok")):
+        Ranger().ask("x", model="call/m")
+    assert not _default_warnings(caplog)
+
+    # (3) RANGER_MODEL env set -> no warning
+    caplog.clear()
+    with mock.patch.dict(os.environ, {"RANGER_MODEL": "env/m"}), \
+         mock.patch(run, return_value=fake_run("ok")):
+        Ranger().ask("x")
+    assert not _default_warnings(caplog)
+
+    # (5) non-opencode backend without a model -> no warning
+    caplog.clear()
+    codex_out = '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+    with mock.patch(run, return_value=fake_run(codex_out)):
+        Ranger(backend="codex").ask("x")
+    assert not _default_warnings(caplog)
+
+
+def test_default_model_warning_once_across_both_sites(caplog, monkeypatch,
+                                                      default_model_warning_reset):
+    """Constructor resolution and _run resolution share one warning."""
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    caplog.set_level(logging.WARNING, logger="ranger")
+    run = "ranger.subprocess.run"
+    # constructor site consumes the one warning…
+    Ranger()
+    recs = _default_warnings(caplog)
+    assert len(recs) == 1
+    # …so the _run site for the same default stays silent
+    caplog.clear()
+    with mock.patch(run, return_value=fake_run("ok")):
+        Ranger().ask("x")
+    assert not _default_warnings(caplog)
 
 
 # ==================================================================== #

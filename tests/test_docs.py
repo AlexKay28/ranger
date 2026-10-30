@@ -13,6 +13,7 @@ import inspect
 import py_compile
 import re
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -219,3 +220,31 @@ def test_readme_carries_pypi_badges():
     """Version + downloads badges keep the README/PyPI landing page honest."""
     assert "img.shields.io/pypi/v/" in README_TEXT, "PyPI version badge missing"
     assert "img.shields.io/pypi/dm/" in README_TEXT, "downloads badge missing"
+
+
+# --- ARCHITECTURE.md count gate ---------------------------------------------
+
+def test_architecture_test_count_marker_matches_reality():
+    """The `<!-- tests:N -->` marker in docs/ARCHITECTURE.md must equal the
+    real collected test count. Adding/removing tests? Update the marker."""
+    arch = (REPO / "docs" / "ARCHITECTURE.md").read_text()
+    markers = re.findall(r"<!-- tests:(\d+) -->", arch)
+    assert markers, (
+        "docs/ARCHITECTURE.md lost its `<!-- tests:N -->` marker — re-add "
+        "it next to the collected test count in the Quality posture bullet"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        cwd=str(REPO), capture_output=True, text=True, timeout=120,
+    )
+    tail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+    m = re.search(r"(\d+)\s+tests? (?:collected|selected)", tail)
+    assert m, f"cannot parse collected count from pytest output: {tail!r}"
+    collected = int(m.group(1))
+    marked = {int(n) for n in markers}
+    assert len(marked) == 1, "conflicting tests: markers in ARCHITECTURE.md"
+    assert marked.pop() == collected, (
+        f"docs/ARCHITECTURE.md claims {markers[0]} tests but the suite "
+        f"collects {collected}. Update the `<!-- tests:{collected} -->` "
+        f"marker (and the surrounding prose) in the Quality posture bullet."
+    )

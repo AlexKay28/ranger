@@ -72,7 +72,8 @@ included. It auto-disables in pipes/tests and honors `NO_COLOR`;
 turn it off with `pretty=False`.
 
 Model priority: explicit `Ranger(model=...)` → `$RANGER_MODEL` env var →
-package default.
+package default; when the package default is what a run actually resolves
+to, ranger logs a one-time staleness warning on the `ranger` logger.
 
 ## Usage
 

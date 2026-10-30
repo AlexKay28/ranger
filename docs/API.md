@@ -25,7 +25,7 @@ the build_editable hook" — fix the tool, not the package:
 
 | Variable | Effect |
 |---|---|
-| `RANGER_MODEL` | Default model when `Ranger(model=...)` is not given. Priority: explicit `model=` argument → `RANGER_MODEL` → package `DEFAULT_MODEL` (`openrouter/anthropic/claude-sonnet-4.5`). |
+| `RANGER_MODEL` | Default model when `Ranger(model=...)` is not given. Priority: explicit `model=` argument → `RANGER_MODEL` → package `DEFAULT_MODEL` (`openrouter/anthropic/claude-sonnet-4.5`). When resolution falls through to the baked package default, ranger emits a one-time `ranger` logger warning (once per process) — the id may be stale; pass `model=` or set `RANGER_MODEL` to silence it. |
 | `NO_COLOR` | Disables terminal colors in the live progress UI (UI is on stderr only). |
 
 Operational detail: `opencode run` resolves its working directory from the
@@ -79,7 +79,7 @@ ranger.Ranger(
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `model` | `RANGER_MODEL` env → `DEFAULT_MODEL` | opencode model id, "provider/model" |
+| `model` | `RANGER_MODEL` env → `DEFAULT_MODEL` | opencode model id, "provider/model" (falling through to `DEFAULT_MODEL` logs a one-time `ranger` staleness warning) |
 | `cwd` | `None` (process cwd) | agent working directory (also drives the `PWD` fix) |
 | `timeout` | `600.0` | seconds before `RangerError` |
 | `auto` | `True` | auto-approve tool permissions (headless-friendliness) |
@@ -137,7 +137,8 @@ immediately — typos fail loudly, never silently. Priority rules:
   package default **resolved per effective backend** (a per-call
   `backend=` switch never inherits the other backend's default; codex
   without an explicit model uses its own `config.toml` default and passes
-  no `-m` at all).
+  no `-m` at all). Falling through to the baked `DEFAULT_MODEL` emits a
+  one-time `ranger` logger staleness warning per process.
 - Agent selection: per-call `agent=` → per-call `mode=` → constructor
   `mode=` → constructor `agent=`.
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
