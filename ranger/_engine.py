@@ -282,6 +282,7 @@ class EngineMixin:
             prompt, o, label, use_memory, prose_grants, effort)
         cmd, full_prompt = adapter.build_cmd(o, full_prompt, skill_files)
         return {
+            "label": label,
             "adapter": adapter,
             "backend": backend_name,
             "cmd": cmd,
@@ -294,13 +295,16 @@ class EngineMixin:
             "timeout": opts["timeout"],
         }
 
-    def _spawn_sync(self, cmd, o, prep, backend_name, adapter, _finish):
+    def _spawn_sync(self, cmd, o, prep, _finish):
         """One sync harness spawn with honest error attribution.
 
         Transport failures map to their true cause: a missing agent cwd
         is a caller error (RangerError), a missing CLI / broken spawn is
         a harness error (install hint attached), a timeout is a timeout.
+        Identity fields (backend, adapter) come from the prep struct —
+        the seam's own contract, never a re-passed copy.
         """
+        backend_name, adapter = prep["backend"], prep["adapter"]
         try:
             return subprocess.run(
                 cmd,
@@ -355,12 +359,14 @@ class EngineMixin:
             # CancelledError are BaseException, so they still propagate)
             pass
 
-    async def _spawn_async(self, cmd, o, prep, backend_name, adapter):
+    async def _spawn_async(self, cmd, o, prep):
         """One async harness spawn with honest error attribution.
 
         Same cause-mapping contract as `_spawn_sync`; cancellation and
-        timeout kill the subprocess's whole process group.
+        timeout kill the subprocess's whole process group. Identity
+        fields come from the prep struct, like the sync twin.
         """
+        backend_name, adapter = prep["backend"], prep["adapter"]
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -405,14 +411,17 @@ class EngineMixin:
             ) from None
         return proc, stdout_b, stderr_b
 
-    def _complete_run(self, prep, adapter, label, use_stats, use_memory,
-                      stdout, t0) -> str:
+    def _complete_run(self, prep, stdout, t0) -> str:
         """Shared post-transport block: parse, ledger, telemetry, memory.
 
         One implementation for BOTH seams (law 1): whatever came out of
         the sync or async transport goes through the exact same
-        parse_output → _record_costs → last → context pipeline.
+        parse_output → _record_costs → last → context pipeline. Every
+        field it needs travels inside the prep struct — the seam's own
+        contract, never re-passed copies of its fields.
         """
+        adapter, label = prep["adapter"], prep["label"]
+        use_stats, use_memory = prep["use_stats"], prep["use_memory"]
         answer, info = adapter.parse_output(stdout, use_stats)
         self._record_costs(len(prep["full_prompt"]), len(answer),
                            info, time.time() - t0)
@@ -429,9 +438,8 @@ class EngineMixin:
 
     def _run(self, prompt: str, label: str = "run", **ov) -> str:
         prep = self._prepare_run(prompt, label, ov)
-        adapter, backend_name = prep["adapter"], prep["backend"]
+        backend_name = prep["backend"]
         cmd, o = prep["cmd"], prep["o"]
-        use_stats, use_memory = prep["use_stats"], prep["use_memory"]
 
         # live progress UI — stderr only; never a TTY in tests/pipes
         use_ui = o["pretty"] and getattr(sys.stderr, "isatty", lambda: False)()
@@ -463,8 +471,7 @@ class EngineMixin:
             proc = None
             while True:
                 try:
-                    proc = self._spawn_sync(cmd, o, prep,
-                                            backend_name, adapter, _finish)
+                    proc = self._spawn_sync(cmd, o, prep, _finish)
                     if proc.returncode != 0:
                         _finish("✗", "red", _clip(proc.stderr, UI_NOTE_CLIP) or f"exit {proc.returncode}")
                         raise RangerHarnessError(
@@ -479,9 +486,7 @@ class EngineMixin:
                         _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), UI_RETRY_CLIP)}")
                         continue
                     raise
-            answer = self._complete_run(
-                prep, adapter, label, use_stats, use_memory,
-                proc.stdout, t0)
+            answer = self._complete_run(prep, proc.stdout, t0)
             first = answer.splitlines()
             _finish("✓", "green", _clip(first[0], UI_NOTE_CLIP) if first else "")
             return answer
@@ -512,9 +517,8 @@ class EngineMixin:
         the same.
         """
         prep = self._prepare_run(prompt, label, ov)
-        adapter, backend_name = prep["adapter"], prep["backend"]
+        backend_name = prep["backend"]
         cmd, o = prep["cmd"], prep["o"]
-        use_stats, use_memory = prep["use_stats"], prep["use_memory"]
         t0 = time.time()
 
         _LOG.debug("run_async start · label=%s model=%s backend=%s",
@@ -526,7 +530,7 @@ class EngineMixin:
             while True:
                 try:
                     proc, stdout_b, stderr_b = await self._spawn_async(
-                        cmd, o, prep, backend_name, adapter)
+                        cmd, o, prep)
                     stdout = stdout_b.decode("utf-8", errors="replace")
                     stderr = stderr_b.decode("utf-8", errors="replace")
                     if proc.returncode != 0:
@@ -543,8 +547,7 @@ class EngineMixin:
                                   attempt, retries, _clip(str(exc), UI_RETRY_CLIP))
                         continue
                     raise
-            return self._complete_run(
-                prep, adapter, label, use_stats, use_memory, stdout, t0)
+            return self._complete_run(prep, stdout, t0)
         except asyncio.CancelledError:
             _LOG.debug("run_async cancelled · label=%s duration=%.2fs",
                        label, time.time() - t0)

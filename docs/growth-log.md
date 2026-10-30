@@ -436,3 +436,20 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   next cycles), 6–8-param internal helpers, the 22-param public
   ctor (API-frozen), and paranoia raises-by-design (law 5's
   parse-or-raise contract). Suite: 354 mocked tests green.
+
+- **Loop cycle 10 — the prep struct IS the transport contract.** The
+  internal transport helpers re-passed fields the prep struct already
+  carries; now they read `prep["backend"]`/`prep["adapter"]`/
+  `prep["label"]`/`prep["use_stats"]`/`prep["use_memory"]` from the
+  seam's own dict: `_spawn_sync(cmd, o, prep, _finish)`,
+  `_spawn_async(cmd, o, prep)`, `_complete_run(prep, stdout, t0)`
+  (7→3 params), with `_prepare_run` gaining the `"label"` key and
+  `_run`/`_run_async` dropping their dead unpacks. Law-1 tight: the
+  shared seam is now literally the only thing that crosses the
+  transport boundary — no re-passed copies can diverge from it.
+  pcina: engine transport params 6–8 → under limit (warns 34 → 31,
+  scan 9.78 → 9.79). Every remaining params warn is public API or
+  test-pinned (ctor 22, debate/until/resolve/fix/challenge,
+  `_compose_prompt` called positionally by a frozen test) —
+  irreducible without an API break, a human-only call. Suite: 354
+  mocked tests green (the prep-struct composition test untouched).
