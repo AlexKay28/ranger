@@ -44,6 +44,15 @@ runs recall the bounded summary instead of the full transcript.
 ### `agent.context_clear() -> list[dict]`
 Wipe recorded context; returns what was cleared.
 
+### `agent.quote(prompt, label="run", **ov) -> dict`
+Price a run BEFORE paying for it — zero model calls, zero side effects.
+Composes the exact prompt the matching run would send (the same seam)
+and returns `{"backend", "label", "chars_total", "est_tokens_in",
+"segments", "skill_files"}`; `segments` splits the bill into `request`,
+`recall`, `grants`, `effort` and `other` (inline skill-file bodies and
+headers). `est_tokens_in` rounds chars/4 — an estimate, not a bill.
+Raise-quoted like the real call: a bad spec fails here, for free.
+
 ### `agent.costs -> dict` *(property)*
 Cumulative ledger over all completed runs — `{"calls", "chars_in",
 "chars_out", "tokens_in", "tokens_out", "wall_s"}`; tokens stay `None`

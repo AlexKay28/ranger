@@ -491,3 +491,25 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   file rank A** (≥ B; started this loop at C/0.00); seed backlog
   **empty** (items 1,2,3 = cycles 1–3; item 4 = this cycle; item 5 =
   cycle 8). Suite: 354 mocked tests green in ~2.8s.
+
+- **Loop cycle 13 — token-spend predictability: quote().** The user
+  asked whether ranger can be token-saving, not just efficient; the
+  answer landed as a new public method that prices a run BEFORE you
+  pay. `agent.quote(prompt, label="run", **ov)` composes the exact
+  prompt the matching run would send via the SAME `_prepare_run`
+  seam (law 1 — the two can never drift), spawns nothing, mutates
+  nothing, and returns `chars_total` plus an exhaustive segment
+  breakdown (`request`/`recall`/`grants`/`effort`/`other` — `other`
+  is inline skill bodies on backends without native attachment) and
+  an honest `est_tokens_in` (chars/4, marked an estimate, not a
+  bill). To keep the breakdown exact without forking the seam's
+  logic, `_compose_prompt` became a one-line assembly of three named
+  blocks extracted verbatim (`_grants_block`, `_recall_block`,
+  `_effort_directive`) — byte-identical composition, pinned green by
+  the untouched suite AND 4 new tests: byte-for-byte equality with
+  `_prepare_run`'s prompt, no-spawn/no-mutation (subprocess patched
+  to explode, context + costs untouched), inline-skill accounting on
+  codex, estimate arithmetic. Docs gates synced: API.md + commands.md
+  ✅ tier entries, ARCHITECTURE marker 354 → 358. Gates: 358 green
+  in ~2.9s, pcina check exit 0, MI all-A. THINK(web): internal
+  feature, zero external claims — trivially satisfied.

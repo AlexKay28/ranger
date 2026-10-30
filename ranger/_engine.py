@@ -219,50 +219,67 @@ class EngineMixin:
                 prose_grants.append(str(entry))
         return prose_grants, skill_files
 
+    def _grants_block(self, prose_grants) -> str:
+        """The exact operating-grants preamble ('' without grants)."""
+        if not prose_grants:
+            return ""
+        return (
+            "## Allowed skills / operating grants for this task\n"
+            + "\n".join(f"- {g}" for g in prose_grants)
+            + "\n\n"
+        )
+
+    def _recall_block(self, o: dict, label: str) -> str:
+        """The exact recall block ('' when recall is off for this label).
+
+        Bounded by memory_budget, oldest-first, and it ENDS with the
+        '## Current request' header — the caller appends the request.
+        """
+        if not o["memory"] or not self.context or label in _PURE_LABELS:
+            return ""
+        budget = o.get("memory_budget") or self.memory_budget
+        selected, total = [], 0
+        for msg in reversed(self.context):
+            total += len(msg["content"]) + 16
+            if total > budget:
+                break
+            selected.append(msg)
+        selected.reverse()
+        if not selected:
+            return ""
+        transcript = "\n\n".join(
+            f"[{m['role']}] {m['content']}" for m in selected
+        )
+        return (
+            "## Previous interaction in this session\n"
+            + transcript + "\n\n## Current request\n"
+        )
+
+    def _effort_directive(self, effort: str) -> str:
+        """The exact trailing effort directive ('' for medium)."""
+        if effort == "low":
+            return "\n\n(Effort directive: low — be brief, minimal ceremony.)"
+        if effort == "high":
+            return ("\n\n(Effort directive: high — work carefully and verify "
+                    "your answer before replying.)")
+        return ""
+
     def _compose_prompt(self, prompt: str, o: dict, label: str,
                         use_memory: bool, prose_grants: "list[str]",
                         effort: str) -> str:
         """Recall block + skill grants + effort directives, in order.
 
-        Context recall first (bounded by memory_budget), prose grants
-        prepended AFTER recall so they can never be overwritten, the
-        effort directive appended last.
+        Grants prepended first, then recall (bounded by memory_budget,
+        never allowed to be overwritten by anything), the request, and
+        the effort directive appended last. One assembly of the named
+        blocks — `quote()` measures the same blocks it prices.
         """
-        full_prompt = prompt
-        if use_memory and self.context and label not in _PURE_LABELS:
-            budget = o.get("memory_budget") or self.memory_budget
-            selected, total = [], 0
-            for msg in reversed(self.context):
-                total += len(msg["content"]) + 16
-                if total > budget:
-                    break
-                selected.append(msg)
-            selected.reverse()
-            if selected:
-                transcript = "\n\n".join(
-                    f"[{m['role']}] {m['content']}" for m in selected
-                )
-                full_prompt = (
-                    "## Previous interaction in this session\n"
-                    + transcript
-                    + "\n\n## Current request\n"
-                    + full_prompt
-                )
-        if prose_grants:
-            full_prompt = (
-                "## Allowed skills / operating grants for this task\n"
-                + "\n".join(f"- {g}" for g in prose_grants)
-                + "\n\n"
-                + full_prompt
-            )
-        if effort == "low":
-            full_prompt += "\n\n(Effort directive: low — be brief, minimal ceremony.)"
-        elif effort == "high":
-            full_prompt += (
-                "\n\n(Effort directive: high — work carefully and verify "
-                "your answer before replying.)"
-            )
-        return full_prompt
+        if not use_memory:
+            return (self._grants_block(prose_grants)
+                    + prompt + self._effort_directive(effort))
+        return (self._grants_block(prose_grants)
+                + self._recall_block(o, label)
+                + prompt + self._effort_directive(effort))
 
     def _prepare_run(self, prompt: str, label: str, ov: dict) -> dict:
         """Resolve options, recall, prompt contracts and the backend argv.

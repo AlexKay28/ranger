@@ -495,6 +495,7 @@ for r in results:
 | `context_summarize()` | Asks the agent for a digest of the recorded history; history left untouched. | `str` (empty if no history) |
 | `context_compact()` | Replaces the whole history with one `{"role": "system", "content": digest}` message — future runs recall a bounded summary. | `str` digest |
 | `context_clear()` | Wipes the recorded context. | the previous list |
+| `quote(prompt, label="run", **ov)` | Prices a run before paying: composes the exact prompt the matching run would send (same seam, zero spawns, no state change) and measures it. `segments` splits the bill into `request`/`recall`/`grants`/`effort`/`other`; `est_tokens_in` rounds chars/4 (an estimate, not a bill). A bad spec raises here, for free. | dict, see [commands.md](commands.md) |
 
 ## Costs — the cumulative ledger
 

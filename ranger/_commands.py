@@ -123,6 +123,50 @@ class CommandsMixin:
         old, self.context = self.context, []
         return old
 
+    def quote(self, prompt: str, label: str = "run", **ov) -> dict:
+        """Price a run BEFORE paying for it — zero model calls.
+
+        Composes the exact prompt the matching run would send (the same
+        `_prepare_run` seam, so the two can never drift — law 1) and
+        measures it. No subprocess is spawned: `context` and `costs`
+        stay untouched, and a bad spec raises here, before you pay.
+
+        Returns `{"backend", "label", "chars_total", "est_tokens_in",
+        "segments", "skill_files"}` where `segments` splits the prompt
+        into `{"request", "recall", "grants", "effort", "other"}` —
+        `other` is the inline skill-file bodies and their headers on
+        backends without native attachment. `est_tokens_in` rounds
+        `chars_total / 4`: a rough estimate, not a bill. Output tokens
+        cannot be quoted honestly — they depend on the model's answer.
+
+        Only side effect: the once-per-process stale-DEFAULT_MODEL
+        warning, exactly like the real call would emit it.
+
+            q = agent.quote("refactor parse()", label="do")
+            if q["est_tokens_in"] > 2000:
+                agent.context_clear()          # shed recall and re-quote
+        """
+        prep = self._prepare_run(prompt, label, ov)
+        o = prep["o"]
+        prose_grants, skill_files = self._collect_skills(o["skills"])
+        effort = (o["effort"] or "medium").lower()
+        chars_total = len(prep["full_prompt"])
+        segments = {
+            "request": len(prompt),
+            "recall": len(self._recall_block(o, label)) if o["memory"] else 0,
+            "grants": len(self._grants_block(prose_grants)),
+            "effort": len(self._effort_directive(effort)),
+        }
+        segments["other"] = chars_total - sum(segments.values())
+        return {
+            "backend": prep["backend"],
+            "label": label,
+            "chars_total": chars_total,
+            "est_tokens_in": round(chars_total / 4),
+            "segments": segments,
+            "skill_files": [str(f) for f in skill_files],
+        }
+
     def ask(self, prompt: str, **ov) -> str:
         """Send an arbitrary prompt to the agent and return its answer."""
         return self._run(prompt, label="ask", **ov)
