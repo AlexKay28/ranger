@@ -11,6 +11,7 @@ effects. All folders except `dummy/` need an authenticated harness CLI
 | [`getting-started/`](getting-started/) | `quickstart.py` | Core `search`, `summarize`, `do`, `write`, `ask` on a target project | several |
 | | `model_discovery.py` | Discover models and make configured agent copies | 1 |
 | [`code-work/`](code-work/) | `fix_failing_tests.py` | Repair a known test command; the command is a hard gate | <= 2 repair attempts |
+| | `recoverable_change.py` | Explicit `snapshot(tag)` -> railed `do()` -> `rollback(tag)` on a red gate | 1 + gate |
 | | `edit_one_file.py` | Make one bounded change to an existing file | 1 |
 | | `simple_code_review.py` | One file -> focused read-only critique | 1 |
 | | `review_before_merge.py` | Evidence report + independent critic for a local diff | 2 |
@@ -19,6 +20,7 @@ effects. All folders except `dummy/` need an authenticated harness CLI
 | | `growth_loop.py` | Persona wish -> one goal -> acceptance gate -> log | ~5/cycle |
 | [`monitoring/`](monitoring/) | `project_health.py` | Read-only test status, actionable risks, telemetry | 1 + gate |
 | | `controls.py` | Gates, checks, bounded loops, stats, modes, skills, context | ~6 |
+| | `cost_control.py` | `quote()` a run before paying, trim recall, read `agent.costs` | 2 + quote (free) |
 | [`agent-reasoning/`](agent-reasoning/) | `research_and_plan.py` | Evidence-gathering agent scripts an AI writes for one task: research (search), plan(), red-teamed by second_opinion+challenge | ~5 |
 | | `verify_claims.py` | Deep-research pass thin-wrapping agent.verify_claims(): verdict table, honest exit code | 1 + k checks |
 | | `micro_task.py` | Micro-task resolver with the honest protocol: pre-flight, compound gate, tri-state report; `--attempt` switches until() to single-shot attempt() | 1-7 (attempt mode: 1-3) |
@@ -46,6 +48,9 @@ python examples/agent-reasoning/research_and_plan.py /path/to/project "fix the f
 
 # ground your beliefs: verify claims about a topic, mechanically
 python examples/agent-reasoning/verify_claims.py /path/to/project "the config parser handles errors"
+
+# price a run before paying for it; the quote itself costs zero tokens
+python examples/monitoring/cost_control.py /path/to/project
 ```
 
 Examples deliberately use only shipped API — anything marked planned in

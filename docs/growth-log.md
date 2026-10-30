@@ -576,3 +576,27 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   All 358 tests green byte-identically, check exit 0, MI all-A,
   paranoia findings unchanged (6 baseline warns, verified by
   file/message key, not line numbers). Baseline re-saved at 9.05.
+
+- **Loop cycle 18 — user-requested surface sync: examples/ and
+  SKILL.md now cover the v0.7 token-control and recovery API.** Gap
+  analysis against `dir(Ranger)` found four public surfaces with no
+  example and no SKILL.md mention: quote(), context_summarize/
+  context_clear as a cost lever, explicit snapshot(tag=)/rollback
+  (only the until(rollback_on_fail=True) chaining was shown), and
+  verify_claims in the multi-agent pattern list. Added:
+  examples/monitoring/cost_control.py (quote a run before paying,
+  trim recall when the breakdown says history dominates the bill,
+  then read agent.costs scoped by costs_reset) and
+  examples/code-work/recoverable_change.py (snapshot tag -> railed
+  do(allow=[...]) -> red gate means rollback restores every touched
+  path). SKILL.md: new recoverable-mutation rule row, the full
+  quote/costs bullet block under Costs, verify_claims in the
+  smallest-fitting-pattern list, and the tip now says
+  snapshot(tag=)/rollback(tag) instead of the stale "(0.8)" forward
+  reference. Gate STRENGTHENED (never weakened):
+  test_every_shipped_command_has_an_example_usage now also demands
+  quote, snapshot and rollback — the coverage cannot drift again.
+  examples/README.md table + recipes updated. All new examples pass
+  the mechanical gates (compile, side-effect-free import <2s, main
+  guard, shipped-API-only); 358 tests green, scan 9.05, check exit 0,
+  MI all-A.

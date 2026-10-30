@@ -25,7 +25,9 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Open-ended answer or one small plan | `ask(prompt)` | A custom chat loop |
 | Make a filesystem change | `do(goal)` | A claim that a change happened |
 | Change one existing file only | `edit(file, instruction)` | `do()` free rein |
+| Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
 | Bound or preview a mutation | `allow=[globs]` / `deny=[globs]` / `dry_run=True` (per call or ctor; deny wins; pure-Python path predicates) | prompt instructions as "safety" (law-4 laundering) |
+| Recoverable mutation | `snapshot(tag=...)` before, `rollback(tag)` after — or `until(..., rollback_on_fail=True)` | `git checkout` hand-rolled; hoping nothing breaks |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
 | Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `trace(symbol)` / `test()` / `lint()` / `diagnose(error)` / `critique(file_or_diff)` / `extract(goal, keys=[...])` (typed JSON rows) | `do()` |
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
@@ -53,6 +55,18 @@ an exit-code boolean and does not call a model.
 
 - Set an explicit `timeout=` for real work and a small `max_iter`/`rounds`
   budget for every loop. A loop costs one or more full CLI calls per iteration.
+- `agent.quote(prompt, label=..., **ov)` prices a run BEFORE you pay:
+  zero model calls, composes the exact prompt the matching run would
+  send (same seam), and reports `chars_total`, an `est_tokens_in`
+  estimate (chars/4 — a preview, not a bill), and a `segments` breakdown
+  (`request`/`recall`/`grants`/`effort`/`other`). Use it to decide
+  whether history is worth re-sending, and `context_summarize()` /
+  `context_clear()` to shed recall weight when the quote says it
+  dominates the bill.
+- `agent.costs` is the cumulative ledger — `{"calls", "chars_in",
+  "chars_out", "tokens_in", "tokens_out", "wall_s"}`, real tokens once
+  the backend reports them. Wrap a loop between `costs_reset()` and
+  `agent.costs` for bounded per-work-item accounting.
 - Ctrl+C / notebook interrupt raises `KeyboardInterrupt`, stops the CLI client,
   and retires the progress spinner. Long loops put honest partial state in the
   interrupt message; nothing is claimed complete.
@@ -88,6 +102,8 @@ Use the smallest fitting pattern:
 - `second_opinion(other, prompt)` — compare two answers; disagreement is the
   signal, not a vote.
 - `review(subject, author=...)` — strict `VERDICT`, `FINDINGS`, `CHANGES`.
+- `verify_claims(list_of_claims)` — one run, a PASS/FAIL/UNCERTAIN table;
+  claims stay unverifiable statements until checked against the repo.
 - `challenge(other, claim=..., rounds=1)` — adversarial evidence check.
 - `refine_with(critic, goal, max_iter=2)` — do → review → revise.
 - `ranger.debate(a, b, topic, judge=...)` — surface factual disagreements;
@@ -153,7 +169,8 @@ two false-greens caught). Follow them when a ranger loop does real work.
   one blurry dialogue: task N+1's planning answer can be piped straight from
   task N's completed report ("already done"), wasting iterations on
   self-doubt. Isolate: `agent.ask(..., memory=False)`, a fresh `Ranger()`,
-  or (0.8) snapshot/restore per task.
+  `snapshot(tag=...)` before and `rollback(tag)` after each task, or check
+  the cost with `quote()` first.
 - **Verify even PASSes.** After a loop claims `achieved`, re-check the
   feature mechanically yourself. Trust, then verify — in that order only
   when the stampede of a deadline demands it; ideally verify, then trust.
@@ -207,7 +224,11 @@ See [examples/README.md](examples/README.md) for runnable recipes:
 
 - `examples/code-work/fix_failing_tests.py` — bounded repair with a real test
   command as the gate.
+- `examples/code-work/recoverable_change.py` — snapshot tag -> rail a `do()` ->
+  red gate means rollback restores every touched path.
 - `examples/code-work/simple_code_review.py` — one file, one strict verdict.
+- `examples/monitoring/cost_control.py` — `quote()` before paying, then
+  `agent.costs` for what it actually cost.
 - `examples/monitoring/project_health.py` — read-only health snapshot.
 - `examples/multiagent/multi_agent.py` — all collaboration patterns.
 - `examples/dummy/mechanical_gates.py` — no model or login required.

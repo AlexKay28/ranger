@@ -139,7 +139,9 @@ def test_every_shipped_command_has_an_example_usage():
                     "gate", "until", "models", "with_config",
                     # multi-agent interactions (v0.6)
                     "review", "challenge", "second_opinion", "refine_with",
-                    "debate"):
+                    "debate",
+                    # token-spend control + recoverable mutations (v0.7)
+                    "quote", "snapshot", "rollback"):
         assert f".{command}(" in all_example_text or f"Ranger.{command}" in all_example_text, (
             f"no example demonstrates .{command}()"
         )
