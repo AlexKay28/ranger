@@ -375,3 +375,19 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   pcina complexity warns remaining: only legacy `challenge` (cc 20,
   cognitive 18) plus one nesting warn at line 385. Suite: 354
   mocked tests green.
+
+- **Loop cycle 7 — legacy challenge de-composed; par_zero complexity
+  category reached.** `Ranger.challenge` — the legacy cc-20 /
+  cognitive-18 block, pre-dating this loop — now orchestrates three
+  per-phase helpers with the frozen prompts and strict line contracts
+  verbatim: `_challenge_attack` (single ATTACK: line, ambiguous
+  replies are RangerError), `_challenge_defense` (exactly one
+  terminal DEFENDED/CONCEDED, concession ends without a ruling
+  call), `_challenge_ruling` (RULING: SUSTAINED|WITHDRAWN from
+  evidence alone). Plus codex `_json_line`/`_jsonl_events`/
+  `_apply_event` restructuring that silenced the last pcina nesting
+  warn (elif-in-for depth 4). pcina's complexity AND nesting
+  categories now score 10.0/10 with zero warns left. Behavior
+  byte-identical — pinned by the challenge truth tables. Remaining
+  pcina findings are size/params/clever class (debate 22 params,
+  long spans) — next backlog tier. Suite: 354 mocked tests green.
