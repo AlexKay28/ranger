@@ -1708,11 +1708,7 @@ class Ranger:
             ...
             agent.rollback("before-refactor")
         """
-        root = self._git("rev-parse", "--show-toplevel").strip()
-        if not root:
-            raise RangerError(
-                f"snapshot() cwd is not a git repository: {self.cwd!r}"
-            )
+        root = self._repo_root("snapshot()")
         self._snap_seq += 1
         if tag is None:
             tag = f"snap-{self._snap_seq}"
@@ -1743,6 +1739,50 @@ class Ranger:
         _LOG.info("snapshot · tag=%s sha=%s", tag, sha[:10])
         return {"tag": tag, "sha": sha, "tree": tree, "root": root}
 
+    def _repo_root(self, who: str) -> str:
+        """The git repo root of cwd, or an honest RangerError."""
+        root = self._git("rev-parse", "--show-toplevel").strip()
+        if not root:
+            raise RangerError(
+                f"{who} cwd is not a git repository: {self.cwd!r}"
+            )
+        return root
+
+    def _rollback_target(self, tag):
+        """Resolve a snapshot tag (None = the latest recorded) to its entry."""
+        if tag is None:
+            if not self.snapshot_log:
+                raise RangerError(
+                    "rollback(): no snapshot recorded — nothing to restore"
+                )
+            tag = self.snapshot_log[-1]["tag"]
+        entry = next((s for s in self.snapshot_log if s["tag"] == tag), None)
+        if entry is None:
+            known = ", ".join(s["tag"] for s in self.snapshot_log) or "none"
+            raise RangerError(
+                f"rollback(): unknown snapshot tag {tag!r} (recorded: {known})"
+            )
+        return tag, entry
+
+    def _paths_changed_since(self, sha, tree) -> tuple:
+        """Honest path diff of the CURRENT tree vs a snapshot.
+
+        Returns (changed, extras): modified/deleted tracked paths
+        (git diff --name-only) and post-snapshot untracked creations
+        present now but absent from the snapshot tree — each by exact
+        path, never a shotgun.
+        """
+        changed = [l for l in self._git("diff", "--name-only", sha).splitlines()
+                   if l.strip()]
+        untracked = [l for l in self._git(
+            "ls-files", "--others", "--exclude-standard").splitlines()
+            if l.strip()]
+        snap_files = set(
+            l for l in self._git("ls-tree", "-r", "--name-only", tree).split() if l
+        )
+        extras = [p for p in untracked if p not in snap_files]
+        return changed, extras
+
     def rollback(self, tag: str | None = None) -> dict:
         """Restore the working tree to a snapshot (tag, or the last one).
 
@@ -1760,35 +1800,10 @@ class Ranger:
         stopped being a git repository — an honest refusal, never a
         claimed restore.
         """
-        if tag is None:
-            if not self.snapshot_log:
-                raise RangerError(
-                    "rollback(): no snapshot recorded — nothing to restore"
-                )
-            tag = self.snapshot_log[-1]["tag"]
-        entry = next((s for s in self.snapshot_log if s["tag"] == tag), None)
-        if entry is None:
-            known = ", ".join(s["tag"] for s in self.snapshot_log) or "none"
-            raise RangerError(
-                f"rollback(): unknown snapshot tag {tag!r} (recorded: {known})"
-            )
-        root = self._git("rev-parse", "--show-toplevel").strip()
-        if not root:
-            raise RangerError(
-                f"rollback() cwd is not a git repository: {self.cwd!r}"
-            )
+        tag, entry = self._rollback_target(tag)
+        self._repo_root("rollback()")
         sha, tree = entry["sha"], entry["tree"]
-        # what differs right now vs the snapshot — the honest restored list
-        changed = [l for l in self._git("diff", "--name-only", sha).splitlines()
-                   if l.strip()]
-        # post-snapshot untracked creations: present now, absent in snapshot
-        untracked = [l for l in self._git(
-            "ls-files", "--others", "--exclude-standard").splitlines()
-            if l.strip()]
-        snap_files = set(
-            l for l in self._git("ls-tree", "-r", "--name-only", tree).split() if l
-        )
-        extras = [p for p in untracked if p not in snap_files]
+        changed, extras = self._paths_changed_since(sha, tree)
         # 1) index+worktree <- snapshot tree; `-u` deletes files whose only
         #    justification was a post-snapshot index entry
         self._git("read-tree", "--reset", "-u", tree)
@@ -1820,10 +1835,7 @@ class Ranger:
             "allow", allow if allow is not None else self.allow)
         effective_deny = _normalize_patterns(
             "deny", deny if deny is not None else self.deny)
-        root = self._git("rev-parse", "--show-toplevel").strip()
-        if not root:
-            raise RangerError(
-                f"commit() cwd is not a git repository: {self.cwd!r}")
+        root = self._repo_root("commit()")
         porcelain = self._git("status", "--porcelain")
         if not porcelain.strip():
             raise RangerError(

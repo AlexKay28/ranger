@@ -345,3 +345,20 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   challenge (cc 20), plus span/params findings; the fresh-vs-legacy
   baseline decision (backlog item 4) is the next gate and needs its
   human call. Suite: 354 green.
+
+- **Loop cycle 5 — rollback/commit/snapshot share their git rails.**
+  `Ranger.rollback` (cc 18, fresh from #7) decomposed into
+  `_rollback_target` (tag resolution: None = latest, unknown tag
+  names what IS recorded), `_paths_changed_since` (the honest
+  changed+extras path diff — exact paths, never a shotgun) and the
+  orchestrator; the duplicated "cwd is not a git repository"
+  refusal across snapshot()/rollback()/commit() is now one
+  `_repo_root(who)` with per-method wording preserved byte-for-byte.
+  Behavior identical (git argv sequences pinned by
+  tests/test_snapshots.py truth tables). pcina: rollback's cc 18
+  gone; remaining complexity warns: transform 15, until 15, legacy
+  challenge 20/cognitive 18, debate 22 params. User decided this
+  cycle: REFATOR-everything policy (no baseline) + push granted
+  (12 commits pushed, d237971..d3d464d; issue closing blocked by
+  the PAT's missing issue-write scope — manual step left open).
+  Suite: 354 mocked tests green.
