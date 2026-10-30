@@ -100,7 +100,11 @@ agent.until("make the tests green", gate_cmd="python -m pytest -q")
 Each call is one fresh headless `opencode run` in the agent's working directory
 (`cwd=`), with permissions auto-approved so it can actually touch the filesystem.
 Pass `session="..."` to share context between calls, `model=` to pick any
-`provider/model` ID from `opencode models`.
+`provider/model` ID from `opencode models`. Independent calls can overlap —
+async twins (`agent.ask_async`, `do_async`, `search_async`, `write_async`,
+`edit_async`, `check_async`) and `agent.par_map(calls, max_concurrency=8)`
+fan out over bounded-concurrency subprocesses with the identical contracts;
+the sync methods stay the primary API.
 
 ## Model discovery & configuration
 

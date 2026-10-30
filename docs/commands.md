@@ -194,6 +194,55 @@ Boolean verdict on repo state. The agent must actually verify (commands, file
 reads) and answer with YES/NO as the first word; unparseable answers raise
 `RangerError` instead of guessing. The loop-grade primitive for gates.
 
+## ✅ Shipped — async twins & par_map (issue #9)
+
+Additive async twins for the call-family commands — same contracts, same
+frozen prompts, byte-identical argv (one shared `_prepare_run()` seam; the
+sync methods stay the primary API). Cancellation kills the CLI subprocess,
+like `KeyboardInterrupt` on the sync path. No chat, no streaming — complete
+strings, exactly like today. Concurrency stays yours: plain awaitables and
+one helper, no runtime or scheduler object (law 6).
+
+### `ask_async(prompt, **ov) -> str`
+Awaitable twin of `ask` — asyncio-spawned CLI process, identical prompt and
+result contract.
+
+### `do_async(goal, **ov) -> str`
+Awaitable twin of `do` — same "actually do the work" contract, same report.
+
+### `search_async(goal, **ov) -> str`
+Awaitable twin of `search` — read-only codebase lookup, same output shape.
+
+### `write_async(task, path=None, **ov) -> str` *(returns file path)*
+Async twin of `write`; raises `RangerError` if the file was not written,
+same mechanical post-check.
+
+### `edit_async(file, instruction, **ov) -> str`
+Async twin of `edit`; raises `RangerError` if the single target file was
+not modified during the run, same mtime post-check.
+
+### `check_async(condition, **ov) -> bool`
+Async twin of `check`; the strict YES/NO verdict grammar is shared with the
+sync command — one parser, not two.
+
+### `par_map(calls, max_concurrency=8) -> list`
+Bounded-concurrency map over independent calls. Each call is a dict with
+`method` (`ask` default, `do`, `write`, `edit`, `search`, `check`), optional
+`args`/`kwargs`, and an optional `agent` (another `Ranger`, defaults to the
+caller). Returns one slot per input, aligned in order: the answer on
+success, or the exception instance that call raised — nothing is swallowed.
+Every spec is validated **before** any harness is spawned; at most
+`max_concurrency` CLI subprocesses run at once. Cancelling the `par_map`
+awaitable kills all child processes.
+
+```python
+results = asyncio.run(agent.par_map([
+    {"method": "search", "args": ["parseSQL defined"]},
+    {"method": "ask",   "args": ["list failing checks"]},
+    {"method": "check", "args": ["readme mentions license"]},
+], max_concurrency=3))
+```
+
 ### `gate(command) -> bool`
 Fully mechanical sibling of `check` — no model at all: a shell command whose
 exit code decides. `agent.gate("python -m pytest -q")`. In `until`, `attempt`

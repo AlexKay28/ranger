@@ -542,6 +542,68 @@ delegates to the backend adapter. opencode runs `opencode models`; codex
 cannot enumerate models and raises `RangerError` pointing at
 `~/.codex/config.toml` / `model=`. No agent, no tokens, no context recording.
 
+## Async twins & par_map
+
+ranger stays sync-and-blocking by design (non-goal: streaming/chat), but
+independent calls with no data dependency are pure parallelism waste —
+"law 6" does not forbid `asyncio.gather`; it forbids hiding it. The twins
+below are **additive shells over the same seam**: the frozen prompt, the
+resolved options and the argv are byte-identical to their sync
+counterparts, because both paths run literally the same preparation
+(`_prepare_run`) — only the process spawn and kill is asyncio. The sync
+methods remain the primary API.
+
+- `ask_async(prompt, **ov) -> str` — twin of `ask()`
+- `do_async(goal, **ov) -> str` — twin of `do()`
+- `search_async(goal, **ov) -> str` — twin of `search()`
+- `write_async(task, path=None, **ov) -> str` — twin of `write()`; same
+  "file must exist afterwards" post-check
+- `edit_async(file, instruction, **ov) -> str` — twin of `edit()`; same
+  "target must have been modified" mtime post-check
+- `check_async(condition, **ov) -> bool` — twin of `check()`; the strict
+  YES/NO verdict grammar is the shared parser, not a copy
+
+Behavioral contract, pinned by mocked tests: per-call `retries` honored
+(transport-class only), timeouts raise `RangerTimeout` and kill the
+process group, nonzero CLI exits raise `RangerHarnessError` with the
+stderr detail, a missing CLI raises with the adapter's install hint, and
+`agent.last` / `agent.context` record exactly as the sync path does.
+Cancelling the awaitable kills the CLI subprocess — the asyncio analogue
+of the sync path's KeyboardInterrupt semantics. There is **no live
+spinner** on the async path (progress UI is a sync-screen concern).
+
+`par_map(calls, max_concurrency=8) -> list` — bounded-concurrency map
+over independent calls. Each element of `calls` is a dict:
+
+- `method`: `'ask'` (default), `'do'`, `'write'`, `'edit'`, `'search'`
+  or `'check'` — the async-twin family;
+- `args` / `kwargs`: passed to that twin;
+- `agent`: optional other `Ranger` (defaults to the caller) — pass
+  differently-configured agents to fan work out.
+
+Returns one slot per input, aligned in order: the answer on success, or
+the exception instance that call raised — per-item failures are never
+swallowed and never cancel their siblings. **Every** call spec is
+validated up front (`TypeError`/`ValueError` before a single CLI is
+spawned), at most `max_concurrency` subprocesses run at once
+(`asyncio.Semaphore`, default 8), and cancelling the `par_map` awaitable
+kills all child processes. It is a helper, not a scheduler: no queue
+object, no runtime — the loop stays yours.
+
+```python
+import asyncio, ranger
+
+agent = ranger.Ranger(timeout=180)
+slow  = ranger.Ranger(timeout=600, backend="codex")
+
+results = asyncio.run(agent.par_map([
+    {"method": "search", "args": ["where is parseSQL defined"]},
+    {"method": "ask",    "args": ["list the failing checks"]},
+    {"agent": slow, "method": "check", "args": ["tests pass under codex"]},
+], max_concurrency=3))
+answer, verdict = results[0], results[2]   # results[1] may be an exception
+```
+
 ## Multi-agent interactions
 
 Compositions, never a runtime (paradigm law 6): every pattern below is

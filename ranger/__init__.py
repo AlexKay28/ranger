@@ -31,6 +31,7 @@ Discover available models and configure runs:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -529,8 +530,108 @@ register_backend("claude", _ClaudeBackend)
 # never facts). Recall is skipped for these; recording still happens.
 _PURE_LABELS = frozenset({"check", "critique", "diagnose", "lint", "read", "search", "summarize", "test", "trace"})
 
+# Command families with async twins (issue #9). par_map validates its
+# call specs against this list; everything else stays sync-only.
+_ASYNC_TWIN_METHODS = frozenset({"ask", "do", "write", "edit", "search", "check"})
+
 # How many characters of recorded context a run may recall, max.
 _MEMORY_BUDGET = 20000
+
+# Frozen command prompt contracts (law 1: one call = one contract; the
+# test suite pins them). The sync commands and their async twins build
+# prompts from these single sources — a twin can never drift from its
+# sync counterpart.
+
+
+def _do_prompt(goal: str) -> str:
+    return (
+        f"Accomplish this goal in the current directory: {goal}\n"
+        "Use your file and shell tools to actually do the work. "
+        "When finished, reply with a short report: what you did, "
+        "which files changed, and anything that failed."
+    )
+
+
+def _edit_prompt(target, instruction: str) -> str:
+    return (
+        f"Edit exactly this existing file: {target}\n\n"
+        f"Instruction: {instruction}\n\n"
+        "You may modify only that file. Do not create, edit, rename, or "
+        "delete any other file. When finished, reply with a short report "
+        "of the change and anything that failed."
+    )
+
+
+def _write_prompt(task: str, out) -> str:
+    return (
+        f"{task}\n\n"
+        f"Write your complete answer as a file at exactly: {Path(out).resolve()}\n"
+        "Do not print the answer to stdout; the file IS the answer. "
+        "When done, reply with the file path only."
+    )
+
+
+def _search_prompt(goal: str) -> str:
+    return (
+        f"Search this codebase to answer: {goal}\n"
+        "Use grep/glob tools over the working directory. "
+        "Reply with a plain multiline report: each match as "
+        "`file:line` followed by the matching line or a short note. "
+        "No code changes."
+    )
+
+
+def _check_prompt(condition: str) -> str:
+    return (
+        f"Decide whether this condition is TRUE in the current directory: "
+        f"{condition}\n"
+        "Actually verify it with file reads or shell commands — never "
+        "guess. The verdict must be the very first thing you print: "
+        "a line containing only YES or only NO, nothing before it. "
+        "One short line of evidence may follow it. No other preamble."
+    )
+
+
+def _parse_check_verdict(answer: str) -> bool:
+    """Boil a check() answer down to True/False or raise RangerError.
+
+    Shared by the sync `check()` and the async twin — the verdict
+    grammar is one contract (law 2), not two.
+    """
+    lines = answer.strip().splitlines()
+
+    def standalone(line: str):
+        m = re.fullmatch(r"\W*(yes|no)\W*", line.strip(), re.IGNORECASE)
+        return m.group(1).upper() if m else None
+
+    # a verdict is a line consisting solely of YES or NO; more than one
+    # verdict is a contradiction, which is no verdict at all
+    verdicts = [v for v in (standalone(l) for l in lines[:10]) if v]
+    joined = "+".join(verdicts)
+    if verdicts:
+        if "YES+NO" in joined or "NO+YES" in joined:
+            raise RangerError(
+                "check() got contradictory YES and NO verdicts from:\n"
+                + answer[:300]
+            )
+        return verdicts[0] == "YES"
+
+    match = re.match(r"\W*(yes|no)\b", answer.strip(), re.IGNORECASE)
+    if match:
+        first_line = lines[0] if lines else ""
+        rest = first_line[re.match(r"\W*(yes|no)\b", first_line,
+                                   re.IGNORECASE).end():]
+        if re.search(r"\b(cannot|can'?t|couldn'?t|unable|unable to|"
+                     r"unknown|unsure|not sure|no idea)\b", rest,
+                     re.IGNORECASE):
+            raise RangerError(
+                "check() got an unconfident non-verdict from:\n"
+                + answer[:300]
+            )
+        return match.group(1).upper() == "YES"
+    raise RangerError(
+        f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
+    )
 
 
 class RangerError(RuntimeError):
@@ -919,12 +1020,7 @@ class Ranger:
             out = Path(path)
             if not out.is_absolute():
                 out = Path(self.cwd or Path.cwd()) / out
-        prompt = (
-            f"{task}\n\n"
-            f"Write your complete answer as a file at exactly: {Path(out).resolve()}\n"
-            "Do not print the answer to stdout; the file IS the answer. "
-            "When done, reply with the file path only."
-        )
+        prompt = _write_prompt(task, out)
         self._run(prompt, label="write", **ov)
         if not out.is_file():
             raise RangerError(f"agent did not write the expected file: {out}")
@@ -936,13 +1032,7 @@ class Ranger:
         The agent may create, edit and delete files and run shell commands
         in the working directory. Returns its final report.
         """
-        prompt = (
-            f"Accomplish this goal in the current directory: {goal}\n"
-            "Use your file and shell tools to actually do the work. "
-            "When finished, reply with a short report: what you did, "
-            "which files changed, and anything that failed."
-        )
-        return self._run(prompt, label="do", **ov)
+        return self._run(_do_prompt(goal), label="do", **ov)
 
     def edit(self, file: str | Path, instruction: str, **ov) -> str:
         """Make one requested change to exactly one existing file.
@@ -958,14 +1048,8 @@ class Ranger:
             before = target.stat().st_mtime_ns
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
-        prompt = (
-            f"Edit exactly this existing file: {target}\n\n"
-            f"Instruction: {instruction}\n\n"
-            "You may modify only that file. Do not create, edit, rename, or "
-            "delete any other file. When finished, reply with a short report "
-            "of the change and anything that failed."
-        )
-        report = self._run(prompt, label="edit", **ov)
+        report = self._run(_edit_prompt(target, instruction),
+                           label="edit", **ov)
         try:
             after = target.stat().st_mtime_ns
         except FileNotFoundError:
@@ -1002,14 +1086,7 @@ class Ranger:
 
         Returns a multiline report: file paths, line numbers and snippets.
         """
-        prompt = (
-            f"Search this codebase to answer: {goal}\n"
-            "Use grep/glob tools over the working directory. "
-            "Reply with a plain multiline report: each match as "
-            "`file:line` followed by the matching line or a short note. "
-            "No code changes."
-        )
-        return self._run(prompt, label="search", **ov)
+        return self._run(_search_prompt(goal), label="search", **ov)
 
     def trace(self, symbol: str, **ov) -> str:
         """Trace a symbol's definition, callers, and data flow without mutation.
@@ -1091,49 +1168,155 @@ class Ranger:
             agent.check("all tests pass")        # -> bool
             agent.check("README mentions the license")
         """
-        prompt = (
-            f"Decide whether this condition is TRUE in the current directory: "
-            f"{condition}\n"
-            "Actually verify it with file reads or shell commands — never "
-            "guess. The verdict must be the very first thing you print: "
-            "a line containing only YES or only NO, nothing before it. "
-            "One short line of evidence may follow it. No other preamble."
-        )
+        prompt = _check_prompt(condition)
         answer = self._run(prompt, label="check", **ov)
-        lines = answer.strip().splitlines()
+        return _parse_check_verdict(answer)
 
-        def standalone(line: str):
-            m = re.fullmatch(r"\W*(yes|no)\W*", line.strip(), re.IGNORECASE)
-            return m.group(1).upper() if m else None
+    # ------------------------------------------------------------------ #
+    # async twins (issue #9) — same contracts, same frozen prompts, one
+    # shared _prepare_run() seam; the sync methods stay the primary API.
+    # Concurrency is the caller's: these are plain awaitables, no runtime.
 
-        # a verdict is a line consisting solely of YES or NO; more than one
-        # verdict is a contradiction, which is no verdict at all
-        verdicts = [v for v in (standalone(l) for l in lines[:10]) if v]
-        joined = "+".join(verdicts)
-        if verdicts:
-            if "YES+NO" in joined or "NO+YES" in joined:
-                raise RangerError(
-                    "check() got contradictory YES and NO verdicts from:\n"
-                    + answer[:300]
+    async def ask_async(self, prompt: str, **ov) -> str:
+        """Async twin of ask(): same contract, same frozen prompt.
+
+        Runs one headless harness CLI through `asyncio`; see par_map()
+        for running many independent calls concurrently.
+        """
+        return await self._run_async(prompt, label="ask", **ov)
+
+    async def do_async(self, goal: str, **ov) -> str:
+        """Async twin of do(): same contract, same frozen prompt."""
+        return await self._run_async(_do_prompt(goal), label="do", **ov)
+
+    async def search_async(self, goal: str, **ov) -> str:
+        """Async twin of search(): same contract, same frozen prompt."""
+        return await self._run_async(_search_prompt(goal),
+                                     label="search", **ov)
+
+    async def write_async(self, task: str, path: str | Path | None = None,
+                          **ov) -> str:
+        """Async twin of write(): same contract, same frozen prompt.
+
+        Returns the path of the file that was written, and raises
+        RangerError if the agent did not write it — same as write().
+        """
+        if path is None:
+            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:40]
+            slug = slug.strip("_-") or "ranger_out"
+            out = Path(self.cwd or Path.cwd()) / (
+                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:6]}.md"
+            )
+        else:
+            out = Path(path)
+            if not out.is_absolute():
+                out = Path(self.cwd or Path.cwd()) / out
+        await self._run_async(_write_prompt(task, out), label="write", **ov)
+        if not out.is_file():
+            raise RangerError(f"agent did not write the expected file: {out}")
+        return str(out)
+
+    async def edit_async(self, file: str | Path, instruction: str,
+                         **ov) -> str:
+        """Async twin of edit(): same contract, same frozen prompt.
+
+        Raises RangerError if the single target file was not modified
+        during the agent run — same mechanical check as edit().
+        """
+        target = Path(file)
+        if not target.is_absolute():
+            target = Path(self.cwd or Path.cwd()) / target
+        target = target.resolve()
+        try:
+            before = target.stat().st_mtime_ns
+        except FileNotFoundError:
+            raise RangerError(f"edit() target does not exist: {target}") from None
+        report = await self._run_async(_edit_prompt(target, instruction),
+                                       label="edit", **ov)
+        try:
+            after = target.stat().st_mtime_ns
+        except FileNotFoundError:
+            raise RangerError(f"agent removed the edit() target: {target}") from None
+        if after == before:
+            raise RangerError(f"agent did not modify the edit() target: {target}")
+        return report
+
+    async def check_async(self, condition: str, **ov) -> bool:
+        """Async twin of check(): same strict YES/NO verdict grammar."""
+        answer = await self._run_async(_check_prompt(condition),
+                                        label="check", **ov)
+        return _parse_check_verdict(answer)
+
+    async def par_map(self, calls: "list[dict]",
+                      max_concurrency: int = 8) -> "list":
+        """Run independent calls concurrently; one result per input.
+
+        Each call is a dict. Keys:
+          - ``method``: an async-twin name — ``ask`` (default), ``do``,
+            ``write``, ``edit``, ``search`` or ``check``;
+          - ``args`` / ``kwargs``: passed to that twin (default: none);
+          - ``agent``: optional OTHER Ranger — defaults to this one.
+
+        Returns a list aligned with ``calls``: the answer on success,
+        or the exception instance that call raised (honest per-item
+        failures — nothing is swallowed; nothing but transport is
+        retried beyond each call's own ``retries``).
+
+        Bounded concurrency: at most ``max_concurrency`` CLI subprocesses
+        run at once. This is a helper, not a scheduler (law 6): there is
+        no runtime, no queue object — plain ``asyncio.gather`` under a
+        semaphore, and the control flow stays yours.
+
+            results = asyncio.run(agent.par_map([
+                {"method": "search", "args": ["parseSQL defined"]},
+                {"method": "ask", "args": ["list failing checks"]},
+                {"method": "check", "args": ["readme mentions license"]},
+            ]))
+        """
+        if isinstance(calls, (str, bytes)) or not isinstance(calls, list):
+            raise TypeError(f"calls must be a list of dicts, got {calls!r}")
+        if (not isinstance(max_concurrency, int)
+                or isinstance(max_concurrency, bool) or max_concurrency < 1):
+            raise ValueError(
+                f"max_concurrency must be a positive int, got {max_concurrency!r}")
+        # validate EVERYTHING up front — a bad spec must not waste a
+        # single harness call on the calls that were fine
+        seen: list[tuple] = []
+        for i, call in enumerate(calls):
+            if not isinstance(call, dict):
+                raise TypeError(f"calls[{i}] must be a dict, got {call!r}")
+            method = call.get("method", "ask")
+            twin = f"{method}_async"
+            if method not in _ASYNC_TWIN_METHODS:
+                raise ValueError(
+                    f"calls[{i}]: method must be one of "
+                    f"{sorted(_ASYNC_TWIN_METHODS)}, got {method!r}"
                 )
-            return verdicts[0] == "YES"
-
-        match = re.match(r"\W*(yes|no)\b", answer.strip(), re.IGNORECASE)
-        if match:
-            first_line = lines[0] if lines else ""
-            rest = first_line[re.match(r"\W*(yes|no)\b", first_line,
-                                       re.IGNORECASE).end():]
-            if re.search(r"\b(cannot|can'?t|couldn'?t|unable|unable to|"
-                         r"unknown|unsure|not sure|no idea)\b", rest,
-                         re.IGNORECASE):
-                raise RangerError(
-                    "check() got an unconfident non-verdict from:\n"
-                    + answer[:300]
+            args = call.get("args", [])
+            kwargs = call.get("kwargs", {})
+            agent = call.get("agent", self)
+            if not isinstance(args, (list, tuple)):
+                raise TypeError(f"calls[{i}]: args must be a list, got {args!r}")
+            if not isinstance(kwargs, dict):
+                raise TypeError(f"calls[{i}]: kwargs must be a dict, got {kwargs!r}")
+            if not hasattr(agent, twin):
+                raise TypeError(
+                    f"calls[{i}]: agent has no {twin} — a Ranger is required"
                 )
-            return match.group(1).upper() == "YES"
-        raise RangerError(
-            f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
-        )
+            seen.append((agent, twin, list(args), dict(kwargs)))
+        if not seen:
+            return []
+
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _one(agent, twin, args, kwargs):
+            async with semaphore:
+                return await getattr(agent, twin)(*args, **kwargs)
+
+        # return_exceptions=True: a sibling failure must not cancel the
+        # others, and per-item errors are reported in place — never hidden
+        return await asyncio.gather(
+            *(_one(*spec) for spec in seen), return_exceptions=True)
 
     def _child_env(self, env: dict | None = None) -> dict | None:
         """Environment for child CLI processes.
@@ -1844,7 +2027,14 @@ class Ranger:
     # ------------------------------------------------------------------ #
     # plumbing
 
-    def _run(self, prompt: str, label: str = "run", **ov) -> str:
+    def _prepare_run(self, prompt: str, label: str, ov: dict) -> dict:
+        """Resolve options, recall, prompt contracts and the backend argv.
+
+        The SHARED SEAM: the sync `_run()` and the async `_run_async()`
+        execute exactly this preparation, so their argv are byte-identical
+        by construction (law 1) — the async twins are a shell over the
+        same contract, never a fork of it.
+        """
         opts = {k: getattr(self, k) for k in _RUN_KEYS}
         opts.update({k: v for k, v in ov.items() if k in _RUN_KEYS})
         unknown = set(ov) - set(_RUN_KEYS)
@@ -1959,9 +2149,26 @@ class Ranger:
                 "your answer before replying.)"
             )
         cmd, full_prompt = adapter.build_cmd(o, full_prompt, skill_files)
+        return {
+            "adapter": adapter,
+            "backend": backend_name,
+            "cmd": cmd,
+            "o": o,
+            "prompt": prompt,
+            "use_stats": use_stats,
+            "use_memory": use_memory,
+            "retries": int(opts.get("retries") or 0),
+            "timeout": opts["timeout"],
+        }
+
+    def _run(self, prompt: str, label: str = "run", **ov) -> str:
+        prep = self._prepare_run(prompt, label, ov)
+        adapter, backend_name = prep["adapter"], prep["backend"]
+        cmd, o = prep["cmd"], prep["o"]
+        use_stats, use_memory = prep["use_stats"], prep["use_memory"]
 
         # live progress UI — stderr only; never a TTY in tests/pipes
-        use_ui = opts["pretty"] and getattr(sys.stderr, "isatty", lambda: False)()
+        use_ui = o["pretty"] and getattr(sys.stderr, "isatty", lambda: False)()
         spinner = None
         t0 = time.time()
         if use_ui:
@@ -1985,7 +2192,7 @@ class Ranger:
                    label, o["model"], backend_name)
 
         try:
-            retries = int(opts.get("retries") or 0)
+            retries = prep["retries"]
             attempt = 0
             proc = None
             while True:
@@ -2004,7 +2211,7 @@ class Ranger:
                             errors="replace",
                             stdin=subprocess.DEVNULL,
                             start_new_session=True,  # own pg → contained blast
-                            timeout=opts["timeout"],
+                            timeout=prep["timeout"],
                         )
                     except FileNotFoundError:
                         # attribute the failure to its real cause: a missing agent
@@ -2019,9 +2226,9 @@ class Ranger:
                             f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
                         ) from None
                     except subprocess.TimeoutExpired:
-                        _finish("✗", "red", f"timed out after {opts['timeout']}s")
+                        _finish("✗", "red", f"timed out after {prep['timeout']}s")
                         raise RangerTimeout(
-                            f"{backend_name} run timed out after {opts['timeout']}s"
+                            f"{backend_name} run timed out after {prep['timeout']}s"
                         ) from None
                     except OSError as exc:
                         _finish("✗", "red", _clip(str(exc), 90))
@@ -2070,6 +2277,122 @@ class Ranger:
                        label, o["model"], time.time() - t0)
             if spinner is not None:
                 spinner.stop()
+
+    async def _run_async(self, prompt: str, label: str = "run", **ov) -> str:
+        """Async shell over the SAME run contract as `_run()`.
+
+        Same frozen prompt, same resolved options, byte-identical argv —
+        the preparation is literally the shared `_prepare_run()` seam;
+        only the process spawn/kill is asyncio here (no live spinner:
+        stderr progress is a sync-screen concern). Cancellation kills
+        the CLI subprocess, mirroring the KeyboardInterrupt semantics
+        of the sync path, and record/telemetry state behaves exactly
+        the same.
+        """
+        prep = self._prepare_run(prompt, label, ov)
+        adapter, backend_name = prep["adapter"], prep["backend"]
+        cmd, o = prep["cmd"], prep["o"]
+        use_stats, use_memory = prep["use_stats"], prep["use_memory"]
+        t0 = time.time()
+
+        _LOG.debug("run_async start · label=%s model=%s backend=%s",
+                   label, o["model"], backend_name)
+
+        async def _kill(proc) -> None:
+            # mirrors _kill_tree: start_new_session made the child its own
+            # process-group leader, so one killpg reaches its whole tree
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), 5)
+            except Exception:  # noqa: BLE001 — cleanup must never mask the exit
+                pass
+
+        try:
+            retries = prep["retries"]
+            attempt = 0
+            while True:
+                proc = None
+                try:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            *cmd,
+                            cwd=self.cwd,
+                            # o, not opts: adapters may fold settings into
+                            # the env overlay inside build_cmd
+                            env=self._child_env(o.get("env")),
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            stdin=asyncio.subprocess.DEVNULL,
+                            start_new_session=True,  # own pg → contained blast
+                        )
+                        stdout_b, stderr_b = await asyncio.wait_for(
+                            proc.communicate(), prep["timeout"]
+                        )
+                    except FileNotFoundError:
+                        # attribute the failure to its real cause: a missing
+                        # agent cwd also raises FileNotFoundError from spawn
+                        if self.cwd and not Path(self.cwd).is_dir():
+                            raise RangerError(
+                                f"agent cwd does not exist: {self.cwd}"
+                            ) from None
+                        raise RangerHarnessError(
+                            f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
+                        ) from None
+                    except asyncio.TimeoutError:
+                        if proc is not None:
+                            await _kill(proc)
+                        raise RangerTimeout(
+                            f"{backend_name} run timed out after {prep['timeout']}s"
+                        ) from None
+                    except asyncio.CancelledError:
+                        # task cancellation kills the CLI subprocess — same
+                        # semantics as KeyboardInterrupt on the sync path
+                        if proc is not None:
+                            await _kill(proc)
+                        raise
+                    except OSError as exc:
+                        raise RangerHarnessError(
+                            f"{backend_name} run could not be spawned: {exc}"
+                        ) from None
+
+                    stdout = stdout_b.decode("utf-8", errors="replace")
+                    stderr = stderr_b.decode("utf-8", errors="replace")
+                    if proc.returncode != 0:
+                        raise RangerHarnessError(
+                            f"{backend_name} run failed (exit {proc.returncode}):\n{stderr.strip()}"
+                        )
+                    break
+                except (RangerTimeout, RangerHarnessError) as exc:
+                    # transport-class failure only: prompt-contract failures
+                    # (plain RangerError) never reach this handler
+                    if attempt < retries:
+                        attempt += 1
+                        _LOG.info("run_async retry %d/%d · %s",
+                                  attempt, retries, _clip(str(exc), 70))
+                        continue
+                    raise
+            answer, info = adapter.parse_output(stdout, use_stats)
+            if use_stats and info is not None:
+                self.last = {
+                    "label": label,
+                    "wall_s": round(time.time() - t0, 2),
+                    **info,
+                }
+            if use_memory:
+                self.context.append(
+                    {"role": "user", "content": prep["prompt"]})
+                self.context.append({"role": "assistant", "content": answer})
+            return answer
+        except asyncio.CancelledError:
+            _LOG.debug("run_async cancelled · label=%s duration=%.2fs",
+                       label, time.time() - t0)
+            raise
+        finally:
+            _LOG.debug("run_async finish · label=%s model=%s duration=%.2fs",
+                       label, o["model"], time.time() - t0)
 
 
 # ====================================================================== #

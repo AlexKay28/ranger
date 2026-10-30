@@ -170,3 +170,17 @@ documentation + tests). This is the loop's only cross-cycle memory.
   zero control-flow change; docs gates updated (API.md capability
   map, SKILL.md, README, ARCHITECTURE.md, examples/README.md,
   `<!-- tests:245 -->` marker).
+- **Issue #9 (same cycle):** async twins — `ask_async`, `do_async`,
+  `write_async`, `edit_async`, `search_async`, `check_async` — plus
+  `par_map`. The prep layer moved out of `_run()` into a shared
+  `_prepare_run()` seam, so sync and async argv are byte-identical BY
+  CONSTRUCTION (pinned by a literal argv-equality test); frozen prompts
+  left the method bodies for single-source builders (`_do_prompt` etc.)
+  so a twin can never drift. Cancellation kills the CLI subtree
+  (asyncio analogue of KeyboardInterrupt semantics); `par_map` validates
+  every spec before a single spawn, bounds concurrency with a semaphore
+  and returns per-slot answers or exception instances — nothing
+  swallowed, no scheduler object (law 6). Suite: 272 mocked tests
+  green in ~2.5s; new file `tests/test_async.py` (27 tests), example
+  `examples/backends/parallel_search.py`, API.md/commands.md/SKILL.md/
+  README synced.

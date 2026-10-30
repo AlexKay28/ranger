@@ -108,6 +108,15 @@ frozen grammars and raise `RangerError` on malformed or conflicting replies.
 - Resolve a model only when needed: explicit per-call model beats constructor,
   then `RANGER_MODEL`, then the effective backend's default.
 
+## Async twins and par_map
+
+Independent calls with no data dependency may overlap — that is caller-side
+plain `asyncio`, not a hidden runtime: `asyncio.run(agent.ask_async(...))`
+or `agent.par_map(calls, max_concurrency=8)` (one aligned slot per call,
+honest per-item exception instances, bounded subprocess concurrency,
+frozen prompts byte-identical to the sync commands). Cancelling kills the
+CLI subtree. The sync methods stay the primary API — no streaming, no chat.
+
 ## Contributing to this repository
 
 - Read [docs/PARADIGM.md](docs/PARADIGM.md) before changing public behavior.
