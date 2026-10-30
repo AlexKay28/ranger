@@ -694,42 +694,51 @@ def _extract_prompt(request: str, keys, many: bool) -> str:
     )
 
 
-def _parse_extract_answer(answer: str, keys, many: bool):
-    """Parse an extract() reply mechanically or raise RangerError (law 5)."""
-    raw = answer.strip()
+def _parse_extract_json(answer: str):
+    """JSON-decode an extract() reply, or raise RangerError (law 5)."""
     try:
-        data = json.loads(raw)
+        return json.loads(answer.strip())
     except ValueError:
         raise RangerError(
             f"extract() could not parse JSON from the agent reply "
             f"(trailing prose or malformed JSON):\n{answer[:300]}"
         ) from None
+
+
+def _extract_rows(data, many: bool, answer: str) -> list:
+    """Normalize parsed JSON into a row list: many=True → array elements,
+    many=False → the single object as a one-row list. None rows become {}
+    (null is an honest empty row); every row must be a JSON object."""
     if many:
         if not isinstance(data, list):
             raise RangerError(
                 f"extract() expected a JSON array with many=True, got: "
                 f"{answer[:300]}"
             )
-        data = [row if row is not None else {} for row in data]
-        for i, row in enumerate(data):
+        rows = [row if row is not None else {} for row in data]
+        for i, row in enumerate(rows):
             if not isinstance(row, dict):
                 raise RangerError(
                     f"extract() array element {i} is not a JSON object: "
                     f"{str(row)[:150]!r}"
                 )
-        rows = data
-    else:
-        if not isinstance(data, dict):
-            raise RangerError(
-                f"extract() expected one JSON object with many=False, got: "
-                f"{answer[:300]}"
-            )
-        rows = [data]
-    # an empty array/object is the agent's legitimate "no matches"
+        return rows
+    if not isinstance(data, dict):
+        raise RangerError(
+            f"extract() expected one JSON object with many=False, got: "
+            f"{answer[:300]}"
+        )
+    return [data]
+
+
+def _parse_extract_answer(answer: str, keys, many: bool):
+    """Parse an extract() reply mechanically or raise RangerError (law 5)."""
+    data = _parse_extract_json(answer)
+    rows = _extract_rows(data, many, answer)
+    # an empty array/object is the agent's legitimate "no matches" —
+    # keys are then vacuously satisfied
     if not many and data == {}:
         return {}
-    # empty array/object is a legitimate "no matches" — keys are then
-    # vacuously satisfied
     for i, row in enumerate(rows):
         missing = [k for k in keys if k not in row]
         if missing:

@@ -331,3 +331,17 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   max 12 per helper). Behavior byte-identical — argv scaffolding and
   JSONL event handling pinned by existing backend tests. Suite: 354
   mocked tests green.
+
+- **Loop cycle 4 — _parse_extract_answer de-composed (cc 17 → clean).**
+  The extract() reply parser (fresh code from issue #8, pcina cc=17)
+  splits into `_parse_extract_json` (JSON-or-RangerError, law 5),
+  `_extract_rows` (shape normalization: array-of-objects vs one
+  object; null rows stay honest empty rows) and a small
+  `_parse_extract_answer` verifier — same truths, same error texts,
+  same vacuous-keys semantics, byte-identical contract pinned by the
+  #8 truth-table tests. radon C list: the cc-17 block is gone. pcina
+  boundary after four cycles: complexity warns remain only on
+  transform (cc 15), until (cc 15), rollback (cc 18) and legacy
+  challenge (cc 20), plus span/params findings; the fresh-vs-legacy
+  baseline decision (backlog item 4) is the next gate and needs its
+  human call. Suite: 354 green.
