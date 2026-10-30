@@ -4,7 +4,7 @@ Runnable applications over `ranger`, organized by the job you want to do.
 Install the package first (`pip install rangers`, or `pip install -e .[dev]`
 from a clone). Every script is main-guarded, so importing it has no side
 effects. All folders except `dummy/` need an authenticated harness CLI
-(opencode, codex, pi or openhands) and make real agent calls.
+(opencode, codex, pi, claude or openhands) and make real agent calls.
 
 | Folder | Example | Use case | Calls |
 |---|---|---|---:|

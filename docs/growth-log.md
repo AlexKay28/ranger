@@ -142,3 +142,31 @@ documentation + tests). This is the loop's only cross-cycle memory.
   new methods; fresh-venv wheel verification before upload.
 - **Release:** `rangers 0.7.1` on PyPI (maintainer-picked patch number),
   verified from pypi.org/simple. Commits: `13274e6`, `07e1532`.
+
+
+## Cycle 7 — claude backend: the fifth harness (2026-10-30)
+
+- **What:** issue #10 — a `claude` backend adapter, so
+  `Ranger(backend="claude")` drives the Claude Code CLI headlessly.
+  Translation only (paradigm law 7): `claude -p "<prompt>"` with
+  `--model`, `--permission-mode acceptEdits` + `--allowedTools
+  "Read,Edit,Bash"` for `auto=True`, `--permission-prompts none`
+  (unattended: anything that would prompt is denied; CLI >= 2.1.259,
+  safe headless), `--resume <id>` for sessions and always
+  `--output-format json`, parsed into answer + telemetry
+  (`result`, `session_id`, `total_cost_usd`, usage → `agent.last`
+  gains `cost_usd`). No file-attachment flag exists, so skills inline
+  into the prompt exactly as the codex backend already does;
+  `--bare` is deliberately never emitted (it breaks subscription
+  auth). Unsupported options (`agent`, `mode`, `title`, `thinking`,
+  non-default `effort`) raise loudly via the shared `unavailable()`
+  contract.
+- **How:** research was frozen up front from the official headless
+  docs (2026-10-30) — the adapter contains only verified flags, and
+  the test suite pins the argv shapes and parser behavior so CLI
+  drift is caught mocked, not in a user's terminal.
+- **Verification:** 245 mocked tests green in under 2s, including a
+  seam-level end-to-end test (`ranger.subprocess.run` mocked) proving
+  zero control-flow change; docs gates updated (API.md capability
+  map, SKILL.md, README, ARCHITECTURE.md, examples/README.md,
+  `<!-- tests:245 -->` marker).

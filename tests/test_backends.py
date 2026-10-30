@@ -21,7 +21,7 @@ RANGER_MOD = "ranger.subprocess"
 
 def test_all_four_backends_registered():
     names = ranger.backends()
-    for name in ("opencode", "codex", "pi", "openhands"):
+    for name in ("opencode", "codex", "pi", "openhands", "claude"):
         assert name in names
     assert names == sorted(names)
 
@@ -121,6 +121,148 @@ class TestPiBuildCmd:
 
 # --------------------------------------------------------------------- #
 # openhands backend
+
+# --------------------------------------------------------------------- #
+# claude backend
+
+def _cl_opts(**kw):
+    base = dict(model=None, cwd=None, timeout=600.0, auto=False, session=None,
+                agent=None, mode=None, title=None, thinking=False, pretty=True,
+                memory=True, skills=None, effort="medium", stats=False,
+                backend="claude", memory_budget=1000, retries=0, env=None)
+    base.update(kw)
+    return base
+
+
+class TestClaudeBuildCmd:
+    def test_basic_headless_run(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, prompt = adapter.build_cmd(_cl_opts(), "fix the build", [])
+        assert cmd == ["claude", "--permission-prompts", "none",
+                       "--output-format", "json", "-p", "fix the build"]
+        assert prompt == "fix the build"
+
+    def test_model_flag_when_set(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, _ = adapter.build_cmd(
+            _cl_opts(model="anthropic/claude-sonnet-4-5"), "hi", [])
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "anthropic/claude-sonnet-4-5"
+
+    def test_no_model_flag_when_unset(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, _ = adapter.build_cmd(_cl_opts(model=None), "hi", [])
+        assert "--model" not in cmd
+
+    def test_auto_maps_to_acceptEdits_and_allowedTools(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, _ = adapter.build_cmd(_cl_opts(auto=True), "hi", [])
+        assert "--permission-mode" in cmd
+        assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+        assert "--allowedTools" in cmd
+        assert cmd[cmd.index("--allowedTools") + 1] == "Read,Edit,Bash"
+
+    def test_read_only_keeps_prompt_denials_headless(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, _ = adapter.build_cmd(_cl_opts(auto=False), "hi", [])
+        assert "--permission-mode" not in cmd
+        assert "--allowedTools" not in cmd
+        assert "--permission-prompts" in cmd
+        assert cmd[cmd.index("--permission-prompts") + 1] == "none"
+
+    def test_session_uses_resume(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, _ = adapter.build_cmd(_cl_opts(session="sid-1"), "hi", [])
+        assert "--resume" in cmd
+        assert cmd[cmd.index("--resume") + 1] == "sid-1"
+
+    def test_output_format_json_always_present(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        for opts in (_cl_opts(), _cl_opts(auto=True, model="m"),
+                     _cl_opts(session="s")):
+            cmd, _ = adapter.build_cmd(opts, "hi", [])
+            assert "--output-format" in cmd
+            assert cmd[cmd.index("--output-format") + 1] == "json"
+
+    def test_prompt_rides_the_p_flag(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, _ = adapter.build_cmd(_cl_opts(), "do work", [])
+        assert cmd[-2] == "-p"
+        assert cmd[-1] == "do work"
+
+    def test_unsupported_options_raise_loudly(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        for bad in (_cl_opts(agent="build"), _cl_opts(mode="plan"),
+                    _cl_opts(title="t"), _cl_opts(thinking=True),
+                    _cl_opts(effort="high"), _cl_opts(effort="low")):
+            with pytest.raises(RangerError, match="does not support"):
+                adapter.build_cmd(bad, "hi", [])
+
+    def test_skills_inline_into_prompt(self, tmp_path):
+        skill = tmp_path / "SKILL.md"
+        skill.write_text("Be terse.", encoding="utf-8")
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        cmd, prompt = adapter.build_cmd(_cl_opts(), "do work", [skill])
+        assert "Attached skill file" in prompt
+        assert "Be terse." in prompt
+        assert "do work" in prompt
+        # the inlined prompt is also exactly what reaches the CLI
+        assert cmd[cmd.index("-p") + 1] == prompt
+
+    def test_skills_have_no_native_flag(self):
+        assert ranger._BACKEND_CLASSES["claude"].native_file_skills is False
+
+    def test_parse_output_extracts_result(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        obj = '{"result": "fixed it", "session_id": "sid-9", '
+        obj += '"total_cost_usd": 0.04, "usage": {"input_tokens": 120, '
+        obj += '"cache_read_input_tokens": 10, "output_tokens": 30}}'
+        answer, info = adapter.parse_output(obj, True)
+        assert answer == "fixed it"
+        assert info == {
+            "model_s": None, "parts": 1, "chars": 8, "session": "sid-9",
+            "cost_usd": 0.04, "input_tokens": 120,
+            "cached_input_tokens": 10, "output_tokens": 30,
+        }
+
+    def test_parse_output_without_stats_returns_no_telemetry(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        answer, info = adapter.parse_output('{"result": "no stats"}', False)
+        assert answer == "no stats"
+        assert info is None
+
+    def test_parse_output_falls_back_to_raw_text(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        # CLI failures print text on stdout too — must not raise
+        answer, info = adapter.parse_output("exit code 2: bad flag\n", True)
+        assert answer == "exit code 2: bad flag"
+        assert info is None
+
+    def test_parse_output_skips_noise_lines(self):
+        adapter = ranger._BACKEND_CLASSES["claude"]()
+        stdout = 'some preamble line\n{"result": "kept"}\n'
+        answer, _ = adapter.parse_output(stdout, False)
+        assert answer == "kept"
+
+    def test_end_to_end_ask_through_the_subprocess_seam(self):
+        """Ranger(backend="claude") wires adapter into _run without touching
+        control flow anywhere else."""
+        agent = Ranger(backend="claude", model="claude-sonnet-4-5",
+                       cwd=".", stats=True)
+        obj = '{"result": "done", "session_id": "sid-1", '
+        obj += '"total_cost_usd": 0.01, "usage": {"input_tokens": 5, '
+        obj += '"output_tokens": 2}}'
+        proc = subprocess.CompletedProcess(args=[], returncode=0,
+                                           stdout=obj, stderr="")
+        with mock.patch(f"{RANGER_MOD}.run", return_value=proc) as run_mock:
+            assert agent.ask("hello") == "done"
+        argv = run_mock.call_args.args[0]
+        assert argv[0] == "claude"
+        assert argv[argv.index("--model") + 1] == "claude-sonnet-4-5"
+        assert argv[-2] == "-p" and argv[-1] == "hello"
+        assert agent.last["session"] == "sid-1"
+        assert agent.last["cost_usd"] == 0.01
+
 
 def _oh_opts(**kw):
     base = dict(model=None, cwd=None, timeout=600.0, auto=True, session=None,

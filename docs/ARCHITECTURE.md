@@ -4,8 +4,8 @@ High-level overview of the codebase. For the design *philosophy* see
 [PARADIGM.md](PARADIGM.md); for per-method details see [API.md](API.md).
 
 **What ranger is:** an agent-as-a-library. One class (`Ranger`) drives
-headless coding-agent harnesses (opencode, codex — and any harness you
-register) from plain Python. You write code, not chat.
+headless coding-agent harnesses (opencode, codex, claude, pi, openhands — and
+any harness you register) from plain Python. You write code, not chat.
 
 ## The layers
 
@@ -68,7 +68,7 @@ register) from plain Python. You write code, not chat.
 
 ## Quality posture
 
-- 229 tests <!-- tests:229 -->, well under the enforced 60-second suite
+- 245 tests <!-- tests:245 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before

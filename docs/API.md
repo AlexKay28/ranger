@@ -624,32 +624,38 @@ never after work has already run.
 
 ## Backends (harness adapters)
 
-`Ranger(backend="codex")`, `Ranger(backend="pi")` or
-`Ranger(backend="openhands")` drive a different headless harness with the
-identical public API. All harness-specific translation — CLI flags, output
+`Ranger(backend="codex")`, `Ranger(backend="pi")`,
+`Ranger(backend="claude")` or `Ranger(backend="openhands")` drive a
+different headless harness with the identical public API. All harness-specific translation — CLI flags, output
 schemas, sandbox semantics — lives in one adapter class per backend; the
 command contracts, context memory and loops are untouched (paradigm law 7:
 the harness is a replaceable data plane).
 
 Capability map:
 
-| Setting | opencode | codex | pi | openhands |
-|---|---|---|---|---|
-| `model` | `--model` (package default if unset) | `-m`; unset → codex config.toml default | `--model` (fuzzy patterns, e.g. `sonnet:high`); unset → pi's configured default | `LLM_MODEL` env + `--override-with-envs` (folded from `model=`; unset → `~/.openhands/agent_settings.json`) |
-| `cwd` | subprocess cwd + `PWD` env fix | native `-C` flag (resume runs use the process cwd) | subprocess cwd (pi works in the launch directory) | subprocess cwd + `PWD` env fix |
-| `auto` | `--auto` | `--approve-for-me` (workspace-write); `auto=False` → `-s read-only` (exec cannot be interactive) | no permission system — `auto` is flag-less (pi rejects unknown flags) | headless always runs `always-approve` (cannot be changed) |
-| `session` | `--session <id>` | `codex exec resume <id>` (model and a requested read-only policy still apply on resume) | `--session-id <id>` (opens exactly, creates if absent) | `--resume <id>` |
-| `mode` / `agent` | `--agent <name>` | not supported — `RangerError` if set | not supported — `RangerError` if set | not supported — `RangerError` if set |
-| `title` | `--title` | not supported — `RangerError` if set | `--name <text>` (session display name) | not supported — `RangerError` if set |
-| `thinking` / `effort` | `--thinking`; effort as prompt directive | `-c model_reasoning_effort="low|high"` | `--thinking high` for `thinking=True` or `effort="high"`; `--thinking low` for `effort="low"` | not supported — `RangerError` if set |
-| skills: files/dirs | native `--file` attachment | inlined into the prompt (codex has no attachment flag) | native `--skill` attachment, files **and** directories | inlined into the prompt |
-| `stats` | wall + model seconds, parts, session id | wall, parts, thread id **and real token usage** (`input_tokens`, `cached_input_tokens`, `output_tokens`) | not yet — `agent.last` stays empty (JSON-event analytics deferred) | not yet — `agent.last` stays empty (`--json` schema not stable enough) |
-| model discovery | `opencode models` | not available — `RangerError` | `pi --list-models` | not available — `RangerError` |
-| `gate()` | harness-free — plain subprocess on every backend | same | same | same |
+| Setting | opencode | codex | pi | claude | openhands |
+|---|---|---|---|---|---|
+| `model` | `--model` (package default if unset) | `-m`; unset → codex config.toml default | `--model` (fuzzy patterns, e.g. `sonnet:high`); unset → pi's configured default | `--model`; unset → Claude Code's configured default | `LLM_MODEL` env + `--override-with-envs` (folded from `model=`; unset → `~/.openhands/agent_settings.json`) |
+| `cwd` | subprocess cwd + `PWD` env fix | native `-C` flag (resume runs use the process cwd) | subprocess cwd (pi works in the launch directory) | subprocess cwd (claude works in the launch directory) | subprocess cwd + `PWD` env fix |
+| `auto` | `--auto` | `--approve-for-me` (workspace-write); `auto=False` → `-s read-only` (exec cannot be interactive) | no permission system — `auto` is flag-less (pi rejects unknown flags) | `--permission-mode acceptEdits` + `--allowedTools "Read,Edit,Bash"`; `auto=False` adds nothing (prompted actions are denied headless) | headless always runs `always-approve` (cannot be changed) |
+| `session` | `--session <id>` | `codex exec resume <id>` (model and a requested read-only policy still apply on resume) | `--session-id <id>` (opens exactly, creates if absent) | `--resume <id>` (new ids are read from JSON output) | `--resume <id>` |
+| `mode` / `agent` | `--agent <name>` | not supported — `RangerError` if set | not supported — `RangerError` if set | not supported — `RangerError` if set | not supported — `RangerError` if set |
+| `title` | `--title` | not supported — `RangerError` if set | `--name <text>` (session display name) | not supported — `RangerError` if set | not supported — `RangerError` if set |
+| `thinking` / `effort` | `--thinking`; effort as prompt directive | `-c model_reasoning_effort="low|high"` | `--thinking high` for `thinking=True` or `effort="high"`; `--thinking low` for `effort="low"` | not supported — `RangerError` if set | not supported — `RangerError` if set |
+| skills: files/dirs | native `--file` attachment | inlined into the prompt (codex has no attachment flag) | native `--skill` attachment, files **and** directories | inlined into the prompt (claude has no attachment flag) | inlined into the prompt |
+| `stats` | wall + model seconds, parts, session id | wall, parts, thread id **and real token usage** (`input_tokens`, `cached_input_tokens`, `output_tokens`) | not yet — `agent.last` stays empty (JSON-event analytics deferred) | wall, parts, session id, token usage **and cumulative `cost_usd`** | not yet — `agent.last` stays empty (`--json` schema not stable enough) |
+| model discovery | `opencode models` | not available — `RangerError` | `pi --list-models` | not available — `RangerError` | not available — `RangerError` |
+| `gate()` | harness-free — plain subprocess on every backend | same | same | same | same |
 
 codex runs always capture in JSON (its stream is JSONL; ranger parses
 `agent_message` items). opencode captures plain text unless `stats=True`.
 Pi runs one-shot via `--print` (final assistant text on stdout);
+Claude Code runs one non-interactive turn via `claude -p` with
+`--output-format json` (ranger parses the `result`, `session_id`,
+`total_cost_usd` and usage fields; `--permission-prompts none` keeps every
+run unattended — anything that would prompt is denied instead, which
+requires CLI >= 2.1.259 and is safe headless either way). `--bare` is
+deliberately never emitted (it breaks subscription auth).
 OpenHands runs `--headless` with the task as `--task` (plain transcript
 captured; JSONL event parsing is deferred on purpose).
 

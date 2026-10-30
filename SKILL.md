@@ -98,7 +98,8 @@ frozen grammars and raise `RangerError` on malformed or conflicting replies.
 ## Backends and models
 
 - Use `Ranger(backend="opencode")` (default), `Ranger(backend="codex")`,
-  `Ranger(backend="pi")`, or `Ranger(backend="openhands")`.
+  `Ranger(backend="pi")`, `Ranger(backend="claude")`, or
+  `Ranger(backend="openhands")`.
   The public API stays the same; CLI flags and output parsing do not.
 - Use OpenRouter-style public model IDs in repository files. Do **not** add
   internal provider/model names to code, docs, examples, tests, or commits.

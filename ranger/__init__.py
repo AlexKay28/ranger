@@ -434,10 +434,95 @@ class _OpenHandsBackend(_Backend):
         return stdout.strip(), None
 
 
+class _ClaudeBackend(_Backend):
+    name = "claude"
+    install_hint = "install the Claude Code CLI (https://code.claude.com/docs)"
+    supports_sessions = True  # new session ids are READ from json output
+    native_file_skills = False  # markdown skills are inlined into prompts
+
+    def build_cmd(self, o, full_prompt, skill_files):
+        # Claude Code headless: `claude -p "<prompt>"` is one
+        # non-interactive turn. Agent/mode/title/thinking have no frozen
+        # headless flag, and effort has no CLI translation — both raise
+        # loudly instead of silently degrading.
+        for k in ("agent", "mode", "title", "thinking"):
+            if o.get(k):
+                raise self.unavailable(k)
+        if o.get("effort") in ("low", "high"):
+            raise self.unavailable("effort")
+        if skill_files:
+            blocks = []
+            for f in skill_files:
+                blocks.append(
+                    f"### Attached skill file: {f}\n"
+                    + Path(f).read_text(encoding="utf-8")
+                )
+            full_prompt = (
+                "## Attached operating instructions (skill files)\n\n"
+                + "\n\n".join(blocks)
+                + "\n\n## Task\n"
+                + full_prompt
+            )
+        cmd = ["claude"]
+        if o["model"]:
+            cmd += ["--model", o["model"]]
+        if o["auto"]:
+            # acceptEdits auto-approves file edits; Bash rides along in
+            # the allowedTools allowlist (permission rule syntax)
+            cmd += ["--permission-mode", "acceptEdits",
+                    "--allowedTools", "Read,Edit,Bash"]
+        # always unattended: anything that would prompt is denied
+        # instead (requires CLI >= 2.1.259; in a -p run with no host
+        # these requests are denied either way, so it is safe headless)
+        cmd += ["--permission-prompts", "none"]
+        if o["session"]:
+            cmd += ["--resume", o["session"]]
+        cmd += ["--output-format", "json", "-p", full_prompt]
+        return cmd, full_prompt
+
+    def parse_output(self, stdout, want_stats):
+        # --output-format json: one JSON object on stdout with at
+        # minimum result, session_id, total_cost_usd and usage fields.
+        obj = None
+        for line in reversed(stdout.splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                cand = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(cand, dict) and "result" in cand:
+                obj = cand
+                break
+        if obj is None:
+            # not JSON (CLI failure text lands on stdout) — pass through
+            return stdout.strip(), None
+        answer = (obj.get("result") or "").strip()
+        if not want_stats:
+            return answer, None
+        info = {
+            "model_s": None,  # claude reports cost and tokens, not seconds
+            "parts": 1 if answer else 0,
+            "chars": len(answer),
+            "session": obj.get("session_id"),
+            "cost_usd": obj.get("total_cost_usd"),
+        }
+        usage = obj.get("usage") or {}
+        if usage:
+            info.update({
+                "input_tokens": usage.get("input_tokens"),
+                "cached_input_tokens": usage.get("cache_read_input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+            })
+        return answer, info
+
+
 register_backend("opencode", _OpenCodeBackend)
 register_backend("codex", _CodexBackend)
 register_backend("pi", _PiBackend)
 register_backend("openhands", _OpenHandsBackend)
+register_backend("claude", _ClaudeBackend)
 
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
