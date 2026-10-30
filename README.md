@@ -110,6 +110,23 @@ async twins (`agent.ask_async`, `do_async`, `search_async`, `write_async`,
 fan out over bounded-concurrency subprocesses with the identical contracts;
 the sync methods stay the primary API.
 
+## Safety rails
+
+Mutating calls carry optional rails — pure-Python path predicates, never
+prompt instructions:
+
+```python
+agent = ranger.Ranger(allow=["src/**", "tests/**"],   # only these may change
+                       deny=["**/.env", "**/secrets*"])  # never these; wins
+plan = agent.do("refactor the parser", dry_run=True)   # read-only preview
+agent.do("refactor the parser")                         # enforced for real
+```
+
+`deny` is checked first and always wins; `edit`/`write` targets are checked
+before any subprocess spawns; `do()` requires a git-verifiable cwd when rails
+are active and audits `git status` against them after the round. Pair rails
+with `snapshots=True`/`rollback()` to make violations recoverable.
+
 ## Model discovery & configuration
 
 ```python

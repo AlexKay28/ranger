@@ -227,3 +227,22 @@ documentation + tests). This is the loop's only cross-cycle memory.
   tests in tests/test_logic.py §13 + async-ledger tests; README, API.md
   Costs section, commands.md catalog, ARCHITECTURE.md (tests:313),
   fix_failing_tests.py loop-cost note synced.
+- **Issue #3 (same cycle):** P0 safety rails — `allow`/`deny` path globs
+  (ctor + per-call, deny wins, per-call lists fully replace) and
+  `dry_run=True` mapping to each harness's real read-only mode
+  (opencode `--agent plan`, codex `-s read-only` / resume
+  `-c sandbox_mode="read-only"`, claude headless with permission
+  grants stripped; pi and openhands REFUSE — no read-only mode
+  exists, never pretend). Law 4 pinned: pure-Python fnmatch
+  predicates on paths, never prompt politeness. edit/write targets
+  are checked BEFORE the spawn (refused targets cost zero calls);
+  `do()` with rails probes git-verifiability up front (non-repo →
+  refusal before the harness runs) and audits
+  `git status --porcelain` against the rails after the round —
+  violations raise naming the paths, tree left mutated honestly
+  (pair with snapshots/rollback). dry_run skips mutation
+  post-checks. Default (no rails) adds zero subprocess calls —
+  suites unchanged. 24 mocked tests in tests/test_safety.py;
+  README safety section, API.md Safety rails + ctor rows,
+  commands.md overrides, SKILL.md row. Suite: 337 mocked tests
+  green in ~2.7s (ARCHITECTURE.md tests:337).

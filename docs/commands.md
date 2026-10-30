@@ -25,7 +25,12 @@ by side. Accepts any of `model`, `timeout`, `auto`, `session`, `agent`, `title`,
 Every command method takes the same run settings as keywords for that single
 call: `model=`, `timeout=`, `auto=`, `session=`, `agent=` (opencode agent name,
 e.g. `"build"`, `"plan"`), `title=`, `thinking=`. Unknown keywords raise
-`TypeError`.
+`TypeError`. Safety rail overrides: `allow=[globs]`, `deny=[globs]` (deny wins;
+each list fully replaces the constructor's) and `dry_run=True` (harness
+read-only/plan mode; mutating commands skip their mutation post-checks).
+Targeted edits are checked before any subprocess spawns; `do()` probes
+git-verifiability up front and audits `git status` against the rails after.
+See the Safety rails section of docs/API.md.
 
 
 ### `agent.context_summarize() -> str`

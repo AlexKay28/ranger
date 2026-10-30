@@ -32,6 +32,7 @@ Discover available models and configure runs:
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import logging
 import os
@@ -81,8 +82,48 @@ def _warn_default_model() -> None:
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
     "pretty", "memory", "skills", "effort", "stats", "backend", "memory_budget",
-    "retries", "env",
+    "retries", "env", "allow", "deny", "dry_run",
 )
+
+def _normalize_patterns(name: str, value) -> "list[str] | None":
+    """Validate an allow/deny spec: None, or a non-empty list of path globs."""
+    if value is None:
+        return None
+    if isinstance(value, (str, Path)):
+        raise TypeError(
+            f"{name} must be a list of glob patterns, got a bare {type(value).__name__} "
+            f"— wrap it: {name}=[{value!r}]"
+        )
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(f"{name} must be a list of glob patterns, got {value!r}")
+    pats = []
+    for p in value:
+        if not isinstance(p, (str, Path)):
+            raise TypeError(f"{name} patterns must be str/Path, got {p!r}")
+        pats.append(str(p))
+        if not pats[-1]:
+            raise ValueError(f"{name} must not contain empty patterns")
+    return pats or None
+
+def _path_matches(path: "Path | str", patterns, root=None) -> bool:
+    """True when the path hits any glob — repo/cwd-relative or absolute."""
+    p = Path(path)
+    if p.is_absolute():
+        forms = [p.resolve().as_posix()]
+        if root:
+            try:
+                forms.append(p.resolve().relative_to(
+                    Path(root).resolve()).as_posix())
+            except ValueError:
+                pass
+    else:
+        forms = [p.as_posix(),
+                (Path(root or Path.cwd()) / p).as_posix()]
+    return any(
+        fnmatch.fnmatch(form, pat)
+        for pat in (patterns or [])
+        for form in forms
+    )
 
 # ====================================================================== #
 # Harness backends (adapters)
@@ -167,6 +208,15 @@ class _OpenCodeBackend(_Backend):
     def build_cmd(self, o, full_prompt, skill_files):
         cmd = ["opencode", "run", "--model", o["model"]]
         agent_name = o.get("agent") or o.get("mode")
+        # dry_run maps to opencode's read-only plan agent (law 4: a
+        # permission mode, never prompt politeness)
+        if o.get("dry_run"):
+            if agent_name:
+                raise RangerError(
+                    "dry_run maps to opencode's read-only plan agent — "
+                    "clear agent/mode for this call"
+                )
+            agent_name = "plan"
         if agent_name:
             cmd += ["--agent", agent_name]
         if o["auto"]:
@@ -264,7 +314,9 @@ class _CodexBackend(_Backend):
             # policy)
             cmd = ["codex", "exec", "resume", "--skip-git-repo-check",
                    o["session"]]
-            if not o["auto"]:
+            # read-only when requested: explicit auto=False, or dry_run
+            # (a permission mode — resume shares -c, not -s)
+            if not o["auto"] or o.get("dry_run"):
                 cmd += ["-c", 'sandbox_mode="read-only"']
         else:
             cmd = ["codex", "exec", "--skip-git-repo-check"]
@@ -272,9 +324,9 @@ class _CodexBackend(_Backend):
                 cmd += ["-C", o["cwd"]]
             # agent autonomy: --approve-for-me routes approvals through
             # automatic review with its own workspace-write sandbox (it
-            # conflicts with -s); auto=False pins a read-only sandbox
-            # (exec cannot be interactive)
-            if o["auto"]:
+            # conflicts with -s); auto=False — or dry_run — pins a
+            # read-only sandbox (exec cannot be interactive)
+            if o["auto"] and not o.get("dry_run"):
                 cmd.append("--approve-for-me")
             else:
                 cmd += ["-s", "read-only"]
@@ -337,6 +389,10 @@ class _PiBackend(_Backend):
 
     def build_cmd(self, o, full_prompt, skill_files):
         cmd = ["pi", "--print"]
+        # pi has no permission system at all — dry_run/read-only cannot
+        # be mapped to it, so it refuses loudly instead of pretending
+        if o.get("dry_run"):
+            raise self.unavailable("dry_run")
         if o["model"]:
             cmd += ["--model", o["model"]]
         if o["session"]:
@@ -403,6 +459,10 @@ class _OpenHandsBackend(_Backend):
         for k in ("agent", "mode", "title", "thinking"):
             if o.get(k):
                 raise self.unavailable(k)
+        # headless ALWAYS runs always-approve and that cannot be changed,
+        # so a read-only dry run cannot be guaranteed — refuse it loudly
+        if o.get("dry_run"):
+            raise self.unavailable("dry_run")
         if skill_files:
             blocks = []
             for f in skill_files:
@@ -451,6 +511,12 @@ class _ClaudeBackend(_Backend):
                 raise self.unavailable(k)
         if o.get("effort") in ("low", "high"):
             raise self.unavailable("effort")
+        if o.get("dry_run"):
+            # claude's headless read-only shape: no permission grants at
+            # all — with --permission-prompts none, anything that would
+            # prompt (every edit/write) is denied instead
+            if o["auto"]:
+                o = dict(o, auto=False)
         if skill_files:
             blocks = []
             for f in skill_files:
@@ -873,6 +939,15 @@ class Ranger:
             replace). `None` (default) means the child inherits everything
             untouched. See the "Child process environment" section of
             docs/API.md.
+        allow: safety rail — list of path globs the agent may touch.
+            `None`/empty (default) keeps today's behavior; non-empty
+            restricts mutating commands to matching paths (fully
+            replaceable per call via `allow=[...]`). Pure-Python
+            predicates, never prompt instructions (paradigm law 4).
+        deny: safety rail — path globs the agent may NEVER touch.
+            Checked BEFORE `allow` (deny always wins), for every target
+            the caller names (edit/write) and every path a do() actually
+            changed (verified post-run via git when rails are active).
         snapshots: opt in to best-effort git snapshots before mutating
             commands (`do`, `edit`, `write`): tracked+untracked-but-not-
             ignored state is committed to a hidden ref
@@ -907,6 +982,8 @@ class Ranger:
         backend: str = "opencode",
         retries: int = 0,
         env: dict | None = None,
+        allow: "list[str] | None" = None,
+        deny: "list[str] | None" = None,
         snapshots: bool = False,
     ) -> None:
         if effort not in ("low", "medium", "high"):
@@ -952,6 +1029,11 @@ class Ranger:
         self.context: list[dict] = []
         #: opt-in: snapshot via git before mutating commands (do/edit/write)
         self.snapshots = snapshots
+        #: safety rails (issue #3): path globs the agent may / may never
+        #: touch — pure-Python predicates, never prompt politeness
+        self.allow = _normalize_patterns("allow", allow)
+        self.deny = _normalize_patterns("deny", deny)
+        self.dry_run = False   # per-call switch only (see _RUN_KEYS)
         #: explicit Python-side snapshot registry: {"tag", "sha", "time"}
         self.snapshot_log: list[dict] = []
         self._snap_seq = 0
@@ -1115,9 +1197,11 @@ class Ranger:
             if not out.is_absolute():
                 out = Path(self.cwd or Path.cwd()) / out
         prompt = _write_prompt(task, out)
+        allow, deny, _ = self._resolve_safety(ov)
+        self._assert_path_allowed(out, allow, deny)
         self._auto_snapshot("pre-write")
         self._run(prompt, label="write", **ov)
-        if not out.is_file():
+        if not out.is_file() and not ov.get("dry_run", False):
             raise RangerError(f"agent did not write the expected file: {out}")
         return str(out)
 
@@ -1129,8 +1213,11 @@ class Ranger:
         `Ranger(snapshots=True)` a best-effort git snapshot is taken
         first, making the round recoverable via `rollback()`.
         """
+        allow, deny, dry, root = self._guard_do(ov)
         self._auto_snapshot("pre-do")
-        return self._run(_do_prompt(goal), label="do", **ov)
+        report = self._run(_do_prompt(goal), label="do", **ov)
+        self._check_do_after(allow, deny, dry, root)
+        return report
 
     def edit(self, file: str | Path, instruction: str, **ov) -> str:
         """Make one requested change to exactly one existing file.
@@ -1146,9 +1233,13 @@ class Ranger:
             before = target.stat().st_mtime_ns
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
+        allow, deny, _ = self._resolve_safety(ov)
+        self._assert_path_allowed(target, allow, deny)
         self._auto_snapshot("pre-edit")
         report = self._run(_edit_prompt(target, instruction),
                            label="edit", **ov)
+        if ov.get("dry_run", False):
+            return report   # read-only plan run: no mutation is expected
         try:
             after = target.stat().st_mtime_ns
         except FileNotFoundError:
@@ -1320,8 +1411,11 @@ class Ranger:
 
     async def do_async(self, goal: str, **ov) -> str:
         """Async twin of do(): same contract, same frozen prompt."""
+        allow, deny, dry, root = self._guard_do(ov)
         self._auto_snapshot("pre-do")
-        return await self._run_async(_do_prompt(goal), label="do", **ov)
+        report = await self._run_async(_do_prompt(goal), label="do", **ov)
+        self._check_do_after(allow, deny, dry, root)
+        return report
 
     async def search_async(self, goal: str, **ov) -> str:
         """Async twin of search(): same contract, same frozen prompt."""
@@ -1345,9 +1439,11 @@ class Ranger:
             out = Path(path)
             if not out.is_absolute():
                 out = Path(self.cwd or Path.cwd()) / out
+        allow, deny, _ = self._resolve_safety(ov)
+        self._assert_path_allowed(out, allow, deny)
         self._auto_snapshot("pre-write")
         await self._run_async(_write_prompt(task, out), label="write", **ov)
-        if not out.is_file():
+        if not out.is_file() and not ov.get("dry_run", False):
             raise RangerError(f"agent did not write the expected file: {out}")
         return str(out)
 
@@ -1366,9 +1462,13 @@ class Ranger:
             before = target.stat().st_mtime_ns
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
+        allow, deny, _ = self._resolve_safety(ov)
+        self._assert_path_allowed(target, allow, deny)
         self._auto_snapshot("pre-edit")
         report = await self._run_async(_edit_prompt(target, instruction),
                                        label="edit", **ov)
+        if ov.get("dry_run", False):
+            return report   # read-only plan run: no mutation is expected
         try:
             after = target.stat().st_mtime_ns
         except FileNotFoundError:
@@ -2428,6 +2528,69 @@ class Ranger:
             if to is not None:
                 c["tokens_out"] = (c["tokens_out"] or 0) + int(to)
 
+    def _resolve_safety(self, ov: dict) -> tuple:
+        """Effective (allow, deny, dry_run) for this call — per-call wins."""
+        allow = _normalize_patterns("allow", ov.get("allow", self.allow))
+        deny = _normalize_patterns("deny", ov.get("deny", self.deny))
+        dry = ov.get("dry_run", self.dry_run)
+        if not isinstance(dry, bool):
+            raise TypeError(f"dry_run must be a bool, got {dry!r}")
+        return allow, deny, dry
+
+    def _assert_path_allowed(self, path, allow, deny, root=None) -> None:
+        """Pure-Python path predicate — deny wins, then allow restricts."""
+        if deny and _path_matches(path, deny, root):
+            raise RangerError(
+                f"path is denied by the safety rails: {Path(path)} "
+                f"(deny: {', '.join(deny)})")
+        if allow and not _path_matches(path, allow, root):
+            raise RangerError(
+                f"path is outside the allow safety rails: {Path(path)} "
+                f"(allow: {', '.join(allow)})")
+
+    def _guard_do(self, ov: dict) -> tuple:
+        """Pre-spawn guard for TARGET-LESS mutating commands (do twins).
+
+        The paths a do() will touch cannot be known before the spawn,
+        so with rails active the tree MUST be mechanically verifiable
+        (a git repo, for the post-run changed-path check) — otherwise
+        the call is refused up front, never allowed-and-hoped. Returns
+        (allow, deny, dry_run, root) for the post-run check.
+        """
+        allow, deny, dry = self._resolve_safety(ov)
+        root = None
+        if not dry and (allow or deny):
+            root = self._git("rev-parse", "--show-toplevel").strip() or None
+        return allow, deny, dry, root
+
+    def _check_do_after(self, allow, deny, dry_run, root) -> None:
+        """Post-run boundary for do twins: git status vs the rails.
+
+        Law 5 honesty: a violation RAISES and names the paths; the tree
+        is left mutated (our word is not a rollback) — pair with
+        `snapshots=True` / `rollback()` for recovery.
+        """
+        if dry_run or not (allow or deny):
+            return
+        porcelain = self._git("status", "--porcelain")
+        violations = []
+        for line in porcelain.splitlines():
+            if len(line) < 4:
+                continue
+            p = line[3:].strip().strip('"').rstrip("/")
+            if not p:
+                continue
+            if deny and _path_matches(p, deny, root):
+                violations.append(p)
+            elif allow and not _path_matches(p, allow, root):
+                violations.append(p)
+        if violations:
+            raise RangerError(
+                "do() touched paths outside the safety rails: "
+                + ", ".join(violations[:8])
+                + " — the working tree is LEFT MUTATED; pair rails with "
+                  "snapshots=True / rollback() to recover")
+
     def _prepare_run(self, prompt: str, label: str, ov: dict) -> dict:
         """Resolve options, recall, prompt contracts and the backend argv.
 
@@ -2441,6 +2604,9 @@ class Ranger:
         unknown = set(ov) - set(_RUN_KEYS)
         if unknown:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
+        # safety-rail specs are validated on the shared seam too, so even
+        # read-only commands reject a malformed spec before any spawn
+        self._resolve_safety(ov)
 
         backend_name = opts["backend"]
         try:

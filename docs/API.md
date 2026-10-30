@@ -72,6 +72,8 @@ ranger.Ranger(
     stats=False,           # JSON-mode runs; telemetry in agent.last
     retries=0,             # transport-failure re-attempts per run
     env=None,               # dict merged over inherited os.environ for the child
+    allow=None,           # safety rail: path globs the agent MAY touch (None = all)
+    deny=None,            # safety rail: path globs the agent may NEVER touch
     snapshots=False,      # opt-in: git snapshot before mutating commands (do/edit/write)
 )
 ```
@@ -99,6 +101,8 @@ ranger.Ranger(
 | `retries` | `0` | re-attempts a failed run, transport failures only (`RangerTimeout`, `RangerHarnessError`); prompt-contract failures (`RangerError`) never retry |
 | `env` | `None` (inherit all) | dict merged over the child's inherited environment — see [Child process environment](#child-process-environment) |
 | `snapshots` | `False` | opt in to best-effort git snapshots before mutating commands (`do`/`edit`/`write`), making rounds recoverable via `rollback()` — see [Snapshots & rollback](#snapshots--rollback) |
+| `allow` | `None` (no restriction) | safety rail: path globs the agent MAY touch; non-empty restricts — see [Safety rails](#safety-rails) |
+| `deny` | `None` (no restriction) | safety rail: path globs the agent may NEVER touch; checked FIRST — deny always wins |
 
 ### Child process environment
 
@@ -745,6 +749,61 @@ a winner. Returns
 Validation: `rounds`/`max_iter` must be non-negative ints (`ValueError`);
 wrong-typed `author`/`critic`/agents/judge raise `TypeError` — up front,
 never after work has already run.
+
+## Safety rails
+
+Mutating commands (`do`, `edit`, `write` — and every work round inside
+`until`/`resolve`/`attempt`) accept three safety settings, as constructor
+arguments or per-call overrides:
+
+- **`allow=[...]`** — path globs the agent may touch. `None`/empty (the
+  default) keeps today's behavior; a non-empty list RESTRICTS.
+- **`deny=[...]`** — path globs the agent may never touch. `deny` is
+  checked BEFORE `allow` and always wins.
+- **`dry_run=True`** — read-only/plan mode: the harness runs without
+  mutation ability and returns the proposed change report (`opencode`
+  `--agent plan`; codex `-s read-only` / resume `-c sandbox_mode=
+  "read-only"`; claude headless with no permission grants). Backends
+  with no read-only mode (pi, openhands) refuse with `RangerError`,
+  honestly. `edit`/`write` skip their mutation post-checks under
+  `dry_run` — no mutation is the expected outcome.
+
+These are **pure-Python predicates on paths** (paradigm law 4), never
+prompt instructions — prompt politeness is laundering, not safety.
+
+Mechanics, pinned by mocked tests:
+
+1. **Named targets** (`edit(file)`, `write(path)`) are checked against
+   the rails BEFORE the subprocess is spawned — a refused target never
+   costs a harness call. The mtime/file post-checks stay: an `edit()`
+   must still actually touch its one allowed file.
+2. **Target-less mutation** (`do`) cannot know its paths up front, so
+   with rails active ranger REQUIRES a verifiable working tree: cwd
+   must be a git repo (probed before the spawn — an unverifiable
+   mutation is refused before any harness runs), and after the round
+   `git status --porcelain` is checked against the rails — a violation
+   raises `RangerError` naming the paths honestly. The tree is LEFT
+   MUTATED (a raise is not a rollback): pair rails with
+   `snapshots=True`/`rollback()` for recovery.
+3. **Per-call overrides fully replace** the constructor lists
+   (`do(goal, allow=[...])`), and malformed specs (`TypeError`) are
+   rejected before any spawn — on every command, since validation
+   lives on the shared seam.
+
+```python
+agent = ranger.Ranger(
+    cwd=".", timeout=180,
+    allow=["src/**", "tests/**"],           # only these may change
+    deny=["**/.env", "**/secrets*"],        # never these; deny wins
+)
+report = agent.do("refactor the parser", dry_run=True)  # plan only
+agent.do("refactor the parser")             # enforced on the real run
+```
+
+Glob matching runs on the absolute path and the cwd-relative form, so
+both `"src/**"` and `"**/src/**"` behave as expected. In a multi-agent
+composition (`debate`, `refine_with`, `par_map`) each agent carries its
+own rails.
 
 ## Snapshots & rollback
 

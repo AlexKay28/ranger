@@ -25,6 +25,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Open-ended answer or one small plan | `ask(prompt)` | A custom chat loop |
 | Make a filesystem change | `do(goal)` | A claim that a change happened |
 | Change one existing file only | `edit(file, instruction)` | `do()` free rein |
+| Bound or preview a mutation | `allow=[globs]` / `deny=[globs]` / `dry_run=True` (per call or ctor; deny wins; pure-Python path predicates) | prompt instructions as "safety" (law-4 laundering) |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
 | Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `trace(symbol)` / `test()` / `lint()` / `diagnose(error)` / `critique(file_or_diff)` / `extract(goal, keys=[...])` (typed JSON rows) | `do()` |
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
