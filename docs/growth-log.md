@@ -195,3 +195,21 @@ documentation + tests). This is the loop's only cross-cycle memory.
   grammar + parser. Suite: 287 mocked tests green in ~2.5s; prompt
   template and full failure truth table pinned in `tests/test_logic.py`;
   example `examples/code-work/extract_failing_tests.py`.
+- **Issue #7 (same cycle):** git-snapshot rollback — every `do()` made
+  recoverable. `snapshot(tag)` commits tracked+untracked state to a hidden
+  ref `refs/ranger/snapshots/<tag>` through a TEMPORARY index
+  (`GIT_INDEX_FILE` under `.git/` — the real index/staging/worktree are
+  never touched); `rollback(tag)` rewinds via
+  `read-tree --reset -u <tree>` plus path-exact `clean -fd --` (never a
+  shotgun), returning the honest `restored` path list; HEAD and history
+  untouched. `until()`/`resolve()` gained `rollback_on_fail=True`: snapshot
+  before round 1, restore on a red budget — `rolled_back`/`rollback` keys
+  appear ONLY when a snapshot was actually taken (absent = honest, nothing
+  claimed). Pre-round auto-snapshots are opt-in
+  (`Ranger(snapshots=True)`) so existing tests pinning exact
+  `subprocess.run` call counts stay exact. 15 mocked tests in
+  `tests/test_snapshots.py` (git vs harness dispatched on one fake seam);
+  `examples/code-work/fix_failing_tests.py` shows `rollback_on_fail`.
+  Suite: 302 mocked tests green in ~2.6s; API.md ctor map +
+  Snapshots & rollback section, commands.md tier, ARCHITECTURE.md
+  (tests:302) synced.

@@ -34,8 +34,12 @@ def main() -> None:
         + command,
         gate_cmd=command,
         max_iter=2,
+        rollback_on_fail=True,  # recoverable: a red budget restores the tree
     )
     print("passed:", result["achieved"], "attempts:", result["iterations"])
+    if result.get("rolled_back"):
+        print("rolled back to", result["rollback"]["tag"],
+              "— restored", len(result["rollback"]["restored"]), "path(s)")
     print("last report:\n", result["report"])
     if not result["achieved"]:
         raise SystemExit("test command is still red; inspect the report and retry deliberately")

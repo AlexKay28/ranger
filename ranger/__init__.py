@@ -873,6 +873,15 @@ class Ranger:
             replace). `None` (default) means the child inherits everything
             untouched. See the "Child process environment" section of
             docs/API.md.
+        snapshots: opt in to best-effort git snapshots before mutating
+            commands (`do`, `edit`, `write`): tracked+untracked-but-not-
+            ignored state is committed to a hidden ref
+            `refs/ranger/snapshots/<tag>` using a TEMPORARY index — the
+            real index and working tree are never touched. Restore with
+            `agent.rollback()`. Snapshots are logged, never claimed when
+            absent (non-git cwd → skipped, `RangerError` only on explicit
+            `snapshot()`/`rollback()` calls). Default off so the per-call
+            subprocess accounting stays exact.
 
     Every command method also accepts any of these as a keyword override for
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
@@ -898,6 +907,7 @@ class Ranger:
         backend: str = "opencode",
         retries: int = 0,
         env: dict | None = None,
+        snapshots: bool = False,
     ) -> None:
         if effort not in ("low", "medium", "high"):
             raise ValueError(f"effort must be low|medium|high, got {effort!r}")
@@ -940,6 +950,11 @@ class Ranger:
         self.last: dict = {}
         #: OpenAI-format conversation state: {"role", "content"} dicts.
         self.context: list[dict] = []
+        #: opt-in: snapshot via git before mutating commands (do/edit/write)
+        self.snapshots = snapshots
+        #: explicit Python-side snapshot registry: {"tag", "sha", "time"}
+        self.snapshot_log: list[dict] = []
+        self._snap_seq = 0
 
     def __repr__(self) -> str:
         """Return a compact description of the core run settings."""
@@ -1094,6 +1109,7 @@ class Ranger:
             if not out.is_absolute():
                 out = Path(self.cwd or Path.cwd()) / out
         prompt = _write_prompt(task, out)
+        self._auto_snapshot("pre-write")
         self._run(prompt, label="write", **ov)
         if not out.is_file():
             raise RangerError(f"agent did not write the expected file: {out}")
@@ -1103,8 +1119,11 @@ class Ranger:
         """Execute a goal against the filesystem like a CLI agent run.
 
         The agent may create, edit and delete files and run shell commands
-        in the working directory. Returns its final report.
+        in the working directory. Returns its final report. With
+        `Ranger(snapshots=True)` a best-effort git snapshot is taken
+        first, making the round recoverable via `rollback()`.
         """
+        self._auto_snapshot("pre-do")
         return self._run(_do_prompt(goal), label="do", **ov)
 
     def edit(self, file: str | Path, instruction: str, **ov) -> str:
@@ -1121,6 +1140,7 @@ class Ranger:
             before = target.stat().st_mtime_ns
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
+        self._auto_snapshot("pre-edit")
         report = self._run(_edit_prompt(target, instruction),
                            label="edit", **ov)
         try:
@@ -1294,6 +1314,7 @@ class Ranger:
 
     async def do_async(self, goal: str, **ov) -> str:
         """Async twin of do(): same contract, same frozen prompt."""
+        self._auto_snapshot("pre-do")
         return await self._run_async(_do_prompt(goal), label="do", **ov)
 
     async def search_async(self, goal: str, **ov) -> str:
@@ -1318,6 +1339,7 @@ class Ranger:
             out = Path(path)
             if not out.is_absolute():
                 out = Path(self.cwd or Path.cwd()) / out
+        self._auto_snapshot("pre-write")
         await self._run_async(_write_prompt(task, out), label="write", **ov)
         if not out.is_file():
             raise RangerError(f"agent did not write the expected file: {out}")
@@ -1338,6 +1360,7 @@ class Ranger:
             before = target.stat().st_mtime_ns
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
+        self._auto_snapshot("pre-edit")
         report = await self._run_async(_edit_prompt(target, instruction),
                                        label="edit", **ov)
         try:
@@ -1463,6 +1486,168 @@ class Ranger:
         self._gate_last = (ok, out)
         return ok
 
+    # ------------------------------------------------------------------ #
+    # git snapshots & rollback (issue #7) — recoverability for the loops
+
+    def _git(self, *args, env: dict | None = None, timeout: float = 60) -> str:
+        """Run ONE git plumbing call in the agent cwd; return stripped stdout.
+
+        The same `ranger.subprocess.run` seam as harness runs, so tests
+        stay fully mocked. Raises RangerError on a non-zero exit — the
+        snapshot machinery must never turn a git failure into a silent
+        no-op (failure is an exception, law 5).
+        """
+        try:
+            proc = subprocess.run(
+                ["git", *args],
+                cwd=self.cwd,
+                env=env or self._child_env(),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+        except FileNotFoundError:
+            raise RangerError(
+                "git CLI not found on PATH — snapshots/rollback need git"
+            ) from None
+        except subprocess.TimeoutExpired:
+            raise RangerError(
+                f"git {' '.join(args)} timed out after {timeout}s"
+            ) from None
+        if proc.returncode != 0:
+            raise RangerError(
+                f"git {' '.join(args)} failed (exit {proc.returncode}): "
+                f"{proc.stderr.strip()}"
+            )
+        return proc.stdout
+
+    def snapshot(self, tag: str | None = None) -> dict:
+        """Commit the current state to a hidden git ref (recoverability).
+
+        Captures tracked + untracked-but-not-ignored files through a
+        TEMPORARY index (`GIT_INDEX_FILE` in `.git/`), so neither the
+        real index + staged state nor the working tree are touched. The
+        commit lands on `refs/ranger/snapshots/<tag>` (inspectable with
+        plain git) and is recorded in the explicit Python-side registry
+        `agent.snapshot_log` (law 4). `tag=None` auto-names `snap-1`,
+        `snap-2`, ...; explicit tags must be unique within the agent.
+
+        An honest refusal, not a phantom snapshot: RangerError when cwd
+        is not a git repository or git is missing. Auto-snapshots before
+        mutating commands (opt-in via `Ranger(snapshots=True)`) are
+        best-effort: skipped and logged, never claimed when absent.
+
+            snap = agent.snapshot("before-refactor")
+            ...
+            agent.rollback("before-refactor")
+        """
+        root = self._git("rev-parse", "--show-toplevel").strip()
+        if not root:
+            raise RangerError(
+                f"snapshot() cwd is not a git repository: {self.cwd!r}"
+            )
+        self._snap_seq += 1
+        if tag is None:
+            tag = f"snap-{self._snap_seq}"
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", tag or ""):
+            raise ValueError(f"invalid snapshot tag: {tag!r}")
+        if any(s["tag"] == tag for s in self.snapshot_log):
+            raise ValueError(f"snapshot tag already used: {tag!r}")
+        index = Path(root) / ".git" / f"ranger-index-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        env = {**(self._child_env() or {}), "GIT_INDEX_FILE": str(index)}
+        try:
+            # add -A on the TEMP index only — no real index/worktree touch
+            self._git("add", "-A", "--", env=env)
+            tree = self._git("write-tree", env=env).strip()
+            sha = self._git(
+                "commit-tree", tree, "-m", f"ranger snapshot {tag}",
+                env=env,
+            ).strip()
+            self._git("update-ref", f"refs/ranger/snapshots/{tag}", sha,
+                      env=env)
+        finally:
+            try:
+                index.unlink(missing_ok=True)
+            except OSError:
+                pass  # cleanup is best-effort by design
+        entry = {"tag": tag, "sha": sha, "tree": tree,
+                 "time": round(time.time(), 3)}
+        self.snapshot_log.append(entry)
+        _LOG.info("snapshot · tag=%s sha=%s", tag, sha[:10])
+        return {"tag": tag, "sha": sha, "tree": tree, "root": root}
+
+    def rollback(self, tag: str | None = None) -> dict:
+        """Restore the working tree to a snapshot (tag, or the last one).
+
+        Returns `{"tag", "sha", "restored": [...]}` — the paths that
+        differed between the snapshot and the current tree (modified
+        tracked files plus untracked stragglers created after the
+        snapshot). Mechanics: `git read-tree --reset -u <tree>` rewinds
+        index+worktree to the snapshot (this resets staged state too —
+        the snapshot itself never preserved staged-vs-worktree
+        distinctions), then any post-snapshot untracked leftovers are
+        removed by exact path (`git clean -fd -- <paths>`, never a
+        shotgun). HEAD, branches and your commit history are untouched.
+
+        RangerError when nothing is recorded, the tag is unknown, or cwd
+        stopped being a git repository — an honest refusal, never a
+        claimed restore.
+        """
+        if tag is None:
+            if not self.snapshot_log:
+                raise RangerError(
+                    "rollback(): no snapshot recorded — nothing to restore"
+                )
+            tag = self.snapshot_log[-1]["tag"]
+        entry = next((s for s in self.snapshot_log if s["tag"] == tag), None)
+        if entry is None:
+            known = ", ".join(s["tag"] for s in self.snapshot_log) or "none"
+            raise RangerError(
+                f"rollback(): unknown snapshot tag {tag!r} (recorded: {known})"
+            )
+        root = self._git("rev-parse", "--show-toplevel").strip()
+        if not root:
+            raise RangerError(
+                f"rollback() cwd is not a git repository: {self.cwd!r}"
+            )
+        sha, tree = entry["sha"], entry["tree"]
+        # what differs right now vs the snapshot — the honest restored list
+        changed = [l for l in self._git("diff", "--name-only", sha).splitlines()
+                   if l.strip()]
+        # post-snapshot untracked creations: present now, absent in snapshot
+        untracked = [l for l in self._git(
+            "ls-files", "--others", "--exclude-standard").splitlines()
+            if l.strip()]
+        snap_files = set(
+            l for l in self._git("ls-tree", "-r", "--name-only", tree).split() if l
+        )
+        extras = [p for p in untracked if p not in snap_files]
+        # 1) index+worktree <- snapshot tree; `-u` deletes files whose only
+        #    justification was a post-snapshot index entry
+        self._git("read-tree", "--reset", "-u", tree)
+        # 2) untracked leftovers go away by exact path — no shotgun clean
+        if extras:
+            self._git("clean", "-fd", "--", *extras)
+        restored = sorted(set(changed) | set(extras))
+        _LOG.info("rollback · tag=%s · restored %d path(s)", tag, len(restored))
+        return {"tag": tag, "sha": sha, "restored": restored}
+
+    def _auto_snapshot(self, label: str):
+        """Best-effort pre-round snapshot when `snapshots=True`.
+
+        Never raises — a skipped snapshot is logged, never claimed.
+        """
+        if not self.snapshots:
+            return None
+        try:
+            return self.snapshot(f"{label}-{self._snap_seq + 1}")
+        except RangerError as exc:
+            _LOG.info("snapshot skipped (%s): %s", label, exc)
+            return None
+
     def _gate_ev(self, command: str, timeout: float | None = None) -> tuple[bool, str]:
         """gate() with evidence: returns (ok, clipped output tail).
 
@@ -1560,6 +1745,7 @@ class Ranger:
         max_iter: int = 5,
         gate_cmd: str | list | None = None,
         condition: str | None = None,
+        rollback_on_fail: bool = False,
         **ov,
     ) -> dict:
         """The loop primitive: plan → do → verify, repeated until green.
@@ -1590,8 +1776,16 @@ class Ranger:
         never a sympathy iteration because the agent says it's "almost
         done".
 
+        Recoverability (issue #7): `rollback_on_fail=True` takes a git
+        snapshot before round 1 and, when the budget ends red, restores
+        the working tree to it — the result then carries
+        `rolled_back: True` plus `rollback: {"tag", "restored"}`. Best
+        effort and honest: with no git repo (or a failed snapshot) the
+        outcome records `rolled_back: False` and never claims a restore.
+
             agent.until("tests folder has coverage for parse()",
-                        gate_cmd="python -m pytest -q")
+                        gate_cmd="python -m pytest -q",
+                        rollback_on_fail=True)
         """
         if not isinstance(max_iter, int) or max_iter < 0:
             raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
@@ -1606,6 +1800,14 @@ class Ranger:
             return {"achieved": True, "iterations": 0, "steps": [],
                     "report": "", "already_green": True,
                     "last_gate": pre_gate}
+        snap_tag: str | None = None
+        if rollback_on_fail:
+            try:
+                snap_tag = self.snapshot(f"pre-until-{time.strftime('%Y%m%d%H%M%S')}"
+                                         )["tag"]
+            except RangerError as exc:
+                # best-effort and logged — never claimed when absent
+                _LOG.info("until rollback_on_fail: no snapshot (%s)", exc)
         try:
             for i in range(1, max_iter + 1):
                 step = self.ask(
@@ -1632,8 +1834,18 @@ class Ranger:
                 "until", {"achieved": False, "iterations": len(steps),
                           "steps": steps, "report": report,
                           "last_gate": last_gate})) from None
-        return {"achieved": False, "iterations": len(steps),
-                "steps": steps, "report": report, "last_gate": last_gate}
+        result = {"achieved": False, "iterations": len(steps),
+                  "steps": steps, "report": report, "last_gate": last_gate}
+        if rollback_on_fail and snap_tag is not None:
+            try:
+                rb = self.rollback(snap_tag)
+                result["rolled_back"] = True
+                result["rollback"] = {"tag": snap_tag,
+                                       "restored": rb["restored"]}
+            except RangerError as exc:
+                result["rolled_back"] = False
+                result["rollback"] = {"tag": snap_tag, "error": str(exc)}
+        return result
 
     def attempt(
         self,
@@ -1684,6 +1896,7 @@ class Ranger:
         max_iter: int = 3,
         gate_cmd: str | list | None = None,
         condition: str | None = None,
+        rollback_on_fail: bool = False,
         **ov,
     ) -> dict:
         """The resolver distilled: plan once, then bounded honest attempts.
@@ -1719,6 +1932,13 @@ class Ranger:
                       pre_gate["kind"])
             return {"status": "ALREADY_GREEN", "goal": goal, "plan": "",
                     "iterations": 0, "report": "", "last_gate": pre_gate}
+        snap_tag: str | None = None
+        if rollback_on_fail:
+            try:
+                snap_tag = self.snapshot(f"pre-resolve-{time.strftime('%Y%m%d%H%M%S')}"
+                                         )["tag"]
+            except RangerError as exc:
+                _LOG.info("resolve rollback_on_fail: no snapshot (%s)", exc)
         plan_text = self.plan(goal, **ov)
         report = ""
         last_gate = pre_gate
@@ -1748,9 +1968,19 @@ class Ranger:
                 {"status": "FAILED", "goal": goal, "plan": plan_text,
                  "iterations": iters, "report": report,
                  "last_gate": last_gate})) from None
-        return {"status": "FAILED", "goal": goal, "plan": plan_text,
-                "iterations": iters, "report": report,
-                "last_gate": last_gate}
+        result = {"status": "FAILED", "goal": goal, "plan": plan_text,
+                  "iterations": iters, "report": report,
+                  "last_gate": last_gate}
+        if rollback_on_fail and snap_tag is not None:
+            try:
+                rb = self.rollback(snap_tag)
+                result["rolled_back"] = True
+                result["rollback"] = {"tag": snap_tag,
+                                       "restored": rb["restored"]}
+            except RangerError as exc:
+                result["rolled_back"] = False
+                result["rollback"] = {"tag": snap_tag, "error": str(exc)}
+        return result
 
     def verify_claims(self, topic: str, max_claims: int = 5, **ov) -> list:
         """Extract verifiable claims about a topic, then verify each.

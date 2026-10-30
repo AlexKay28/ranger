@@ -72,6 +72,7 @@ ranger.Ranger(
     stats=False,           # JSON-mode runs; telemetry in agent.last
     retries=0,             # transport-failure re-attempts per run
     env=None,               # dict merged over inherited os.environ for the child
+    snapshots=False,      # opt-in: git snapshot before mutating commands (do/edit/write)
 )
 ```
 
@@ -97,6 +98,7 @@ ranger.Ranger(
 | `backend` | `"opencode"` | which harness to drive — see Backends below |
 | `retries` | `0` | re-attempts a failed run, transport failures only (`RangerTimeout`, `RangerHarnessError`); prompt-contract failures (`RangerError`) never retry |
 | `env` | `None` (inherit all) | dict merged over the child's inherited environment — see [Child process environment](#child-process-environment) |
+| `snapshots` | `False` | opt in to best-effort git snapshots before mutating commands (`do`/`edit`/`write`), making rounds recoverable via `rollback()` — see [Snapshots & rollback](#snapshots--rollback) |
 
 ### Child process environment
 
@@ -708,6 +710,57 @@ a winner. Returns
 Validation: `rounds`/`max_iter` must be non-negative ints (`ValueError`);
 wrong-typed `author`/`critic`/agents/judge raise `TypeError` — up front,
 never after work has already run.
+
+## Snapshots & rollback
+
+`do()`/`edit()`/`write()` (and `until()`/`resolve()` rounds) mutate the caller's
+real working tree. Issue #7 makes every round recoverable with one git
+mechanism — no container sandbox needed.
+
+**`snapshot(tag=None) -> dict`** — commit the current state (tracked +
+untracked-but-not-ignored) to a hidden ref `refs/ranger/snapshots/<tag>`
+through a **temporary index** (`GIT_INDEX_FILE` under `.git/`): the real
+index, staged state and working tree are untouched. The commit is also
+recorded in the Python-side registry `agent.snapshot_log`
+(`{"tag", "sha", "tree", "time"}`). `tag=None` auto-names `snap-1`,
+`snap-2`, …; explicit tags must be unique, non-empty and shell-safe
+(letters/digits/`-_.`, else `ValueError`). Returns
+`{"tag", "sha", "tree", "root"}`.
+
+- Honest refusal, law 5: cwd not a git repository (or git missing) →
+  `RangerError`; nothing is claimed.
+- Auto-snapshots are **opt-in**: `Ranger(snapshots=True)` takes a
+  best-effort snapshot before each mutating command. A skipped snapshot is
+  logged, never claimed. Default off keeps the per-call subprocess
+  accounting of `do()`/`edit()`/`write()` at exactly one harness run.
+
+**`rollback(tag=None) -> dict`** — restore the working tree to a snapshot
+(tag, or the most recent one). Mechanics: `git diff --name-only <sha>` +
+`git ls-files --others` decide the honest restored list, then
+`git read-tree --reset -u <tree>` rewinds index+worktree, and any
+post-snapshot untracked leftovers are removed **by exact path**
+(`git clean -fd -- <paths>`, never a shotgun). HEAD, branches and your
+commit history are untouched. Returns `{"tag", "sha", "restored": [...]}`
+— the paths that actually differed. `RangerError` when nothing is
+recorded, the tag is unknown, or cwd is not a git repository.
+
+**`until(..., rollback_on_fail=False)` / `resolve(..., rollback_on_fail=False)`**
+— when `True`, a snapshot is taken before round 1; if the budget ends red,
+the tree is restored and the result carries `rolled_back: True` plus
+`rollback: {"tag", "restored"}`. Best effort and honest: with no git repo
+(or a failed snapshot) the keys are simply absent — a green outcome never
+rolls back, and a red one never claims a restore it did not perform.
+
+```python
+agent = ranger.Ranger(cwd=".", snapshots=True)
+snap = agent.snapshot("before-refactor")
+agent.do("refactor the parser")
+agent.rollback("before-refactor")     # {"tag": ..., "restored": [...]}
+
+result = agent.until("make tests green", gate_cmd="python -m pytest -q",
+                     rollback_on_fail=True)
+# result.get("rolled_back") is True only if a red budget was actually rewound
+```
 
 ## Backends (harness adapters)
 

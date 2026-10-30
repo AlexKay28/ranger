@@ -65,14 +65,17 @@ configured copy.
 
 ## ✅ Shipped — core commands
 
-### `until(goal, max_iter=5, gate_cmd=None, condition=None) -> dict`
+### `until(goal, max_iter=5, gate_cmd=None, condition=None, rollback_on_fail=False) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
 mechanical verdict — `gate_cmd` (pure exit code) or `condition` (agent YES/NO).
 Returns `{"achieved", "iterations", "steps", "report"}`; exhausted budget means
 `achieved: False`, honestly, never a sympathy iteration. The gate is also
 evaluated **before** any work: a green-up-front gate returns
 `already_green: True` with zero iterations — a vacuous gate can never
-masquerade as an agent achievement.
+masquerade as an agent achievement. With `rollback_on_fail=True` a git snapshot
+is taken before round 1 and a red budget restores the working tree
+(`rolled_back: True` + `rollback: {"tag", "restored"}` in the result); without
+a git repo nothing is claimed — the keys are simply absent.
 
 ### `ask(prompt) -> str`
 Raw prompt, raw answer. The escape hatch every other method is built on.
@@ -260,6 +263,31 @@ and `resolve`, `gate_cmd` also accepts a **list** of commands — run in order,
 short-circuiting on the first red, with a per-part breakdown in `last_gate`
 so a failure names the exact sub-check that tripped.
 
+## ✅ Shipped — snapshots & rollback (issue #7)
+
+Recoverability for mutating commands and loops, via one git mechanism —
+no container sandbox. Snapshots go to the hidden ref
+`refs/ranger/snapshots/<tag>` through a temporary index: the real index,
+staged state and working tree are never touched. All git plumbing rides the
+same mocked `ranger.subprocess` seam as the harness runs.
+
+### `snapshot(tag=None) -> dict`
+Commit tracked + untracked-but-not-ignored state to the hidden ref;
+`tag=None` auto-names `snap-1`, `snap-2`, …; explicit tags must be unique
+and shell-safe (`ValueError` otherwise). Also appends to the Python-side
+registry `agent.snapshot_log`. Non-git cwd → honest `RangerError`, never a
+phantom snapshot. With `Ranger(snapshots=True)`, `do`/`edit`/`write` take a
+best-effort snapshot first (skips are logged, not claimed; default off
+keeps their subprocess accounting at exactly one harness run).
+
+### `rollback(tag=None) -> dict`
+Restore the working tree to a snapshot (tag, or the last one taken).
+`git read-tree --reset -u <tree>` rewinds index+worktree; post-snapshot
+untracked leftovers are cleaned **by exact path**, never a shotgun.
+HEAD, branches and commit history stay untouched. Returns
+`{"tag", "sha", "restored": [...]}` — the paths that actually differed.
+Nothing recorded / unknown tag / non-git cwd → `RangerError`.
+
 ### `attempt(goal, gate_cmd=None, condition=None) -> dict`
 The single-shot honest sibling of `until`: ONE `do()` of the goal, then a
 mechanical verdict — `gate_cmd` (pure exit code), else `condition` (agent
@@ -274,13 +302,16 @@ agent.attempt("add __repr__ to Parser",
               gate_cmd="python -m pytest -q tests/test_parser.py")
 ```
 
-### `resolve(goal, max_iter=3, gate_cmd=None, condition=None) -> dict`
+### `resolve(goal, max_iter=3, gate_cmd=None, condition=None, rollback_on_fail=False) -> dict`
 The resolver distilled into one call: pre-flight gate check (already green →
 `status: "ALREADY_GREEN"`, zero model runs), then ONE `plan()` (think before
 touching), then a bounded loop of plan-guided `do()` rounds with a mechanical
 verdict each — no sympathy pass when the budget ends. Returns
 `{"status": "ALREADY_GREEN"|"PASS"|"FAILED", "goal", "plan", "iterations",
 "report", "last_gate"}`. Gates must assert contracts, not prose.
+`rollback_on_fail=True` snapshots before round 1 and restores the tree when
+the budget ends red (`rolled_back: True` + `rollback: {"tag", "restored"}`);
+absent keys mean no snapshot existed — never a claimed restore.
 
 ```python
 agent.resolve("add coverage for parse()",
