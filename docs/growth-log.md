@@ -533,3 +533,16 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   was set under the old model and may be unreachable or require
   several grind cycles under the new one — decision pending, not
   silently re-anchored.
+
+- **Loop cycle 15 — grind to scan ≥ 9.0 (1/4): every magic value
+  named.** All 19 hardcode findings cleared (~20 weighted penalty
+  points; overall 8.44 → 8.64, hardcode aspect 9.5 → 10.0): the
+  subprocess/-kill grace waits, models-listing timeout, recall
+  per-message overhead, mm:ss elapsed divisor, note/preview/spinner
+  frame constants, gate/diagnosis/claim evidence clips, slug and
+  uuid-hex filename clips, and snapshot index/time precision — one
+  named constant each in `_util.py`'s constant block, imported at the
+  point of use, zero behavior change (all 358 tests green, byte
+  output pinned by the suite). Two mid-cycle red moments (a missed
+  import edit, a mismatched import block) were caught by the suite
+  and fixed before commit — still never red at HEAD.

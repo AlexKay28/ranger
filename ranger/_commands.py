@@ -19,7 +19,8 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError, APPROX_CHARS_PER_TOKEN)
+                    RangerHarnessError, APPROX_CHARS_PER_TOKEN,
+                    SLUG_CLIP, UUID_HEX_CLIP)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -219,10 +220,10 @@ class CommandsMixin:
         Returns the path of the file that was written.
         """
         if path is None:
-            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:40]
+            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:SLUG_CLIP]
             slug = slug.strip("_-") or "ranger_out"
             out = Path(self.cwd or Path.cwd()) / (
-                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:6]}.md"
+                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:UUID_HEX_CLIP]}.md"
             )
         else:
             out = Path(path)
@@ -505,10 +506,10 @@ class CommandsMixin:
         RangerError if the agent did not write it — same as write().
         """
         if path is None:
-            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:40]
+            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:SLUG_CLIP]
             slug = slug.strip("_-") or "ranger_out"
             out = Path(self.cwd or Path.cwd()) / (
-                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:6]}.md"
+                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:UUID_HEX_CLIP]}.md"
             )
         else:
             out = Path(path)

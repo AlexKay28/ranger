@@ -19,7 +19,8 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError, ANSWER_EXCERPT, ROW_EXCERPT)
+                    RangerHarnessError, ANSWER_EXCERPT, ROW_EXCERPT,
+                    CLAIM_CLIP)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -89,7 +90,7 @@ class MultiMixin:
             except RangerError:
                 ok, verdict = None, "UNCERTAIN"
             results.append({"claim": claim, "verdict": verdict, "ok": ok})
-            _LOG.info("verify_claims · %s: %s", verdict, claim[:80])
+            _LOG.info("verify_claims · %s: %s", verdict, claim[:CLAIM_CLIP])
         return results
 
     @staticmethod

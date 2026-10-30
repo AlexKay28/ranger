@@ -39,6 +39,30 @@ LOG_MSG_CLIP = 60          # commit message shown in log lines
 # Plainly an estimate, never a bill — output tokens are unguessable.
 APPROX_CHARS_PER_TOKEN = 4
 
+# Subprocess timeouts (seconds) and post-kill grace waits.
+KILL_WAIT_S = 5          # cleanup grace after SIGKILL (transport only)
+MODELS_TIMEOUT_S = 60    # `models` listing call per backend
+
+# Recall accounting: per-message overhead added alongside content length.
+RECALL_MSG_OVERHEAD = 16
+
+# Live progress rendering: elapsed clock and clipped note/preview texts.
+SECONDS_PER_MIN = 60     # mm:ss elapsed divisor (progress + spinner)
+RUN_NOTE_CLIP = 84       # live-run note shown next to the progress mark
+SPINNER_PREVIEW_CLIP = 40
+SPINNER_FRAME_S = 0.1    # spinner frame interval
+
+# Evidence clips quoted into results/errors.
+GATE_OUT_CLIP = 400      # gate stdout+stderr shown in gate() result
+DIAGNOSIS_CLIP = 800     # diagnosis fed to fix() rounds
+CLAIM_CLIP = 80          # one claim truncated in verify_claims logs
+
+# Generated-file names for write()/ensure_written().
+SLUG_CLIP = 40           # task slug kept in the generated filename
+UUID_HEX_CLIP = 6        # uuid hex suffix in generated filenames
+SNAP_HEX_CLIP = 8        # uuid hex suffix in snapshot git-index names
+SNAP_TIME_DECIMALS = 3   # snapshot timestamp precision
+
 # git status --porcelain v1 line anatomy: "XY <path>", path starts at col 3,
 # and a shorter line carries no path at all.
 PORCELAIN_MIN = 4
@@ -140,7 +164,7 @@ def _kill_tree(proc: "subprocess.Popen") -> None:
     except (ProcessLookupError, PermissionError, OSError):
         pass
     try:
-        proc.communicate(timeout=5)
+        proc.communicate(timeout=KILL_WAIT_S)
     except (subprocess.TimeoutExpired, OSError):
         # narrow, honest cleanup catch: only transport-level failures occur
         # here — cleanup must never mask the original exception
@@ -169,7 +193,7 @@ class _Spinner:
 
     def __init__(self, label: str, preview: str) -> None:
         self._label = _c(label, "cyan")
-        self._preview = _clip(preview, 40)
+        self._preview = _clip(preview, SPINNER_PREVIEW_CLIP)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._spin, daemon=True)
 
@@ -177,14 +201,14 @@ class _Spinner:
         start = time.time()
         i = 0
         while not self._stop.is_set():
-            mm, ss = divmod(int(time.time() - start), 60)
+            mm, ss = divmod(int(time.time() - start), SECONDS_PER_MIN)
             sys.stderr.write(
                 f"\r  {_c(self.FRAMES[i % len(self.FRAMES)], 'cyan')}"
                 f" {self._label} {_c('·', 'dim')} {self._preview}"
                 f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}   "
             )
             sys.stderr.flush()
-            self._stop.wait(0.1)
+            self._stop.wait(SPINNER_FRAME_S)
             i += 1
         sys.stderr.write("\r\033[K")
         sys.stderr.flush()

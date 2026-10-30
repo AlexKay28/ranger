@@ -19,7 +19,9 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError, UI_NOTE_CLIP, UI_RETRY_CLIP)
+                    RangerHarnessError, UI_NOTE_CLIP, UI_RETRY_CLIP,
+                    RECALL_MSG_OVERHEAD, KILL_WAIT_S, SECONDS_PER_MIN,
+                    RUN_NOTE_CLIP)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -240,7 +242,7 @@ class EngineMixin:
         budget = o.get("memory_budget") or self.memory_budget
         selected, total = [], 0
         for msg in reversed(self.context):
-            total += len(msg["content"]) + 16
+            total += len(msg["content"]) + RECALL_MSG_OVERHEAD
             if total > budget:
                 break
             selected.append(msg)
@@ -368,7 +370,7 @@ class EngineMixin:
         except (ProcessLookupError, PermissionError, OSError):
             pass
         try:
-            await asyncio.wait_for(proc.wait(), 5)
+            await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
         except (OSError, asyncio.TimeoutError):
             # narrow, honest cleanup catch: the kill already happened, only
             # transport-level failures can occur here — and cleanup must
@@ -496,8 +498,8 @@ class EngineMixin:
                 return
             if spinner:
                 spinner.stop()
-            mm, ss = divmod(int(time.time() - t0), 60)
-            note_part = f" {_c('·', 'dim')} {_clip(note, 84)}" if note else ""
+            mm, ss = divmod(int(time.time() - t0), SECONDS_PER_MIN)
+            note_part = f" {_c('·', 'dim')} {_clip(note, RUN_NOTE_CLIP)}" if note else ""
             sys.stderr.write(
                 f"  {_c(mark, color)} {_c(label, color)}"
                 f" {_c('·', 'dim')} {_c(f'{mm:02d}:{ss:02d}', 'dim')}{note_part}\n"

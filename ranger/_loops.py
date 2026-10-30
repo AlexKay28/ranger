@@ -19,7 +19,8 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
+                    RangerHarnessError, GATE_OUT_CLIP,
+                    DIAGNOSIS_CLIP)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -64,7 +65,7 @@ class LoopsMixin:
         except KeyboardInterrupt:
             _kill_tree(proc)
             raise
-        return proc.returncode == 0, _clip((out or "") + (err or ""), 400)
+        return proc.returncode == 0, _clip((out or "") + (err or ""), GATE_OUT_CLIP)
 
     def _gate_sequence(self, gate_cmd, timeout):
         """Run a gate SEQUENCE: short-circuit on the first red part.
@@ -418,7 +419,7 @@ class LoopsMixin:
             return {"status": "ALREADY_GREEN", "problem": problem,
                     "diagnosis": "", "iterations": 0, "last_gate": pre_gate}
         diagnosis = self.diagnose(problem, **ov)
-        clipped = _clip(diagnosis, 800)
+        clipped = _clip(diagnosis, DIAGNOSIS_CLIP)
         last_gate: dict = pre_gate
         rounds = 0
         for i in range(1, max_iter + 1):

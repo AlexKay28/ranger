@@ -12,7 +12,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from ._util import (RangerError, RangerTimeout, RangerHarnessError, _c, _clip)
+from ._util import (RangerError, RangerTimeout, RangerHarnessError, _c,
+                    _clip, MODELS_TIMEOUT_S)
 
 # ====================================================================== #
 # Harness backends (adapters)
@@ -176,7 +177,8 @@ class _OpenCodeBackend(_Backend):
         try:
             proc = subprocess.run(
                 ["opencode", "models"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True,
+                timeout=MODELS_TIMEOUT_S,
                 encoding="utf-8", errors="replace",
             )
         except FileNotFoundError:
@@ -360,7 +362,8 @@ class _PiBackend(_Backend):
         try:
             proc = subprocess.run(
                 ["pi", "--list-models"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True,
+                timeout=MODELS_TIMEOUT_S,
                 encoding="utf-8", errors="replace",
             )
         except FileNotFoundError:

@@ -20,7 +20,8 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
                     RangerHarnessError, LOG_SHA_CLIP, LOG_MSG_CLIP,
-                    PORCELAIN_MIN, PORCELAIN_PATH_AT)
+                    PORCELAIN_MIN, PORCELAIN_PATH_AT,
+                    SNAP_HEX_CLIP, SNAP_TIME_DECIMALS)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -94,7 +95,7 @@ class SnapshotMixin:
             raise ValueError(f"invalid snapshot tag: {tag!r}")
         if any(s["tag"] == tag for s in self.snapshot_log):
             raise ValueError(f"snapshot tag already used: {tag!r}")
-        index = Path(root) / ".git" / f"ranger-index-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        index = Path(root) / ".git" / f"ranger-index-{os.getpid()}-{uuid.uuid4().hex[:SNAP_HEX_CLIP]}"
         env = {**(self._child_env() or {}), "GIT_INDEX_FILE": str(index)}
         try:
             # add -A on the TEMP index only — no real index/worktree touch
@@ -112,7 +113,7 @@ class SnapshotMixin:
             except OSError:
                 pass  # cleanup is best-effort by design
         entry = {"tag": tag, "sha": sha, "tree": tree,
-                 "time": round(time.time(), 3)}
+                 "time": round(time.time(), SNAP_TIME_DECIMALS)}
         self.snapshot_log.append(entry)
         _LOG.info("snapshot · tag=%s sha=%s", tag, sha[:LOG_SHA_CLIP])
         return {"tag": tag, "sha": sha, "tree": tree, "root": root}
