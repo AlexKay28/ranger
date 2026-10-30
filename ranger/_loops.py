@@ -66,22 +66,14 @@ class LoopsMixin:
             raise
         return proc.returncode == 0, _clip((out or "") + (err or ""), 400)
 
-    def _gate_evidence(self, gate_cmd, timeout: float | None = None):
-        """Evaluate gate_cmd — a single command string OR a sequence.
+    def _gate_sequence(self, gate_cmd, timeout):
+        """Run a gate SEQUENCE: short-circuit on the first red part.
 
-        A sequence short-circuits on the first red part — the semantics
-        of `part1 && part2 && ...` — and returns a per-part breakdown so
-        a red verdict names the exact sub-check that failed (the false-red
-        lesson: never diagnose a compound gate from one blended blob).
-
-        Returns (ok, output_tail, parts) — parts is None for a plain
-        string gate, and a list of {"cmd", "ok", "output"} for a list.
+        The semantics of `part1 && part2 && ...` with a per-part
+        breakdown, so a red verdict names the exact sub-check that
+        failed (the false-red lesson: never diagnose a compound gate
+        from one blended blob).
         """
-        if isinstance(gate_cmd, str):
-            self._gate_last = None
-            ok = self.gate(gate_cmd, timeout=timeout)
-            ev = self._gate_last
-            return ok, (ev[1] if ev else ""), None
         if not gate_cmd:
             raise RangerError("gate_cmd sequence must not be empty")
         parts = []
@@ -99,6 +91,19 @@ class LoopsMixin:
         all_ok = failed is None
         out = failed["output"] if failed else parts[-1]["output"]
         return all_ok, out, parts
+
+    def _gate_evidence(self, gate_cmd, timeout: float | None = None):
+        """Evaluate gate_cmd — a single command string OR a sequence.
+
+        Returns (ok, output_tail, parts) — parts is None for a plain
+        string gate, and a list of {"cmd", "ok", "output"} for a list.
+        """
+        if isinstance(gate_cmd, str):
+            self._gate_last = None
+            ok = self.gate(gate_cmd, timeout=timeout)
+            ev = self._gate_last
+            return ok, (ev[1] if ev else ""), None
+        return self._gate_sequence(gate_cmd, timeout)
 
     def _verdict(self, goal, gate_cmd, condition, **ov):
         """One mechanical verdict, shared by until()/attempt()/resolve().
@@ -146,6 +151,23 @@ class LoopsMixin:
         except RangerError as exc:
             result["rolled_back"] = False
             result["rollback"] = {"tag": snap_tag, "error": str(exc)}
+
+    def _until_round(self, goal, gate_cmd, condition, steps, ov):
+        """One until() round: ask a step, do it, gate it.
+
+        Returns (step, report, ok, last_gate) — the caller owns budget
+        and honesty rules; this helper never decides them.
+        """
+        attempted = "\n".join(f"- {s}" for s in steps) or "- none"
+        step = self.ask(
+            f"Goal: {goal}\n"
+            f"Steps already attempted:\n{attempted}"
+            + "\n\nName ONE concrete, small next step toward the goal. "
+            "Reply with the step only, one line.",
+            **ov,
+        ).strip()
+        report = self.do(step, **ov)
+        return step, report, *self._verdict(goal, gate_cmd, condition, **ov)
 
     def until(
         self,
@@ -213,17 +235,9 @@ class LoopsMixin:
             snap_tag = self._pre_loop_snapshot("until")
         try:
             for i in range(1, max_iter + 1):
-                step = self.ask(
-                    f"Goal: {goal}\n"
-                    f"Steps already attempted:\n"
-                    + ("\n".join(f"- {s}" for s in steps) or "- none")
-                    + "\n\nName ONE concrete, small next step toward the goal. "
-                    "Reply with the step only, one line.",
-                    **ov,
-                ).strip()
-                report = self.do(step, **ov)
+                step, report, ok, last_gate = self._until_round(
+                    goal, gate_cmd, condition, steps, ov)
                 steps.append(step)
-                ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
                 _LOG.info("until iteration %d/%d · gate(%s) → %s",
                           i, max_iter, last_gate["kind"],
                           "achieved" if ok else "not achieved")
@@ -286,6 +300,22 @@ class LoopsMixin:
         return {"passed": ok, "already_green": False, "goal": goal,
                 "report": report, "last_gate": last_gate}
 
+    def _resolve_round(self, goal, plan_text, gate_cmd, condition, ov):
+        """One resolve() round: execute the next plan step, gate it.
+
+        Returns (report, ok, last_gate) — budget and honesty rules stay
+        with the caller.
+        """
+        report = self.do(
+            f"Goal: {goal}\n\n"
+            f"Approved plan to follow:\n{plan_text}\n\n"
+            "Execute the next unfinished step of the plan (or redo "
+            "a step that stayed red) and report what you changed.",
+            **ov,
+        )
+        ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
+        return report, ok, last_gate
+
     def resolve(
         self,
         goal: str,
@@ -338,14 +368,8 @@ class LoopsMixin:
         try:
             for i in range(1, max_iter + 1):
                 iters = i
-                report = self.do(
-                    f"Goal: {goal}\n\n"
-                    f"Approved plan to follow:\n{plan_text}\n\n"
-                    "Execute the next unfinished step of the plan (or redo "
-                    "a step that stayed red) and report what you changed.",
-                    **ov,
-                )
-                ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
+                report, ok, last_gate = self._resolve_round(
+                    goal, plan_text, gate_cmd, condition, ov)
                 _LOG.info("resolve iteration %d/%d · gate(%s) → %s", i,
                           max_iter, last_gate["kind"],
                           "PASS" if ok else "not yet")

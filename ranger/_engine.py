@@ -436,6 +436,31 @@ class EngineMixin:
             self.context.append({"role": "assistant", "content": answer})
         return answer
 
+    def _sync_transport(self, cmd, o, prep, _finish):
+        """The sync spawn-retry loop: transport failures may re-attempt.
+
+        Returns the successful CompletedProcess (exited 0). Retry
+        policy: transport-class failures only — prompt-contract
+        failures (plain RangerError) never re-attempt.
+        """
+        retries = prep["retries"]
+        attempt = 0
+        while True:
+            try:
+                proc = self._spawn_sync(cmd, o, prep, _finish)
+                if proc.returncode != 0:
+                    _finish("✗", "red", _clip(proc.stderr, UI_NOTE_CLIP) or f"exit {proc.returncode}")
+                    raise RangerHarnessError(
+                        f"{prep['backend']} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
+                    )
+                return proc
+            except (RangerTimeout, RangerHarnessError) as exc:
+                if attempt < retries:
+                    attempt += 1
+                    _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), UI_RETRY_CLIP)}")
+                    continue
+                raise
+
     def _run(self, prompt: str, label: str = "run", **ov) -> str:
         prep = self._prepare_run(prompt, label, ov)
         backend_name = prep["backend"]
@@ -466,26 +491,7 @@ class EngineMixin:
                    label, o["model"], backend_name)
 
         try:
-            retries = prep["retries"]
-            attempt = 0
-            proc = None
-            while True:
-                try:
-                    proc = self._spawn_sync(cmd, o, prep, _finish)
-                    if proc.returncode != 0:
-                        _finish("✗", "red", _clip(proc.stderr, UI_NOTE_CLIP) or f"exit {proc.returncode}")
-                        raise RangerHarnessError(
-                            f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
-                        )
-                    break
-                except (RangerTimeout, RangerHarnessError) as exc:
-                    # transport-class failure only: prompt-contract failures
-                    # (plain RangerError) never reach this handler
-                    if attempt < retries:
-                        attempt += 1
-                        _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), UI_RETRY_CLIP)}")
-                        continue
-                    raise
+            proc = self._sync_transport(cmd, o, prep, _finish)
             answer = self._complete_run(prep, proc.stdout, t0)
             first = answer.splitlines()
             _finish("✓", "green", _clip(first[0], UI_NOTE_CLIP) if first else "")
@@ -504,6 +510,34 @@ class EngineMixin:
                        label, o["model"], time.time() - t0)
             if spinner is not None:
                 spinner.stop()
+
+    async def _async_transport(self, cmd, o, prep):
+        """The async spawn-retry loop: transport failures may re-attempt.
+
+        Returns decoded (stdout, stderr) of the successful run (exit
+        0). Retry policy mirrors `_sync_transport`: transport-class
+        failures only — plain RangerError never re-attempts.
+        """
+        retries = prep["retries"]
+        attempt = 0
+        while True:
+            try:
+                proc, stdout_b, stderr_b = await self._spawn_async(
+                    cmd, o, prep)
+                stdout = stdout_b.decode("utf-8", errors="replace")
+                stderr = stderr_b.decode("utf-8", errors="replace")
+                if proc.returncode != 0:
+                    raise RangerHarnessError(
+                        f"{prep['backend']} run failed (exit {proc.returncode}):\n{stderr.strip()}"
+                    )
+                return stdout, stderr
+            except (RangerTimeout, RangerHarnessError) as exc:
+                if attempt < retries:
+                    attempt += 1
+                    _LOG.info("run_async retry %d/%d · %s",
+                              attempt, retries, _clip(str(exc), UI_RETRY_CLIP))
+                    continue
+                raise
 
     async def _run_async(self, prompt: str, label: str = "run", **ov) -> str:
         """Async shell over the SAME run contract as `_run()`.
@@ -525,28 +559,7 @@ class EngineMixin:
                    label, o["model"], backend_name)
 
         try:
-            retries = prep["retries"]
-            attempt = 0
-            while True:
-                try:
-                    proc, stdout_b, stderr_b = await self._spawn_async(
-                        cmd, o, prep)
-                    stdout = stdout_b.decode("utf-8", errors="replace")
-                    stderr = stderr_b.decode("utf-8", errors="replace")
-                    if proc.returncode != 0:
-                        raise RangerHarnessError(
-                            f"{backend_name} run failed (exit {proc.returncode}):\n{stderr.strip()}"
-                        )
-                    break
-                except (RangerTimeout, RangerHarnessError) as exc:
-                    # transport-class failure only: prompt-contract failures
-                    # (plain RangerError) never reach this handler
-                    if attempt < retries:
-                        attempt += 1
-                        _LOG.info("run_async retry %d/%d · %s",
-                                  attempt, retries, _clip(str(exc), UI_RETRY_CLIP))
-                        continue
-                    raise
+            stdout, _stderr = await self._async_transport(cmd, o, prep)
             return self._complete_run(prep, stdout, t0)
         except asyncio.CancelledError:
             _LOG.debug("run_async cancelled · label=%s duration=%.2fs",

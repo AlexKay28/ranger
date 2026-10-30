@@ -453,3 +453,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   `_compose_prompt` called positionally by a frozen test) —
   irreducible without an API break, a human-only call. Suite: 354
   mocked tests green (the prep-struct composition test untouched).
+
+- **Loop cycle 11 — the cc-11..13 tail extracted; complexity warns
+  reach zero.** Seven extraction points, all behavior-preserving
+  and pinned green by the untouched suite: `_gate_sequence` (the
+  short-circuit sequence loop out of `_gate_evidence`), `_until_
+  round` / `_resolve_round` (one loop round each: ask/do/verdict —
+  budget and honesty rules stay with the caller),
+  `_path_violations` (the porcelain scan out of `_check_do_after`),
+  `_challenge_intro` (spec validation + purity-flag strip),
+  `_refine_task` (goal + requested-changes merge), and
+  `_sync_transport` / `_async_transport` (the spawn-retry loops out
+  of `_run`/`_run_async` — retry policy literally shared shape).
+  pcina: zero [warn][complexity] findings remain (all cc>10 gone:
+  challenge 12, _check_do_after 12, _gate_evidence 11, _run 11,
+  resolve 11 all clear); p75_cc 8.0 → 7.0, avg_cc 4.7 → 4.5. The
+  warn count moved 31 → 32 though: cc/size fixes that move
+  validation into helpers now surface as paranoia warnings
+  (raise-guards in internal helpers), and the new helpers carry
+  6-7 params (2 over limit). Suite: 354 mocked tests green.

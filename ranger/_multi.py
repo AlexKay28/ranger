@@ -300,6 +300,21 @@ class MultiMixin:
             label="ruling", memory=False, session=None, **jov,
         ).strip()
 
+    def _challenge_intro(self, other, claim, rounds, ov):
+        """Validate a challenge spec; resolve claim + pure judgment flags.
+
+        Returns (claim, jov) — jov is ov minus the purity flags that
+        must never collide with the forced memory/session-off runs.
+        """
+        if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 0:
+            raise ValueError(f"rounds must be a non-negative int, got {rounds!r}")
+        if claim is None:
+            claim = self._last_claim(other)
+        # judgment calls (attack, ruling) are pure: strip any purity
+        # overrides so they never collide, then force memory/session off
+        jov = {k: v for k, v in ov.items() if k not in ("memory", "session")}
+        return claim, jov
+
     def challenge(self, other: "Ranger", claim: str | None = None,
                   rounds: int = 2, **ov) -> dict:
         """Adversarially challenge another agent's claim.
@@ -327,13 +342,7 @@ class MultiMixin:
 
             auditor.challenge(author)          # attack their latest claim
         """
-        if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 0:
-            raise ValueError(f"rounds must be a non-negative int, got {rounds!r}")
-        if claim is None:
-            claim = self._last_claim(other)
-        # judgment calls (attack, ruling) are pure: strip any purity
-        # overrides so they never collide, then force memory/session off
-        jov = {k: v for k, v in ov.items() if k not in ("memory", "session")}
+        claim, jov = self._challenge_intro(other, claim, rounds, ov)
         history: list[dict] = []
         try:
             for i in range(1, rounds + 1):
@@ -373,6 +382,15 @@ class MultiMixin:
         norm = lambda s: " ".join(s.split()).casefold()
         return {"mine": mine, "theirs": theirs, "differs": norm(mine) != norm(theirs)}
 
+    def _refine_task(self, goal: str, pending: str) -> str:
+        """This round's task: the goal, plus the requested changes verbatim."""
+        if not pending:
+            return goal
+        return (
+            f"{goal}\n\nThe reviewer requested these changes (address "
+            f"ALL of them):\n{pending}"
+        )
+
     def refine_with(self, critic: "Ranger", goal: str, max_iter: int = 3,
                     **ov) -> dict:
         """The two-agent until: do, get reviewed, address the changes, repeat.
@@ -410,11 +428,8 @@ class MultiMixin:
         report = ""
         try:
             for i in range(1, max_iter + 1):
-                task = goal if not pending else (
-                    f"{goal}\n\nThe reviewer requested these changes (address "
-                    f"ALL of them):\n{pending}"
-                )
-                report = self.do(task, **work_ov)
+                report = self.do(self._refine_task(goal, pending),
+                                  **work_ov)
                 rev = critic.review(subject=goal, author=report, **review_ov)
                 reviews.append(rev)
                 _LOG.info("refine_with iteration %d/%d · verdict=%s",

@@ -66,15 +66,13 @@ class SafetyMixin:
             root = self._git("rev-parse", "--show-toplevel").strip() or None
         return allow, deny, dry, root
 
-    def _check_do_after(self, allow, deny, dry_run, root) -> None:
-        """Post-run boundary for do twins: git status vs the rails.
+    def _path_violations(self, allow, deny, root) -> "list[str]":
+        """Changed paths that fall outside the rails, from git status.
 
-        Law 5 honesty: a violation RAISES and names the paths; the tree
-        is left mutated (our word is not a rollback) — pair with
-        `snapshots=True` / `rollback()` for recovery.
+        Each porcelain line is a "XY <path>" record; a path violates
+        when it matches the deny list, or when an allow list exists
+        and it does not match it.
         """
-        if dry_run or not (allow or deny):
-            return
         porcelain = self._git("status", "--porcelain")
         violations = []
         for line in porcelain.splitlines():
@@ -87,6 +85,18 @@ class SafetyMixin:
                 violations.append(p)
             elif allow and not _path_matches(p, allow, root):
                 violations.append(p)
+        return violations
+
+    def _check_do_after(self, allow, deny, dry_run, root) -> None:
+        """Post-run boundary for do twins: git status vs the rails.
+
+        Law 5 honesty: a violation RAISES and names the paths; the tree
+        is left mutated (our word is not a rollback) — pair with
+        `snapshots=True` / `rollback()` for recovery.
+        """
+        if dry_run or not (allow or deny):
+            return
+        violations = self._path_violations(allow, deny, root)
         if violations:
             raise RangerError(
                 "do() touched paths outside the safety rails: "
