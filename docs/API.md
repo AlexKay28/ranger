@@ -542,6 +542,31 @@ delegates to the backend adapter. opencode runs `opencode models`; codex
 cannot enumerate models and raises `RangerError` pointing at
 `~/.codex/config.toml` / `model=`. No agent, no tokens, no context recording.
 
+## extract — structured JSON grammar
+
+`agent.extract(request, keys, many=True) -> list[dict] | dict` extends
+the verdict grammar (YES/NO, `VERDICT:`, `RULING:`) with one more typed
+shape: a small structured record. The agent verifies facts read-only in
+the working directory and must reply with **exactly one** JSON value —
+an array of objects with `many=True` (default), or a single JSON object
+with `many=False` — where every object carries the named `keys`. Parsing is
+purely mechanical (law 2): malformed JSON, trailing prose, markdown
+fences, non-object rows or missing keys raise `RangerError` carrying the
+raw agent reply, never a guess. An empty array/object is the legitimate
+"no matches" answer. Like `check()`, `extract()` is a fact command:
+history- and session-independent (`session=` is ignored for it).
+
+```python
+rows = agent.extract("failing tests in tests/test_parser.py",
+                     keys=["test_id", "reason", "file"])
+meta = agent.extract("project metadata", keys=["name", "version"],
+                     many=False)
+```
+
+Deliberate non-goals (framework creep is out): no pydantic dependency,
+no model/schema registry, no nested or recursive schemas — flat string
+keys, grammar + parser.
+
 ## Async twins & par_map
 
 ranger stays sync-and-blocking by design (non-goal: streaming/chat), but

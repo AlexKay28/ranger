@@ -184,3 +184,14 @@ documentation + tests). This is the loop's only cross-cycle memory.
   green in ~2.5s; new file `tests/test_async.py` (27 tests), example
   `examples/backends/parallel_search.py`, API.md/commands.md/SKILL.md/
   README synced.
+- **Issue #8 (same cycle):** `extract(request, keys, many=True)` — the
+  JSON grammar beyond YES/NO (laws 2 and 5): frozen prompt demanding
+  exactly one JSON array-of-objects / object with the named keys;
+  mechanical parse-or-raise carrying the raw reply (malformed JSON,
+  prose, fences, wrong shape, missing keys all raise; empty array/object
+  is a legitimate "no matches"). A pure fact command (added to
+  `_PURE_LABELS`; session/recall ignored). Deliberate non-goals
+  documented: no pydantic, no schema registry, no nesting — flat keys,
+  grammar + parser. Suite: 287 mocked tests green in ~2.5s; prompt
+  template and full failure truth table pinned in `tests/test_logic.py`;
+  example `examples/code-work/extract_failing_tests.py`.

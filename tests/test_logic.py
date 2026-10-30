@@ -616,3 +616,97 @@ def test_refine_and_debate_fail_fast_on_bad_overrides():
             ranger.debate(Ranger(), Ranger(), "topic", rounds=1,
                           judge="not an agent")
     assert m.call_count == 0
+
+
+# ==================================================================== #
+# 12. extract(): the JSON grammar — truth table, same style as check()
+
+def test_extract_parses_success_and_prompt_is_pinned():
+    agent = Ranger()
+    answer = '[{"test_id": "t1", "reason": "import"}, {"test_id": "t2", "reason": "typo"}]'
+    cmds = []
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda c, **k: cmds.append(c)
+                    or fake_run(answer)):
+        rows = agent.extract("failing tests", keys=["test_id", "reason"])
+    assert rows == [{"test_id": "t1", "reason": "import"},
+                    {"test_id": "t2", "reason": "typo"}]
+    # frozen prompt template — a breaking-change test (law 1)
+    prompt = cmds[0][-1]
+    assert prompt.startswith(
+        'Extract structured data for this request: failing tests')
+    assert '"test_id", "reason"' in prompt
+    assert "EXACTLY ONE JSON array of objects" in prompt
+    assert "no prose before or after, no markdown fences" in prompt
+
+
+def test_extract_single_object_mode():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run('{"name": "ranger", "version": "0.7"}')):
+        one = agent.extract("project metadata",
+                            keys=["name", "version"], many=False)
+    assert one == {"name": "ranger", "version": "0.7"}
+    with mock.patch("ranger.subprocess.run",
+                    return_value=fake_run('[{"name": "ranger", "version": "0.7"}]')):
+        with mock.patch("ranger.subprocess.run",
+                        return_value=fake_run('{"name": "ranger", "version": "0.7"}')):
+            with pytest.raises(RangerError, match="many=True"):
+                agent.extract("meta", keys=["name"],
+                              many=True)  # object when array expected
+
+
+@pytest.mark.parametrize("answer,pat", [
+    ('not json at all', "could not parse JSON"),
+    ('[{"a": 1}], trailing prose', "could not parse JSON"),
+    ('```json\n{"a": 1}\n```', "could not parse JSON"),   # fences are prose
+    ('[{"test_id": "t1"}]', "missing key"),
+    ('[{"a": 1}]', "missing key"),
+    ('["a string"]', "not a JSON object"),
+    ('{"a": 1}', "expected a JSON array"),
+    ('42', "expected a JSON array"),
+    ('[{"test_id": "t1", "reason": "x"}, {"test_id": "z"}]', "missing key"),
+])
+def test_extract_failure_truth_table(answer, pat):
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(answer)):
+        with pytest.raises(RangerError, match=pat):
+            agent.extract("q", keys=["test_id", "reason"])
+
+
+def test_extract_single_mode_failure_shapes():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run('[{"a": 1}]')):
+        with pytest.raises(RangerError, match="many=False"):
+            agent.extract("q", keys=["a"], many=False)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run('{"b": 1}')):
+        with pytest.raises(RangerError, match="missing key"):
+            agent.extract("q", keys=["a"], many=False)
+
+
+def test_extract_empty_results_are_legitimate():
+    agent = Ranger()
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("[]")):
+        assert agent.extract("q", keys=["k"]) == []
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("{}")):
+        assert agent.extract("q", keys=["k"], many=False) == {}
+
+
+def test_extract_validates_keys_up_front():
+    agent = Ranger()
+    for bad in (["ok", ""], [], "test_id", 42, ()):  # empty/str/num/empty tuple
+        with pytest.raises((TypeError, ValueError)):
+            agent.extract("q", keys=bad)
+
+
+def test_extract_is_pure_no_session_no_recall():
+    agent = Ranger(session="keep", memory=True, cwd=".")
+    agent.context.append({"role": "user", "content": "old stuff"})
+    cmds = []
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda c, **k: cmds.append(c) or
+                    fake_run("[]")):
+        agent.extract("q", keys=["k"])
+    prompt = cmds[0][-1]
+    assert "keep" not in prompt and "old stuff" not in prompt
+    assert "## Previous interaction" not in prompt

@@ -528,7 +528,8 @@ register_backend("claude", _ClaudeBackend)
 # Commands whose answers must be pure facts about the world, never colored
 # by conversation history (paradigm law: context memory colors dialogues,
 # never facts). Recall is skipped for these; recording still happens.
-_PURE_LABELS = frozenset({"check", "critique", "diagnose", "lint", "read", "search", "summarize", "test", "trace"})
+_PURE_LABELS = frozenset({"check", "critique", "diagnose", "extract", "lint",
+                          "read", "search", "summarize", "test", "trace"})
 
 # Command families with async twins (issue #9). par_map validates its
 # call specs against this list; everything else stays sync-only.
@@ -590,6 +591,78 @@ def _check_prompt(condition: str) -> str:
         "a line containing only YES or only NO, nothing before it. "
         "One short line of evidence may follow it. No other preamble."
     )
+
+
+def _extract_keys_clause(keys) -> str:
+    return ", ".join(f'"{k}"' for k in keys)
+
+
+def _extract_prompt(request: str, keys, many: bool) -> str:
+    keys_list = "[" + _extract_keys_clause(keys) + "]"
+    if many:
+        shape = ("an answer that is EXACTLY ONE JSON array of objects "
+                 '(for no matches: `[]`)')
+    else:
+        shape = ("an answer that is EXACTLY ONE JSON object "
+                 '(for no matches: `{}`)')
+    return (
+        f"Extract structured data for this request: {request}\n\n"
+        "Contract: your entire reply must be "
+        + shape
+        + f" — every object must carry exactly these keys: {keys_list}. "
+        "The reply is raw JSON, nothing else: no prose before or after, "
+        "no markdown fences, no comments, no trailing commas. Values may "
+        "be strings, numbers, booleans or null — but the named keys must "
+        "always be present. Verify the facts in the current directory "
+        "first; do NOT modify, create, delete, or rename any file."
+    )
+
+
+def _parse_extract_answer(answer: str, keys, many: bool):
+    """Parse an extract() reply mechanically or raise RangerError (law 5)."""
+    raw = answer.strip()
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise RangerError(
+            f"extract() could not parse JSON from the agent reply "
+            f"(trailing prose or malformed JSON):\n{answer[:300]}"
+        ) from None
+    if many:
+        if not isinstance(data, list):
+            raise RangerError(
+                f"extract() expected a JSON array with many=True, got: "
+                f"{answer[:300]}"
+            )
+        data = [row if row is not None else {} for row in data]
+        for i, row in enumerate(data):
+            if not isinstance(row, dict):
+                raise RangerError(
+                    f"extract() array element {i} is not a JSON object: "
+                    f"{str(row)[:150]!r}"
+                )
+        rows = data
+    else:
+        if not isinstance(data, dict):
+            raise RangerError(
+                f"extract() expected one JSON object with many=False, got: "
+                f"{answer[:300]}"
+            )
+        rows = [data]
+    # an empty array/object is the agent's legitimate "no matches"
+    if not many and data == {}:
+        return {}
+    # empty array/object is a legitimate "no matches" — keys are then
+    # vacuously satisfied
+    for i, row in enumerate(rows):
+        missing = [k for k in keys if k not in row]
+        if missing:
+            kind = "row" if many else "object"
+            raise RangerError(
+                f"extract() {kind} {i} is missing key(s) "
+                f"{', '.join(map(repr, missing))} from:\n{answer[:300]}"
+            )
+    return rows if many else rows[0]
 
 
 def _parse_check_verdict(answer: str) -> bool:
@@ -1171,6 +1244,40 @@ class Ranger:
         prompt = _check_prompt(condition)
         answer = self._run(prompt, label="check", **ov)
         return _parse_check_verdict(answer)
+
+    def extract(self, request: str, keys: "list[str] | tuple[str, ...]",
+                many: bool = True, **ov) -> "list[dict] | dict":
+        """Extract structured data: JSON grammar beyond the YES/NO verdict.
+
+        The agent verifies facts in the working directory and must reply
+        with exactly one JSON object (``many=False``) or one JSON array of
+        objects (``many=True``, the default) carrying the named ``keys``.
+        The reply is parsed mechanically (law 2): malformed JSON, trailing
+        prose, non-object rows or missing keys raise `RangerError` carrying
+        the raw agent reply — never a guess. An empty array/object is a
+        legitimate "no matches".
+
+        History- and session-independent (a fact command), read-only.
+
+            rows = agent.extract("failing tests in tests/",
+                                 keys=["test_id", "reason"])
+            one  = agent.extract("project metadata", keys=["name", "version"],
+                                 many=False)
+
+        Deliberate non-goals: no pydantic models, no schema registry, no
+        nested schemas — flat keys, grammar + parser.
+        """
+        if isinstance(keys, str) or not isinstance(keys, (list, tuple)):
+            raise TypeError(f"keys must be a list of strings, got {keys!r}")
+        keys = [str(k) for k in keys]
+        if not keys:
+            raise ValueError("keys must not be empty")
+        for k in keys:
+            if not k:
+                raise ValueError("keys must be non-empty strings")
+        prompt = _extract_prompt(request, keys, many)
+        answer = self._run(prompt, label="extract", **ov)
+        return _parse_extract_answer(answer, keys, many)
 
     # ------------------------------------------------------------------ #
     # async twins (issue #9) — same contracts, same frozen prompts, one

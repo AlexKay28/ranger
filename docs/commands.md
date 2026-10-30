@@ -194,6 +194,16 @@ Boolean verdict on repo state. The agent must actually verify (commands, file
 reads) and answer with YES/NO as the first word; unparseable answers raise
 `RangerError` instead of guessing. The loop-grade primitive for gates.
 
+### `extract(request, keys, many=True) -> list[dict] | dict`
+Structured-data grammar beyond YES/NO (law 2): the agent verifies facts
+read-only and must reply with exactly one JSON array of objects (`many=True`,
+default) or one JSON object (`many=False`), every object carrying the named
+keys. Malformed JSON, trailing prose, non-object rows or missing keys raise
+`RangerError` carrying the raw reply — parsed mechanically, never guessed.
+Empty array/object is a legitimate "no matches". History- and
+session-independent. Deliberate non-goals: no pydantic dependency, no model
+registry, no nested schemas — flat `keys` only.
+
 ## ✅ Shipped — async twins & par_map (issue #9)
 
 Additive async twins for the call-family commands — same contracts, same

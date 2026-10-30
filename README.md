@@ -92,6 +92,8 @@ agent.diagnose("ValueError: invalid token")  # -> root cause and minimal fix dir
 agent.critique("src/parser.py")           # -> focused read-only code review
 agent.ask("anything at all")         # -> raw prompt, raw answer
 agent.check("all tests pass")        # -> YES/NO verdict as a bool
+agent.extract("failing tests under tests/",
+              keys=["file", "test_id", "reason"])   # -> typed rows, or error
 agent.gate("python -m pytest -q")    # -> exit-code booleans, no model
 agent.until("make the tests green", gate_cmd="python -m pytest -q")
                                     # -> loop: plan/do/verify until green

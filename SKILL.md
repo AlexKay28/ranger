@@ -26,7 +26,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Make a filesystem change | `do(goal)` | A claim that a change happened |
 | Change one existing file only | `edit(file, instruction)` | `do()` free rein |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
-| Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `trace(symbol)` / `test()` / `lint()` / `diagnose(error)` / `critique(file_or_diff)` | `do()` |
+| Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `trace(symbol)` / `test()` / `lint()` / `diagnose(error)` / `critique(file_or_diff)` / `extract(goal, keys=[...])` (typed JSON rows) | `do()` |
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
 | Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
 | Bounded repair loop | `until(..., gate_cmd=..., max_iter=N)` | An unbounded `while` loop |
