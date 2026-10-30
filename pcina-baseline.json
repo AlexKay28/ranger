@@ -1,0 +1,1259 @@
+{
+  "schema": "pcina/1",
+  "scope": {
+    "roots": [
+      "ranger/"
+    ],
+    "files": 11,
+    "loc": 3264,
+    "lloc": 1540,
+    "skipped": []
+  },
+  "scores": {
+    "overall": 9.79,
+    "aspects": {
+      "complexity": 10.0,
+      "paranoia": 10.0,
+      "nesting": 10.0,
+      "hardcode": 10.0,
+      "deadcode": 10.0,
+      "yagni": 10.0,
+      "clever": 10.0,
+      "size": 9.9
+    }
+  },
+  "statistics": {
+    "loc": 3264,
+    "lloc": 1540,
+    "files": 11,
+    "functions": 144,
+    "classes": 17,
+    "docstring_coverage": 78,
+    "comment_ratio": 4,
+    "avg_cc": 4.5,
+    "max_cc": 14,
+    "p75_cc": 7.0,
+    "raises": 118,
+    "try_except": 46,
+    "bare_excepts": 0,
+    "dead_candidates": 1,
+    "yagni_candidates": 0,
+    "magic_values": 19
+  },
+  "findings": [
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/__init__.py",
+      "line": 173,
+      "section": "Ranger.__init__",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/__init__.py",
+      "line": 173,
+      "section": "Ranger.__init__",
+      "metric": "fn-span",
+      "message": "function spans 80 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/__init__.py",
+      "line": 173,
+      "section": "Ranger.__init__",
+      "metric": "param-count",
+      "message": "22 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/__init__.py",
+      "line": 258,
+      "section": "Ranger.__repr__",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 113,
+      "section": "_OpenCodeBackend",
+      "metric": "missing-docstring",
+      "message": "class '_OpenCodeBackend' without docstring",
+      "fix": "add one line stating the class's single responsibility"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 117,
+      "section": "_OpenCodeBackend.build_cmd",
+      "metric": "cc",
+      "message": "function _OpenCodeBackend.build_cmd complexity cc=11",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 117,
+      "section": "_OpenCodeBackend.build_cmd",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 147,
+      "section": "_OpenCodeBackend.parse_output",
+      "metric": "cc",
+      "message": "function _OpenCodeBackend.parse_output complexity cc=14",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 147,
+      "section": "_OpenCodeBackend.parse_output",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 147,
+      "section": "_OpenCodeBackend.parse_output",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 158,
+      "section": "_OpenCodeBackend.parse_output",
+      "metric": "guard-opportunity",
+      "message": "nested if may become a guard clause",
+      "fix": "hoist the inner condition into an early-return guard"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 175,
+      "section": "_OpenCodeBackend.list_models",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 179,
+      "section": "_OpenCodeBackend.list_models",
+      "metric": "magic-number",
+      "message": "magic value 60 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 280,
+      "section": "_CodexBackend._apply_event",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 298,
+      "section": "_CodexBackend.parse_output",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 318,
+      "section": "_PiBackend",
+      "metric": "missing-docstring",
+      "message": "class '_PiBackend' without docstring",
+      "fix": "add one line stating the class's single responsibility"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 324,
+      "section": "_PiBackend.build_cmd",
+      "metric": "cc",
+      "message": "function _PiBackend.build_cmd complexity cc=12",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 324,
+      "section": "_PiBackend.build_cmd",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 324,
+      "section": "_PiBackend.build_cmd",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 359,
+      "section": "_PiBackend.list_models",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 363,
+      "section": "_PiBackend.list_models",
+      "metric": "magic-number",
+      "message": "magic value 60 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 383,
+      "section": "_OpenHandsBackend",
+      "metric": "missing-docstring",
+      "message": "class '_OpenHandsBackend' without docstring",
+      "fix": "add one line stating the class's single responsibility"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 389,
+      "section": "_OpenHandsBackend.build_cmd",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 420,
+      "section": "_ClaudeBackend",
+      "metric": "missing-docstring",
+      "message": "class '_ClaudeBackend' without docstring",
+      "fix": "add one line stating the class's single responsibility"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 426,
+      "section": "_ClaudeBackend.build_cmd",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 460,
+      "section": "_ClaudeBackend.parse_output",
+      "metric": "cc",
+      "message": "function _ClaudeBackend.parse_output complexity cc=12",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 460,
+      "section": "_ClaudeBackend.parse_output",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 170,
+      "section": "CommandsMixin.write",
+      "metric": "magic-number",
+      "message": "magic value 40 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 173,
+      "section": "CommandsMixin.write",
+      "metric": "magic-number",
+      "message": "magic value 6 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "paranoia",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 393,
+      "section": "CommandsMixin.extract",
+      "metric": "raise-guard-burst",
+      "message": "3 raise-guards in internal helper - validation belongs to trust boundary",
+      "fix": "keep one boundary check in the caller; delete redundant guards"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 456,
+      "section": "CommandsMixin.write_async",
+      "metric": "magic-number",
+      "message": "magic value 40 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 459,
+      "section": "CommandsMixin.write_async",
+      "metric": "magic-number",
+      "message": "magic value 6 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 509,
+      "section": "CommandsMixin.par_map",
+      "metric": "cc",
+      "message": "function CommandsMixin.par_map complexity cc=14",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "paranoia",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 509,
+      "section": "CommandsMixin.par_map",
+      "metric": "raise-guard-burst",
+      "message": "7 raise-guards in internal helper - validation belongs to trust boundary",
+      "fix": "keep one boundary check in the caller; delete redundant guards"
+    },
+    {
+      "aspect": "paranoia",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 509,
+      "section": "CommandsMixin.par_map",
+      "metric": "raise-storm",
+      "message": "7 raises in internal function CommandsMixin.par_map - keep validation at trust boundary",
+      "fix": "move checks to the trust boundary that owns the data"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 509,
+      "section": "CommandsMixin.par_map",
+      "metric": "fn-span",
+      "message": "function spans 69 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_contracts.py",
+      "line": 113,
+      "section": "_extract_rows",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_contracts.py",
+      "line": 152,
+      "section": "_parse_extract_answer",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36,
+      "section": "debate",
+      "metric": "cc",
+      "message": "function debate complexity cc=13",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "paranoia",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36,
+      "section": "debate",
+      "metric": "raise-guard-burst",
+      "message": "3 raise-guards in internal helper - validation belongs to trust boundary",
+      "fix": "keep one boundary check in the caller; delete redundant guards"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36,
+      "section": "debate",
+      "metric": "fn-span",
+      "message": "function spans 70 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36,
+      "section": "debate",
+      "metric": "param-count",
+      "message": "6 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "size",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 63,
+      "section": "debate.position",
+      "metric": "missing-docstring",
+      "message": "long public function without docstring",
+      "fix": "add one line stating what the function returns"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 65,
+      "section": "debate.position",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 96,
+      "section": "debate",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 131,
+      "section": "EngineMixin._resolve_run_options",
+      "metric": "cc",
+      "message": "function EngineMixin._resolve_run_options complexity cc=13",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 131,
+      "section": "EngineMixin._resolve_run_options",
+      "metric": "fn-span",
+      "message": "function spans 41 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 192,
+      "section": "EngineMixin._collect_skills",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 211,
+      "section": "EngineMixin._collect_skills",
+      "metric": "guard-opportunity",
+      "message": "nested if may become a guard clause",
+      "fix": "hoist the inner condition into an early-return guard"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222,
+      "section": "EngineMixin._compose_prompt",
+      "metric": "cc",
+      "message": "function EngineMixin._compose_prompt complexity cc=13",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222,
+      "section": "EngineMixin._compose_prompt",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222,
+      "section": "EngineMixin._compose_prompt",
+      "metric": "fn-span",
+      "message": "function spans 43 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222,
+      "section": "EngineMixin._compose_prompt",
+      "metric": "param-count",
+      "message": "7 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 236,
+      "section": "EngineMixin._compose_prompt",
+      "metric": "magic-number",
+      "message": "magic value 16 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 298,
+      "section": "EngineMixin._spawn_sync",
+      "metric": "fn-span",
+      "message": "function spans 45 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 354,
+      "section": "EngineMixin._kill_async",
+      "metric": "magic-number",
+      "message": "magic value 5 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 362,
+      "section": "EngineMixin._spawn_async",
+      "metric": "fn-span",
+      "message": "function spans 50 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 464,
+      "section": "EngineMixin._run",
+      "metric": "fn-span",
+      "message": "function spans 48 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 482,
+      "section": "EngineMixin._run._finish",
+      "metric": "magic-number",
+      "message": "magic value 60 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 483,
+      "section": "EngineMixin._run._finish",
+      "metric": "magic-number",
+      "message": "magic value 84 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 485,
+      "section": "EngineMixin._run._finish",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 67,
+      "section": "LoopsMixin._gate_ev",
+      "metric": "magic-number",
+      "message": "magic value 400 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 155,
+      "section": "LoopsMixin._until_round",
+      "metric": "param-count",
+      "message": "6 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 172,
+      "section": "LoopsMixin.until",
+      "metric": "cc",
+      "message": "function LoopsMixin.until complexity cc=11",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 172,
+      "section": "LoopsMixin.until",
+      "metric": "fn-span",
+      "message": "function spans 86 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 172,
+      "section": "LoopsMixin.until",
+      "metric": "param-count",
+      "message": "7 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 260,
+      "section": "LoopsMixin.attempt",
+      "metric": "fn-span",
+      "message": "function spans 41 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 303,
+      "section": "LoopsMixin._resolve_round",
+      "metric": "param-count",
+      "message": "6 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 319,
+      "section": "LoopsMixin.resolve",
+      "metric": "cc",
+      "message": "function LoopsMixin.resolve complexity cc=11",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 319,
+      "section": "LoopsMixin.resolve",
+      "metric": "fn-span",
+      "message": "function spans 73 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 319,
+      "section": "LoopsMixin.resolve",
+      "metric": "param-count",
+      "message": "7 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 394,
+      "section": "LoopsMixin.fix",
+      "metric": "fn-span",
+      "message": "function spans 48 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 394,
+      "section": "LoopsMixin.fix",
+      "metric": "param-count",
+      "message": "6 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 421,
+      "section": "LoopsMixin.fix",
+      "metric": "magic-number",
+      "message": "magic value 800 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 43,
+      "section": "MultiMixin.verify_claims",
+      "metric": "fn-span",
+      "message": "function spans 50 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 92,
+      "section": "MultiMixin.verify_claims",
+      "metric": "magic-number",
+      "message": "magic value 80 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 128,
+      "section": "MultiMixin._decision",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 134,
+      "section": "MultiMixin._sections",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 145,
+      "section": "MultiMixin._sections",
+      "metric": "guard-opportunity",
+      "message": "nested if may become a guard clause",
+      "fix": "hoist the inner condition into an early-return guard"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 156,
+      "section": "MultiMixin.review",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "paranoia",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 156,
+      "section": "MultiMixin.review",
+      "metric": "raise-guard-burst",
+      "message": "3 raise-guards in internal helper - validation belongs to trust boundary",
+      "fix": "keep one boundary check in the caller; delete redundant guards"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 156,
+      "section": "MultiMixin.review",
+      "metric": "fn-span",
+      "message": "function spans 69 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 227,
+      "section": "MultiMixin._challenge_attack",
+      "metric": "param-count",
+      "message": "6 parameters - group them or pass a struct",
+      "fix": "introduce a parameter object or use keyword-only grouping"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 237,
+      "section": "MultiMixin._challenge_attack",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 318,
+      "section": "MultiMixin.challenge",
+      "metric": "fn-span",
+      "message": "function spans 54 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "complexity",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 394,
+      "section": "MultiMixin.refine_with",
+      "metric": "cc",
+      "message": "function MultiMixin.refine_with complexity cc=12",
+      "fix": "split the function or name complex conditions as predicates"
+    },
+    {
+      "aspect": "paranoia",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 394,
+      "section": "MultiMixin.refine_with",
+      "metric": "raise-guard-burst",
+      "message": "3 raise-guards in internal helper - validation belongs to trust boundary",
+      "fix": "keep one boundary check in the caller; delete redundant guards"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 394,
+      "section": "MultiMixin.refine_with",
+      "metric": "fn-span",
+      "message": "function spans 52 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "nesting",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_safety.py",
+      "line": 69,
+      "section": "SafetyMixin._path_violations",
+      "metric": "max-nesting",
+      "message": "nesting depth 3 - one level from trouble",
+      "fix": "consider inverting the outer condition"
+    },
+    {
+      "aspect": "size",
+      "severity": "warn",
+      "file": "/home/alexkay28/projects/ranger/ranger/_snapshots.py",
+      "line": 69,
+      "section": "SnapshotMixin.snapshot",
+      "metric": "fn-span",
+      "message": "function spans 49 lines - likely more than one outcome",
+      "fix": "split around the outcomes; one responsibility per function"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_snapshots.py",
+      "line": 97,
+      "section": "SnapshotMixin.snapshot",
+      "metric": "magic-number",
+      "message": "magic value 8 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_snapshots.py",
+      "line": 115,
+      "section": "SnapshotMixin.snapshot",
+      "metric": "magic-number",
+      "message": "magic value 3 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 49,
+      "section": "_normalize_patterns",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 139,
+      "section": "_kill_tree",
+      "metric": "magic-number",
+      "message": "magic value 5 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "deadcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 157,
+      "section": "file:_util",
+      "metric": "no-caller",
+      "message": "no callers found for '_Spinner' - deletion candidate (verify dynamic use: CLI, registration, plugins)",
+      "fix": "delete the definition if no dynamic dispatch references it"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 168,
+      "section": "_Spinner.__init__",
+      "metric": "magic-number",
+      "message": "magic value 40 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 176,
+      "section": "_Spinner._spin",
+      "metric": "magic-number",
+      "message": "magic value 60 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    },
+    {
+      "aspect": "clever",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 178,
+      "section": "_Spinner._spin",
+      "metric": "big-fstring",
+      "message": "f-string packs many interpolations - build from named locals",
+      "fix": "compute named locals first, then interpolate"
+    },
+    {
+      "aspect": "hardcode",
+      "severity": "info",
+      "file": "/home/alexkay28/projects/ranger/ranger/_util.py",
+      "line": 183,
+      "section": "_Spinner._spin",
+      "metric": "magic-number",
+      "message": "magic value 0.1 - name it as a module constant",
+      "fix": "extract the value into a named module constant"
+    }
+  ],
+  "budget_violations": [
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=80 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/__init__.py",
+      "line": 173
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=22 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/__init__.py",
+      "line": 173
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=11 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 117
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=14 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 147
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=12 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 324
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=12 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_backends.py",
+      "line": 460
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=14 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 509
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=69 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_commands.py",
+      "line": 509
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=13 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=70 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=6 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_debate.py",
+      "line": 36
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=13 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 131
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=41 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 131
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=13 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=43 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=7 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 222
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=45 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 298
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=50 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 362
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=48 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_engine.py",
+      "line": 464
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=6 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 155
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=11 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 172
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=86 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 172
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=7 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 172
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=41 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 260
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=6 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 303
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=11 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 319
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=73 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 319
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=7 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 319
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=48 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 394
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=6 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_loops.py",
+      "line": 394
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=50 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 43
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=69 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 156
+    },
+    {
+      "budget": "max_params",
+      "actual": "params=6 (limit 5)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 227
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=54 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 318
+    },
+    {
+      "budget": "max_cc",
+      "actual": "cc=12 (limit 10)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 394
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=52 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_multi.py",
+      "line": 394
+    },
+    {
+      "budget": "max_fn_loc",
+      "actual": "span=49 lines (limit 40)",
+      "file": "/home/alexkay28/projects/ranger/ranger/_snapshots.py",
+      "line": 69
+    }
+  ]
+}

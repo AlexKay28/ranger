@@ -472,3 +472,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   validation into helpers now surface as paranoia warnings
   (raise-guards in internal helpers), and the new helpers carry
   6-7 params (2 over limit). Suite: 354 mocked tests green.
+
+- **Loop cycle 12 — the reviewed baseline pins the remainder; the
+  loop's completion criterion is met.** The user reviewed the
+  11-cycle evidence and chose the baseline path (the criterion in
+  docs/ENHANCEMENT-LOOP.md explicitly allows "a reviewed baseline
+  pins the remainder"). `pcina.toml` pins budgets at the CURRENT
+  measured maxima — max_cc 14, max_fn_loc 86, max_params 22 — so the
+  gate still fails on any new or aggravated code while the three
+  irreducible classes stay documented: API-frozen signatures
+  (Ranger.__init__, the loop/multi-agent methods — pinned by the
+  docs gates and truth-table tests), docstring-inclusive spans on
+  the public API (the contract prose is load-bearing), and law 5's
+  parse-or-raise design. `pcina-baseline.json` snapshots the
+  findings for delta comparison (`--compare`: 0 new, 0 resolved).
+  VERIFIED, all four criterion legs at HEAD: `pcina check ranger/`
+  **exits 0**; `pcina scan` **9.79/10** (≥ 9.0); radon MI **every
+  file rank A** (≥ B; started this loop at C/0.00); seed backlog
+  **empty** (items 1,2,3 = cycles 1–3; item 4 = this cycle; item 5 =
+  cycle 8). Suite: 354 mocked tests green in ~2.8s.

@@ -1,0 +1,27 @@
+# pcina budgets — pinned per the enhancement-loop baseline decision
+# (docs/ENHANCEMENT-LOOP.md, growth-log cycle 12; user-reviewed).
+#
+# Eleven refactor cycles reduced every reducible violation class:
+# complexity/nesting/hardcode/bare-except warns are zero, avg_cc 4.5,
+# p75_cc 7.0, radon MI rank A for every file. What remains is pinned
+# here at the CURRENT measured maxima, so the gate still fails on any
+# new or aggravated code, but no longer demands the impossible three:
+#
+#   - max_params above 5: Ranger.__init__ (22) and the public loop /
+#     multi-agent methods carry their API-frozen signatures
+#     (docs/API.md gates + truth-table tests pin them);
+#   - max_fn_loc above 40: pcina counts docstrings in the span and the
+#     public API's contract prose is load-bearing documentation;
+#   - the raises budget: law 5 (parse mechanically or raise — never
+#     guess) is an intentional design law of this package.
+#
+# Lowering a value below a measured maximum requires fixing the code
+# first — never bump a budget to silence an unreviewed regression.
+
+[budgets]
+max_cc = 14              # max today: par_map + _OpenCodeBackend.parse_output
+max_fn_loc = 86          # max today: until() (39 of them docstring)
+max_params = 22          # max today: Ranger.__init__ (public ctor)
+max_nesting = 3          # default, no violations
+max_raises_per_100 = 8   # default, currently passing (7.7)
+bare_except = "error"    # default, zero bare excepts remain
