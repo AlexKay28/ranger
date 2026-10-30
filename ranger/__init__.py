@@ -1205,6 +1205,45 @@ class Ranger:
             raise RangerError(f"agent did not write the expected file: {out}")
         return str(out)
 
+    def transform(self, pattern: "str | Path", instruction: str,
+                  max_files: int = 10, **ov) -> "list[dict]":
+        """Apply ONE bounded edit() to every file matching a glob.
+
+        Batch `edit()` with per-file honesty: each result entry is
+        `{"file", "report"}` on success or `{"file", "error"}` on
+        failure — a sibling's failure never stops the batch. Runs at
+        most `max_files` matched files (sorted); safety rails
+        (allow/deny) and `dry_run` apply to every file exactly as in
+        `edit()`.
+
+            agent.transform("src/**/*.py", "add the module docstring",
+                            max_files=20)
+        """
+        if isinstance(pattern, Path):
+            pattern = str(pattern)
+        if not isinstance(pattern, str) or not pattern:
+            raise TypeError(f"pattern must be a non-empty glob, got {pattern!r}")
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise TypeError(
+                f"instruction must be a non-empty string, got {instruction!r}")
+        if (not isinstance(max_files, int) or isinstance(max_files, bool)
+                or max_files < 1):
+            raise ValueError(
+                f"max_files must be a positive int, got {max_files!r}")
+        root = Path(self.cwd or Path.cwd())
+        files = sorted(p for p in root.glob(pattern) if p.is_file())
+        if not files:
+            raise RangerError(
+                f"transform(): no files match {pattern!r} under {root}")
+        results: list[dict] = []
+        for f in files[:max_files]:
+            try:
+                results.append(
+                    {"file": str(f), "report": self.edit(f, instruction, **ov)})
+            except (RangerError, RangerHarnessError, RangerTimeout) as exc:
+                results.append({"file": str(f), "error": str(exc)})
+        return results
+
     def do(self, goal: str, **ov) -> str:
         """Execute a goal against the filesystem like a CLI agent run.
 
@@ -1741,6 +1780,49 @@ class Ranger:
         _LOG.info("rollback · tag=%s · restored %d path(s)", tag, len(restored))
         return {"tag": tag, "sha": sha, "restored": restored}
 
+    def commit(self, message: str | None = None,
+               allow: "list[str] | None" = None,
+               deny: "list[str] | None" = None) -> str:
+        """Stage and commit the agent's own work in cwd. Returns the sha.
+
+        Only ever runs `git add -A --` + `git commit -m`: it never
+        pushes, resets, cleans or rewrites history — destructive
+        operations are simply not part of the method.
+
+        Honest refusals (RangerError): cwd is not a git repository;
+        nothing changed (`git status --porcelain` empty — a clean tree
+        is never "committed"); a changeset path hits the safety rails
+        (`deny` wins, `allow` restricts — the #3 defaults apply when
+        no per-call lists are given, and a denied path is never
+        staged). `message=None` uses a marked default so agent commits
+        are identifiable in `git log`.
+        """
+        effective_allow = _normalize_patterns(
+            "allow", allow if allow is not None else self.allow)
+        effective_deny = _normalize_patterns(
+            "deny", deny if deny is not None else self.deny)
+        root = self._git("rev-parse", "--show-toplevel").strip()
+        if not root:
+            raise RangerError(
+                f"commit() cwd is not a git repository: {self.cwd!r}")
+        porcelain = self._git("status", "--porcelain")
+        if not porcelain.strip():
+            raise RangerError(
+                "commit(): nothing to commit — the working tree is clean")
+        for line in porcelain.splitlines():
+            if len(line) < 4:
+                continue
+            p = line[3:].strip().strip('"').rstrip("/")
+            if p:
+                self._assert_path_allowed(p, effective_allow,
+                                           effective_deny, root)
+        msg = message or f"ranger: agent work ({time.strftime('%Y-%m-%d %H:%M')})"
+        self._git("add", "-A", "--")
+        self._git("commit", "-m", msg)
+        sha = self._git("rev-parse", "HEAD").strip()
+        _LOG.info("commit · %s · %s", sha[:10], _clip(msg, 60))
+        return sha
+
     def _auto_snapshot(self, label: str):
         """Best-effort pre-round snapshot when `snapshots=True`.
 
@@ -2087,6 +2169,56 @@ class Ranger:
                 result["rolled_back"] = False
                 result["rollback"] = {"tag": snap_tag, "error": str(exc)}
         return result
+
+    def fix(self, problem: str, gate_cmd: "str | list | None" = None,
+            condition: str | None = None, max_iter: int = 3,
+            **ov) -> dict:
+        """Diagnose once, then bounded repair rounds — evidence-carrying.
+
+        The tier's bounded repair: (1) mechanical pre-verdict (gate_cmd /
+        condition / check fallback — green means ALREADY_GREEN, zero
+        work: never invent work); (2) ONE read-only `diagnose()` pass;
+        (3) at most `max_iter` `do()` repair rounds, each ending in a
+        mechanical verdict — no sympathy pass when the budget ends.
+
+        status is exactly "ALREADY_GREEN" | "FIXED" | "FAILED"; the
+        result carries the diagnosis and last_gate evidence.
+
+            agent.fix("tests/test_parser.py::test_tokens fails",
+                      gate_cmd="python -m pytest -q -k tokens")
+        """
+        if (not isinstance(max_iter, int) or isinstance(max_iter, bool)
+                or max_iter < 1):
+            raise ValueError(
+                f"max_iter must be a positive int, got {max_iter!r}")
+        pre_ok, pre_gate = self._verdict(problem, gate_cmd, condition, **ov)
+        if pre_ok:
+            _LOG.info("fix pre-check · already green — no work needed")
+            return {"status": "ALREADY_GREEN", "problem": problem,
+                    "diagnosis": "", "iterations": 0, "last_gate": pre_gate}
+        diagnosis = self.diagnose(problem, **ov)
+        clipped = _clip(diagnosis, 800)
+        last_gate: dict = pre_gate
+        rounds = 0
+        for i in range(1, max_iter + 1):
+            rounds = i
+            work = (
+                "Repair this problem until the mechanical verdict passes.\n\n"
+                f"Problem: {problem}\n\n"
+                "Diagnosis from a read-only pass:\n"
+                f"{clipped}\n\n"
+                "Make the smallest correct fix, then rerun only the "
+                "relevant checks before reporting."
+            )
+            self.do(work, **ov)
+            ok, last_gate = self._verdict(problem, gate_cmd, condition, **ov)
+            if ok:
+                return {"status": "FIXED", "problem": problem,
+                        "diagnosis": diagnosis, "iterations": i,
+                        "last_gate": last_gate}
+        return {"status": "FAILED", "problem": problem,
+                "diagnosis": diagnosis, "iterations": rounds,
+                "last_gate": last_gate}
 
     def verify_claims(self, topic: str, max_claims: int = 5, **ov) -> list:
         """Extract verifiable claims about a topic, then verify each.

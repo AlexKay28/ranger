@@ -246,3 +246,23 @@ documentation + tests). This is the loop's only cross-cycle memory.
   README safety section, API.md Safety rails + ctor rows,
   commands.md overrides, SKILL.md row. Suite: 337 mocked tests
   green in ~2.7s (ARCHITECTURE.md tests:337).
+- **Issue #4 (same cycle):** the repair tier, shipped honestly on the
+  #3 rails. `fix(problem, gate_cmd, condition, max_iter=3)`: mechanical
+  pre-verdict (green → ALREADY_GREEN, zero work), one read-only
+  diagnose() pass whose result travels inside every repair prompt,
+  bounded do() rounds each ending in a mechanical verdict — status
+  FIXED/FAILED with no sympathy pass, evidence in last_gate.
+  `transform(pattern, instruction, max_files=10)`: batch edit() over
+  the sorted glob matches — per-file isolation ({"file", "report"} /
+  {"file", "error"}), rails + dry_run per file, no-matches is an
+  honest RangerError, specs validated pre-spawn.
+  `commit(message=None, allow=None, deny=None)`: stage and commit the
+  agent's work — the method's whole git vocabulary is rev-parse /
+  status --porcelain / add -A -- / commit -m / rev-parse HEAD;
+  no push/reset/clean/checkout exists in it. Refuses non-repos,
+  clean trees and rail violations in the changeset (denied paths
+  are never staged). 16 mocked tests in tests/test_workflows.py;
+  example examples/code-work/ship_fix.py; commands.md planned tier
+  promoted to ✅ shipped. Suite: 353 mocked tests green in ~2.8s
+  (ARCHITECTURE.md tests:353). Issue queue drained: #10, #9, #8, #7,
+  #6, #3, #4 — all committed locally, unpushed.

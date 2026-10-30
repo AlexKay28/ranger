@@ -750,6 +750,54 @@ Validation: `rounds`/`max_iter` must be non-negative ints (`ValueError`);
 wrong-typed `author`/`critic`/agents/judge raise `TypeError` — up front,
 never after work has already run.
 
+## The repair tier — fix, transform, commit
+
+Three bounded compositions over the existing primitives (law 6), shipped
+on top of the [safety rails](#safety-rails) and [snapshots](#snapshots--rollback):
+
+**`fix(problem, gate_cmd=None, condition=None, max_iter=3) -> dict`** —
+the bounded repair loop: mechanical pre-verdict (green →
+`"ALREADY_GREEN"`, zero work — never invent work), ONE read-only
+`diagnose()` pass, then at most `max_iter` `do()` repair rounds, each
+ending in a mechanical verdict. The diagnosis is carried inside every
+repair prompt. `status` is exactly `"ALREADY_GREEN" | "FIXED" |
+"FAILED"`; the result carries `{"problem", "diagnosis", "iterations",
+"last_gate"}` — budgets honest, no sympathy pass. Rails mark the work
+rounds: with `deny`/`allow` set, an unverifiable (non-git) cwd refuses
+before any harness spawn.
+
+**`transform(pattern, instruction, max_files=10) -> list[dict]`** —
+batch `edit()` over a glob (relative to `cwd`, sorted, first
+`max_files`): one bounded edit per file with per-file isolation —
+`{"file", "report"}` on success, `{"file", "error"}` on failure; a
+sibling's failure never stops the batch. `allow`/`deny`/`dry_run`
+apply to every file exactly as in `edit()`. No matches is an honest
+`RangerError`, not a silent empty batch. Spec validation is up front
+(`TypeError`/`ValueError`, zero spawns on a bad spec).
+
+**`commit(message=None, allow=None, deny=None) -> str`** — stage and
+commit the agent's own work in cwd; returns the commit sha. The full
+git vocabulary of this method is `rev-parse`, `status --porcelain`,
+`add -A --`, `commit -m`, `rev-parse HEAD` — **no push, no reset, no
+clean, no checkout, no rewrite**: destructive operations are not
+delegated, they are absent. Honest refusals (`RangerError`): non-repo
+cwd; clean working tree; a changeset path hitting the rails (instance
+`allow`/`deny` defaults apply when per-call lists are absent; a
+denied path is never staged). `message=None` uses a marked default so
+agent commits are identifiable in `git log`.
+
+```python
+agent = ranger.Ranger(cwd=".", allow=["src/**", "tests/**"],
+                      snapshots=True)
+
+result = agent.fix("tests/test_parser.py::test_tokens fails",
+                   gate_cmd="python -m pytest -q -k tokens", max_iter=2)
+if result["status"] == "FIXED":
+    results = agent.transform("src/**/*.py", "add module docstrings",
+                              max_files=20)
+    sha = agent.commit("parser: fix tokens + docstrings")
+```
+
 ## Safety rails
 
 Mutating commands (`do`, `edit`, `write` — and every work round inside

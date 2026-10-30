@@ -376,24 +376,39 @@ Adversarial attack on another agent's claim or last answer.
 ### `debate(agent_a, agent_b, topic, rounds=2, judge=None) -> dict` *(module-level)*
 Symmetric exchange, optionally refereed by a third agent.
 
+## ✅ Shipped — the repair tier (issue #4)
+
+Bounded repair built OUT of the existing primitives (law 6) atop the #3
+rails: mechanical pre-verdicts, honest budgets, per-file isolation,
+no destructive git verbs anywhere.
+
+### `fix(problem, gate_cmd=None, condition=None, max_iter=3) -> dict`
+Diagnose once (read-only), repair in bounded `do()` rounds with a
+mechanical verdict each — no sympathy pass. Returns
+`{"status": "ALREADY_GREEN"|"FIXED"|"FAILED", "problem", "diagnosis",
+"iterations", "last_gate"}`; a green pre-verdict means zero work, and
+the diagnosis travels inside every repair prompt.
+
+### `transform(pattern, instruction, max_files=10) -> list[dict]`
+Batch `edit()` over the glob's matches (sorted, first `max_files`):
+`{"file", "report"}` on success, `{"file", "error"}` on failure — a
+sibling's failure never stops the batch. Rails and `dry_run` apply per
+file exactly as in `edit()`. No matches → honest `RangerError`.
+
+### `commit(message=None, allow=None, deny=None) -> str`
+Stage and commit the agent's work in cwd; returns the commit sha.
+Only ever `git add -A --` + `git commit -m` — never push, reset,
+clean, checkout or a force anything. Refuses honestly (`RangerError`)
+on a non-repo cwd, a clean tree, or a changeset path hitting the
+rails (instance `allow`/`deny` defaults apply; per-call lists replace).
+`message=None` uses a marked default ("ranger: agent work (…)").
+
 ## 🔜 Next batch (planned, same pattern) (1)
 
-## 🌱 Later (3)
+## 🌱 Later (0)
 
-Bigger contracts — multi-step verification, retries, or safety rails.
-
-### `fix(goal_or_error) -> str`
-Diagnose and repair. The valuable primitive for agentic loops: pairs with
-`test` to validate the fix before returning. Requires result-parsing +
-retry-on-failure shell around `do`.
-
-### `transform(paths_pattern, instruction) -> str`
-Batch edit across many files ("add type hints to every function in src/*.py").
-Requires multiple `edit` runs with progress tracking.
-
-### `commit(message=None) -> str`
-Ask the agent to stage and commit its own work with a sensible generated
-message. Needs safety rails (refuse if cwd isn't a repo, no force-pushes).
+The former planned entries (`fix`, `transform`, `commit`) shipped —
+see the repair tier above. No unshipped commands remain.
 
 ## Non-goals
 
