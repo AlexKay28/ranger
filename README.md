@@ -97,6 +97,8 @@ agent.extract("failing tests under tests/",
 agent.gate("python -m pytest -q")    # -> exit-code booleans, no model
 agent.until("make the tests green", gate_cmd="python -m pytest -q")
                                     # -> loop: plan/do/verify until green
+agent.costs_reset()                  # -> zero the ledger, returns the old one
+print(agent.costs)                   # -> {"calls": ...} what the loop cost
 ```
 
 Each call is one fresh headless `opencode run` in the agent's working directory

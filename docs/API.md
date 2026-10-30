@@ -492,6 +492,41 @@ for r in results:
 | `context_compact()` | Replaces the whole history with one `{"role": "system", "content": digest}` message — future runs recall a bounded summary. | `str` digest |
 | `context_clear()` | Wipes the recorded context. | the previous list |
 
+## Costs — the cumulative ledger
+
+`agent.costs` (property) is the cumulative cost/telemetry ledger for every
+**completed** agent run of this `Ranger` — plain Python-side state (law 4),
+always recorded; `stats=True` is not required (it only switches runs into
+JSON mode for `agent.last`; the ledger feeds on whatever telemetry a run
+happens to produce, plus prompt/answer sizes and wall time, which need no
+harness cooperation):
+
+```python
+{"calls": int,         # completed runs (failures/interrupts record nothing)
+ "chars_in": int,      # prompt characters sent, summed
+ "chars_out": int,     # answer characters received, summed
+ "tokens_in": None|int,   # None until a backend actually reports tokens
+ "tokens_out": None|int,
+ "wall_s": float}      # summed subprocess wall time
+```
+
+- `costs_reset() -> dict` returns the current ledger and zeroes it —
+  the "what did this loop cost?" idiom:
+
+  ```python
+  agent.costs_reset()
+  result = agent.until("make tests green", gate_cmd="python -m pytest -q")
+  print(f"{result['iterations']} iterations, {agent.costs['calls']} calls, "
+        f"{agent.costs['wall_s']}s wall")
+  ```
+
+- The returned dict is a **copy** — mutating it never touches the ledger.
+- Tokens are backend-honest: backends that report real token usage
+  (codex with `stats=True`, claude with `stats=True`) accumulate it;
+  others leave it `None`, never a guess.
+- **Per agent**: a `debate`/`refine_with`/`second_opinion` partner keeps
+  its own ledger — measure each participant's `costs` separately.
+
 ---
 
 ## Skills allow-list

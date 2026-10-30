@@ -28,6 +28,7 @@ def main() -> None:
         print("already green; no agent run needed")
         return
 
+    agent.costs_reset()  # bounded accounting: report what THIS loop cost
     result = agent.until(
         "Make this test command pass. First reproduce its failure, make the "
         "smallest correct fix, and rerun only relevant tests before reporting: "
@@ -40,6 +41,7 @@ def main() -> None:
     if result.get("rolled_back"):
         print("rolled back to", result["rollback"]["tag"],
               "— restored", len(result["rollback"]["restored"]), "path(s)")
+    print("cost this loop:", agent.costs)
     print("last report:\n", result["report"])
     if not result["achieved"]:
         raise SystemExit("test command is still red; inspect the report and retry deliberately")

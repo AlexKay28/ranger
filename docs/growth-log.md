@@ -213,3 +213,17 @@ documentation + tests). This is the loop's only cross-cycle memory.
   Suite: 302 mocked tests green in ~2.6s; API.md ctor map +
   Snapshots & rollback section, commands.md tier, ARCHITECTURE.md
   (tests:302) synced.
+- **Issue #6 (same cycle):** the cumulative cost ledger. `agent.costs`
+  (property, returns a copy) accumulates `{"calls", "chars_in",
+  "chars_out", "tokens_in", "tokens_out", "wall_s"}` over every completed
+  run of both seams (sync `_run` and `_run_async`) — always recorded,
+  `stats=True` not required (it only switches run-mode for `last`);
+  tokens stay `None` until a backend actually reports them, never a
+  guess. `costs_reset()` returns-and-zeroes for bounded per-loop
+  accounting. Failed and interrupted runs record nothing; multi-agent
+  compositions keep per-agent ledgers. Feeds from the existing
+  telemetry seam plus prompt/answer sizes and wall time — zero extra
+  harness calls. Suite: 313 mocked tests green in ~2.6s; truth-table
+  tests in tests/test_logic.py §13 + async-ledger tests; README, API.md
+  Costs section, commands.md catalog, ARCHITECTURE.md (tests:313),
+  fix_failing_tests.py loop-cost note synced.

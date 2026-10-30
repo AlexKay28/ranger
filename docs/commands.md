@@ -39,6 +39,22 @@ runs recall the bounded summary instead of the full transcript.
 ### `agent.context_clear() -> list[dict]`
 Wipe recorded context; returns what was cleared.
 
+### `agent.costs -> dict` *(property)*
+Cumulative ledger over all completed runs — `{"calls", "chars_in",
+"chars_out", "tokens_in", "tokens_out", "wall_s"}`; tokens stay `None`
+until a backend reports them. Always recorded, `stats=` not required. In a
+`debate`/`refine_with` each agent's ledger is its own.
+
+### `agent.costs_reset() -> dict`
+Returns the current ledger and zeroes it — wrap a loop between
+`costs_reset()` and `agent.costs` for bounded per-loop accounting:
+
+```python
+agent.costs_reset()
+result = agent.until("make tests green", gate_cmd="python -m pytest -q")
+print(result["iterations"], agent.costs)   # what THIS loop cost
+```
+
 All commands auto-record their exchange into `agent.context` (OpenAI message
 format); dialogue commands (`ask`, `do`, `edit`, `plan`, `write`, `context_*`) also recall
 recent history within a character budget, while fact commands (`check`, `critique`,

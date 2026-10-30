@@ -710,3 +710,106 @@ def test_extract_is_pure_no_session_no_recall():
     prompt = cmds[0][-1]
     assert "keep" not in prompt and "old stuff" not in prompt
     assert "## Previous interaction" not in prompt
+
+
+# ==================================================================== #
+# 13. costs(): the cumulative ledger — truth table (issue #6)
+
+def test_costs_accumulates_across_calls():
+    agent = Ranger(memory=False)
+    a1, a2 = "hello world!", "short"
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(a1)):
+        agent.ask("question one")
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(a2)):
+        agent.do("goal two")
+    c = agent.costs
+    assert c["calls"] == 2
+    assert c["chars_out"] == len(a1) + len(a2)
+    assert c["chars_in"] > 0       # full prompts (contracts text) sent
+    assert c["wall_s"] >= 0.0
+
+
+def test_costs_prompt_chars_track_the_real_prompt():
+    agent = Ranger(memory=False)
+    sent = []
+    with mock.patch("ranger.subprocess.run",
+                    side_effect=lambda cmd, **k: sent.append(cmd[-1])
+                    or fake_run("x")):
+        agent.ask("precise question text")
+    assert agent.costs["chars_in"] == len(sent[0])
+
+
+def test_costs_tokens_none_until_backend_reports():
+    agent = Ranger(memory=False)          # plain text mode: no telemetry
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("answer")):
+        agent.ask("q")
+    assert agent.costs["tokens_in"] is None
+    assert agent.costs["tokens_out"] is None
+
+
+def test_costs_tokens_accumulate_from_backend_telemetry():
+    agent = Ranger(backend="claude", stats=True, memory=False)
+    obj = ('{"result": "done", "session_id": "s1", "total_cost_usd": 0.01, '
+           '"usage": {"input_tokens": 120, "output_tokens": 30}}')
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(obj)):
+        agent.ask("q1")
+    obj2 = ('{"result": "done2", "session_id": "s2", "total_cost_usd": 0.02, '
+            '"usage": {"input_tokens": 80, "output_tokens": 20}}')
+    with mock.patch("ranger.subprocess.run", return_value=fake_run(obj2)):
+        agent.ask("q2")
+    assert agent.costs["calls"] == 2
+    assert agent.costs["tokens_in"] == 200
+    assert agent.costs["tokens_out"] == 50
+
+
+def test_costs_reset_returns_and_zeroes():
+    agent = Ranger(memory=False)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("abc")):
+        agent.ask("q")
+    before = agent.costs_reset()
+    assert before["calls"] == 1 and before["chars_out"] == 3
+    assert agent.costs == {"calls": 0, "chars_in": 0, "chars_out": 0,
+                           "tokens_in": None, "tokens_out": None,
+                           "wall_s": 0.0}
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("de")):
+        agent.ask("q2")
+    assert agent.costs["calls"] == 1          # counted from the reset only
+
+
+def test_costs_failed_run_records_nothing():
+    agent = Ranger(memory=False, retries=0)
+    bad = mock.Mock()
+    bad.returncode, bad.stdout, bad.stderr = 3, "", "kaput"
+    with mock.patch("ranger.subprocess.run", return_value=bad):
+        with pytest.raises(RangerError):
+            agent.ask("q")
+    assert agent.costs["calls"] == 0
+    assert agent.costs["chars_in"] == 0
+
+
+def test_costs_returns_a_copy_not_the_live_ledger():
+    agent = Ranger(memory=False)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+        agent.ask("q")
+    agent.costs["calls"] = 999               # mutating a snapshot: harmless
+    assert agent.costs["calls"] == 1
+
+
+def test_costs_ledger_is_per_agent():
+    a, b = Ranger(memory=False), Ranger(memory=False)
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+        a.ask("q")
+    assert a.costs["calls"] == 1
+    assert b.costs["calls"] == 0       # debate partners keep own ledgers
+
+
+def test_costs_until_loop_is_bounded_accounting():
+    agent = Ranger(memory=False, timeout=30)
+    # replies, in order: pre-check NO, step, report, verdict NO (budget ends red)
+    replies = [fake_run("NO"), fake_run("step"),
+               fake_run("report"), fake_run("NO")]
+    with mock.patch("ranger.subprocess.run", side_effect=replies):
+        result = agent.until("goal", max_iter=1, condition="cond")
+    assert result["achieved"] is False
+    # pre-check ask + step ask + do run + verdict ask = 4 completed calls
+    assert agent.costs["calls"] == 4

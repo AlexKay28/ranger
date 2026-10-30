@@ -955,6 +955,12 @@ class Ranger:
         #: explicit Python-side snapshot registry: {"tag", "sha", "time"}
         self.snapshot_log: list[dict] = []
         self._snap_seq = 0
+        #: cumulative cost/telemetry ledger (issue #6) — always recorded;
+        #: tokens_* stay None until a backend actually reports them
+        self._costs: dict = {
+            "calls": 0, "chars_in": 0, "chars_out": 0,
+            "tokens_in": None, "tokens_out": None, "wall_s": 0.0,
+        }
 
     def __repr__(self) -> str:
         """Return a compact description of the core run settings."""
@@ -2362,7 +2368,65 @@ class Ranger:
                 "report": report, "reviews": reviews}
 
     # ------------------------------------------------------------------ #
-    # plumbing
+    # cumulative costs ledger (issue #6) — plain Python-side state
+
+    @property
+    def costs(self) -> dict:
+        """Cumulative cost/telemetry ledger across ALL completed calls.
+
+        Law-4 state: explicit, Python-side, always recorded —
+        `stats=True` is NOT required (it only switches the harness run
+        into JSON mode for `last`; the ledger feeds on whatever
+        telemetry any run happens to produce, plus prompt/answer sizes
+        and wall time, which need no harness cooperation).
+
+            {"calls": int,          # completed agent runs
+             "chars_in": int,       # prompt characters sent, total
+             "chars_out": int,      # answer characters received, total
+             "tokens_in": None|int, # None until a backend reports tokens
+             "tokens_out": None|int,
+             "wall_s": float}       # summed subprocess wall time
+
+        Per agent: a `debate`/`refine_with` partner keeps its own
+        ledger — inspect each agent's `costs` separately. Reset (and
+        collect) with `costs_reset()`. The returned dict is a copy;
+        mutating it never touches the ledger.
+        """
+        return dict(self._costs)
+
+    def costs_reset(self) -> dict:
+        """Return the current ledger and zero it (bounded accounting).
+
+        The classic "what did this loop cost?" idiom:
+
+            agent.costs_reset()
+            result = agent.until("make tests green", gate_cmd=...)
+            print(result["iterations"], agent.costs)   # this loop only
+
+        Failed and interrupted runs never record — `calls` counts
+        completed agent runs only.
+        """
+        ledger = dict(self._costs)
+        self._costs = {
+            "calls": 0, "chars_in": 0, "chars_out": 0,
+            "tokens_in": None, "tokens_out": None, "wall_s": 0.0,
+        }
+        return ledger
+
+    def _record_costs(self, chars_in: int, chars_out: int,
+                      info: dict | None, wall_s: float) -> None:
+        """Merge one completed run into the ledger. Never raises."""
+        c = self._costs
+        c["calls"] += 1
+        c["chars_in"] += chars_in
+        c["chars_out"] += chars_out
+        c["wall_s"] = round(c["wall_s"] + max(wall_s, 0.0), 2)
+        if info:
+            ti, to = info.get("input_tokens"), info.get("output_tokens")
+            if ti is not None:
+                c["tokens_in"] = (c["tokens_in"] or 0) + int(ti)
+            if to is not None:
+                c["tokens_out"] = (c["tokens_out"] or 0) + int(to)
 
     def _prepare_run(self, prompt: str, label: str, ov: dict) -> dict:
         """Resolve options, recall, prompt contracts and the backend argv.
@@ -2492,6 +2556,7 @@ class Ranger:
             "cmd": cmd,
             "o": o,
             "prompt": prompt,
+            "full_prompt": full_prompt,
             "use_stats": use_stats,
             "use_memory": use_memory,
             "retries": int(opts.get("retries") or 0),
@@ -2588,6 +2653,8 @@ class Ranger:
                         continue
                     raise
             answer, info = adapter.parse_output(proc.stdout, use_stats)
+            self._record_costs(len(prep["full_prompt"]), len(answer),
+                               info, time.time() - t0)
             if use_stats and info is not None:
                 self.last = {
                     "label": label,
@@ -2712,6 +2779,8 @@ class Ranger:
                         continue
                     raise
             answer, info = adapter.parse_output(stdout, use_stats)
+            self._record_costs(len(prep["full_prompt"]), len(answer),
+                               info, time.time() - t0)
             if use_stats and info is not None:
                 self.last = {
                     "label": label,

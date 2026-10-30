@@ -466,3 +466,29 @@ class TestTwinsDoNotForkControlFlow:
         for name in ranger._ASYNC_TWIN_METHODS:
             twin = getattr(Ranger, f"{name}_async")
             assert "twin" in twin.__doc__
+
+
+# --------------------------------------------------------------------- #
+# costs ledger on the async path (issue #6, shared with the sync path)
+
+class TestAsyncCostsLedger:
+    def test_ask_async_records_into_the_ledger(self):
+        agent = Ranger(model="m", cwd=".", memory=False)
+        factory, _ = make_exec_factory(stdout=b"hi\n")
+        with mock.patch(SPAWN, side_effect=factory):
+            assert run(agent.ask_async("hello")) == "hi"
+        c = agent.costs
+        assert c["calls"] == 1
+        assert c["chars_out"] == 2
+        assert c["chars_in"] > 0
+        assert c["tokens_in"] is None       # no backend telemetry in this mode
+
+    def test_failures_and_cancellations_record_nothing(self):
+        agent = Ranger(model="m", cwd=".", memory=False)
+        factory, _ = make_exec_factory(stderr=b"boom", returncode=3)
+        with mock.patch(SPAWN, side_effect=factory):
+            with pytest.raises(RangerHarnessError):
+                run(agent.ask_async("q"))
+        assert agent.costs == {"calls": 0, "chars_in": 0, "chars_out": 0,
+                               "tokens_in": None, "tokens_out": None,
+                               "wall_s": 0.0}
