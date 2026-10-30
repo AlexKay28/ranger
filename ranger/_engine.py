@@ -19,7 +19,7 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
+                    RangerHarnessError, UI_NOTE_CLIP, UI_RETRY_CLIP)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -160,10 +160,9 @@ class EngineMixin:
         if label in _PURE_LABELS:
             o["session"] = None
         # priority: per-call agent/mode beats constructor mode beats agent
-        o["agent"] = (
-            ov.get("agent") or ov.get("mode")
-            or opts.get("mode") or opts.get("agent")
-        )
+        per_call_agent = ov.get("agent") or ov.get("mode")
+        ctor_agent = opts.get("mode") or opts.get("agent")
+        o["agent"] = per_call_agent or ctor_agent
         o["mode"] = None
         effort = (o["effort"] or "medium").lower()
         if effort not in ("low", "medium", "high"):
@@ -334,7 +333,7 @@ class EngineMixin:
                 f"{backend_name} run timed out after {prep['timeout']}s"
             ) from None
         except OSError as exc:
-            _finish("✗", "red", _clip(str(exc), 90))
+            _finish("✗", "red", _clip(str(exc), UI_NOTE_CLIP))
             raise RangerHarnessError(
                 f"{backend_name} run could not be spawned: {exc}"
             ) from None
@@ -349,7 +348,11 @@ class EngineMixin:
             pass
         try:
             await asyncio.wait_for(proc.wait(), 5)
-        except Exception:  # noqa: BLE001 — cleanup must never mask the exit
+        except (OSError, asyncio.TimeoutError):
+            # narrow, honest cleanup catch: the kill already happened, only
+            # transport-level failures can occur here — and cleanup must
+            # never mask the original exit (KeyboardInterrupt and
+            # CancelledError are BaseException, so they still propagate)
             pass
 
     async def _spawn_async(self, cmd, o, prep, backend_name, adapter):
@@ -463,7 +466,7 @@ class EngineMixin:
                     proc = self._spawn_sync(cmd, o, prep,
                                             backend_name, adapter, _finish)
                     if proc.returncode != 0:
-                        _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
+                        _finish("✗", "red", _clip(proc.stderr, UI_NOTE_CLIP) or f"exit {proc.returncode}")
                         raise RangerHarnessError(
                             f"{backend_name} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
                         )
@@ -473,14 +476,14 @@ class EngineMixin:
                     # (plain RangerError) never reach this handler
                     if attempt < retries:
                         attempt += 1
-                        _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), 70)}")
+                        _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), UI_RETRY_CLIP)}")
                         continue
                     raise
             answer = self._complete_run(
                 prep, adapter, label, use_stats, use_memory,
                 proc.stdout, t0)
             first = answer.splitlines()
-            _finish("✓", "green", _clip(first[0], 90) if first else "")
+            _finish("✓", "green", _clip(first[0], UI_NOTE_CLIP) if first else "")
             return answer
         except KeyboardInterrupt:
             # Ctrl+C / kernel interrupt: subprocess.run already killed the
@@ -537,7 +540,7 @@ class EngineMixin:
                     if attempt < retries:
                         attempt += 1
                         _LOG.info("run_async retry %d/%d · %s",
-                                  attempt, retries, _clip(str(exc), 70))
+                                  attempt, retries, _clip(str(exc), UI_RETRY_CLIP))
                         continue
                     raise
             return self._complete_run(

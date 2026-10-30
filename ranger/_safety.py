@@ -19,7 +19,8 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
+                    RangerHarnessError, RAISED_PATHS_LISTED,
+                    PORCELAIN_MIN, PORCELAIN_PATH_AT)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -77,9 +78,9 @@ class SafetyMixin:
         porcelain = self._git("status", "--porcelain")
         violations = []
         for line in porcelain.splitlines():
-            if len(line) < 4:
+            if len(line) < PORCELAIN_MIN:
                 continue
-            p = line[3:].strip().strip('"').rstrip("/")
+            p = line[PORCELAIN_PATH_AT:].strip().strip('"').rstrip("/")
             if not p:
                 continue
             if deny and _path_matches(p, deny, root):
@@ -89,6 +90,6 @@ class SafetyMixin:
         if violations:
             raise RangerError(
                 "do() touched paths outside the safety rails: "
-                + ", ".join(violations[:8])
+                + ", ".join(violations[:RAISED_PATHS_LISTED])
                 + " — the working tree is LEFT MUTATED; pair rails with "
                   "snapshots=True / rollback() to recover")

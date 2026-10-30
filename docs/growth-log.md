@@ -417,3 +417,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   findings: size/params class only (debate 22 params, long spans,
   one 4-operand chain, 2 bare excepts, raises 9.2 intentional per
   law 5, magic values info). Suite: 354 mocked tests green in ~2.8s.
+
+- **Loop cycle 9 — mechanical warn classes cleared.** The two
+  broad `except Exception: pass` cleanup blocks (sync `_kill_tree`
+  in `_util`, async `_kill_async` in `_engine`) narrowed to honest
+  transport-level tuples — `(subprocess.TimeoutExpired, OSError)` /
+  `(OSError, asyncio.TimeoutError)` — so KeyboardInterrupt and
+  CancelledError (BaseException) still propagate and the cleanup
+  can only swallow what it honestly owns. The 4-operand agent
+  precedence chain became two named locals (`per_call_agent`,
+  `ctor_agent`). Every evidence/clip magic number (300/150/90/70/
+  60/10/8, porcelain 4/3) is now a named module constant in `_util`
+  (ANSWER_EXCERPT, ROW_EXCERPT, UI_NOTE_CLIP, UI_RETRY_CLIP,
+  LOG_SHA_CLIP, LOG_MSG_CLIP, RAISED_PATHS_LISTED, PORCELAIN_MIN,
+  PORCELAIN_PATH_AT) — one place per frozen number. pcina: warns
+  41 → 34, scan 9.74 → 9.78; hardcode/bare_except/clever-chain
+  categories clear. Remaining warns: long spans (41–94 lines,
+  next cycles), 6–8-param internal helpers, the 22-param public
+  ctor (API-frozen), and paranoia raises-by-design (law 5's
+  parse-or-raise contract). Suite: 354 mocked tests green.

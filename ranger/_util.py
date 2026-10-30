@@ -25,6 +25,21 @@ _RUN_KEYS = (
     "retries", "env", "allow", "deny", "dry_run",
 )
 
+# Quote/clip lengths (chars) — one named place per frozen number, so an
+# evidence policy or UI width change is a one-line edit.
+ANSWER_EXCERPT = 300      # agent reply quoted in error evidence (law 5)
+ROW_EXCERPT = 150         # one offending row quoted in error evidence
+RAISED_PATHS_LISTED = 8    # violation paths listed in a do() rails error
+UI_NOTE_CLIP = 90         # stderr/first-line shown in live progress marks
+UI_RETRY_CLIP = 70        # exception text shown in retry progress lines
+LOG_SHA_CLIP = 10          # commit sha prefix in log lines
+LOG_MSG_CLIP = 60          # commit message shown in log lines
+
+# git status --porcelain v1 line anatomy: "XY <path>", path starts at col 3,
+# and a shorter line carries no path at all.
+PORCELAIN_MIN = 4
+PORCELAIN_PATH_AT = 3
+
 def _normalize_patterns(name: str, value) -> "list[str] | None":
     """Validate an allow/deny spec: None, or a non-empty list of path globs."""
     if value is None:
@@ -122,7 +137,9 @@ def _kill_tree(proc: "subprocess.Popen") -> None:
         pass
     try:
         proc.communicate(timeout=5)
-    except Exception:  # noqa: BLE001 — cleanup must never mask the exit
+    except (subprocess.TimeoutExpired, OSError):
+        # narrow, honest cleanup catch: only transport-level failures occur
+        # here — cleanup must never mask the original exception
         pass
 
 

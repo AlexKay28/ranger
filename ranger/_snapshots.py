@@ -19,7 +19,8 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
+                    RangerHarnessError, LOG_SHA_CLIP, LOG_MSG_CLIP,
+                    PORCELAIN_MIN, PORCELAIN_PATH_AT)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -113,7 +114,7 @@ class SnapshotMixin:
         entry = {"tag": tag, "sha": sha, "tree": tree,
                  "time": round(time.time(), 3)}
         self.snapshot_log.append(entry)
-        _LOG.info("snapshot · tag=%s sha=%s", tag, sha[:10])
+        _LOG.info("snapshot · tag=%s sha=%s", tag, sha[:LOG_SHA_CLIP])
         return {"tag": tag, "sha": sha, "tree": tree, "root": root}
 
     def _repo_root(self, who: str) -> str:
@@ -218,9 +219,9 @@ class SnapshotMixin:
             raise RangerError(
                 "commit(): nothing to commit — the working tree is clean")
         for line in porcelain.splitlines():
-            if len(line) < 4:
+            if len(line) < PORCELAIN_MIN:
                 continue
-            p = line[3:].strip().strip('"').rstrip("/")
+            p = line[PORCELAIN_PATH_AT:].strip().strip('"').rstrip("/")
             if p:
                 self._assert_path_allowed(p, effective_allow,
                                            effective_deny, root)
@@ -228,7 +229,7 @@ class SnapshotMixin:
         self._git("add", "-A", "--")
         self._git("commit", "-m", msg)
         sha = self._git("rev-parse", "HEAD").strip()
-        _LOG.info("commit · %s · %s", sha[:10], _clip(msg, 60))
+        _LOG.info("commit · %s · %s", sha[:LOG_SHA_CLIP], _clip(msg, LOG_MSG_CLIP))
         return sha
 
     def _auto_snapshot(self, label: str):

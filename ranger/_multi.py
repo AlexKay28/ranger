@@ -19,7 +19,7 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _clip, _interrupt_payload, _kill_tree,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
+                    RangerHarnessError, ANSWER_EXCERPT, ROW_EXCERPT)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -79,7 +79,7 @@ class MultiMixin:
         if not claims:
             raise RangerError(
                 "verify_claims() parsed no CLAIM: lines from:\n"
-                + extraction[:300]
+                + extraction[:ANSWER_EXCERPT]
             )
         results = []
         for claim in claims:
@@ -115,18 +115,18 @@ class MultiMixin:
                            text, re.IGNORECASE | re.MULTILINE)
         if not found:
             raise RangerError(
-                f"could not parse a {key} line from:\n{text[:300]}"
+                f"could not parse a {key} line from:\n{text[:ANSWER_EXCERPT]}"
             )
         if len(found) > 1:
             raise RangerError(
                 f"{len(found)} conflicting {key} lines — ambiguous reply:\n"
-                f"{text[:300]}"
+                f"{text[:ANSWER_EXCERPT]}"
             )
         token = found[0].upper()
         if token not in tokens:
             raise RangerError(
                 f"invalid {key} {found[0]!r} — expected one of "
-                f"{'/'.join(tokens)}:\n{text[:300]}"
+                f"{'/'.join(tokens)}:\n{text[:ANSWER_EXCERPT]}"
             )
         return token
 
@@ -215,7 +215,7 @@ class MultiMixin:
             if not secs.get(key):
                 raise RangerError(
                     f"review() reply is missing a non-empty {key} section:\n"
-                    f"{answer[:300]}"
+                    f"{answer[:ANSWER_EXCERPT]}"
                 )
         return {
             "passed": verdict == "APPROVE",
@@ -247,12 +247,12 @@ class MultiMixin:
         if not lines:
             raise RangerError(
                 f"challenge() could not parse an ATTACK line from:\n"
-                f"{raw[:300]}"
+                f"{raw[:ANSWER_EXCERPT]}"
             )
         if len(lines) > 1:
             raise RangerError(
                 f"{len(lines)} conflicting ATTACK lines — ambiguous "
-                f"reply:\n{raw[:300]}"
+                f"reply:\n{raw[:ANSWER_EXCERPT]}"
             )
         return lines[0]
 
@@ -276,12 +276,12 @@ class MultiMixin:
         if not statuses:
             raise RangerError(
                 "challenge() defense is missing a final DEFENDED or "
-                f"CONCEDED line:\n{defense[:300]}"
+                f"CONCEDED line:\n{defense[:ANSWER_EXCERPT]}"
             )
         if len(set(s.upper() for s in statuses)) > 1 or len(statuses) > 1:
             raise RangerError(
                 "challenge() defense carries conflicting DEFENDED/"
-                f"CONCEDED lines:\n{defense[:300]}"
+                f"CONCEDED lines:\n{defense[:ANSWER_EXCERPT]}"
             )
         return defense, statuses[0].upper() == "CONCEDED"
 

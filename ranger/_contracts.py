@@ -6,7 +6,8 @@ import json
 import re
 from pathlib import Path
 
-from ._util import RangerError, RangerHarnessError
+from ._util import (RangerError, RangerHarnessError, ANSWER_EXCERPT,
+                    ROW_EXCERPT)
 
 _PURE_LABELS = frozenset({"check", "critique", "diagnose", "extract", "lint",
                           "read", "search", "summarize", "test", "trace"})
@@ -105,7 +106,7 @@ def _parse_extract_json(answer: str):
     except ValueError:
         raise RangerError(
             f"extract() could not parse JSON from the agent reply "
-            f"(trailing prose or malformed JSON):\n{answer[:300]}"
+            f"(trailing prose or malformed JSON):\n{answer[:ANSWER_EXCERPT]}"
         ) from None
 
 
@@ -117,20 +118,20 @@ def _extract_rows(data, many: bool, answer: str) -> list:
         if not isinstance(data, list):
             raise RangerError(
                 f"extract() expected a JSON array with many=True, got: "
-                f"{answer[:300]}"
+                f"{answer[:ANSWER_EXCERPT]}"
             )
         rows = [row if row is not None else {} for row in data]
         for i, row in enumerate(rows):
             if not isinstance(row, dict):
                 raise RangerError(
                     f"extract() array element {i} is not a JSON object: "
-                    f"{str(row)[:150]!r}"
+                    f"{str(row)[:ROW_EXCERPT]!r}"
                 )
         return rows
     if not isinstance(data, dict):
         raise RangerError(
             f"extract() expected one JSON object with many=False, got: "
-            f"{answer[:300]}"
+            f"{answer[:ANSWER_EXCERPT]}"
         )
     return [data]
 
@@ -149,7 +150,7 @@ def _parse_extract_answer(answer: str, keys, many: bool):
             kind = "row" if many else "object"
             raise RangerError(
                 f"extract() {kind} {i} is missing key(s) "
-                f"{', '.join(map(repr, missing))} from:\n{answer[:300]}"
+                f"{', '.join(map(repr, missing))} from:\n{answer[:ANSWER_EXCERPT]}"
             )
     return rows if many else rows[0]
 
@@ -174,7 +175,7 @@ def _parse_check_verdict(answer: str) -> bool:
         if "YES+NO" in joined or "NO+YES" in joined:
             raise RangerError(
                 "check() got contradictory YES and NO verdicts from:\n"
-                + answer[:300]
+                + answer[:ANSWER_EXCERPT]
             )
         return verdicts[0] == "YES"
 
@@ -188,11 +189,11 @@ def _parse_check_verdict(answer: str) -> bool:
                      re.IGNORECASE):
             raise RangerError(
                 "check() got an unconfident non-verdict from:\n"
-                + answer[:300]
+                + answer[:ANSWER_EXCERPT]
             )
         return match.group(1).upper() == "YES"
     raise RangerError(
-        f"check() could not parse a YES/NO verdict from:\n{answer[:300]}"
+        f"check() could not parse a YES/NO verdict from:\n{answer[:ANSWER_EXCERPT]}"
     )
 
 
