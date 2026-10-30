@@ -2890,6 +2890,135 @@ class Ranger:
             "timeout": opts["timeout"],
         }
 
+    def _spawn_sync(self, cmd, o, prep, backend_name, adapter, _finish):
+        """One sync harness spawn with honest error attribution.
+
+        Transport failures map to their true cause: a missing agent cwd
+        is a caller error (RangerError), a missing CLI / broken spawn is
+        a harness error (install hint attached), a timeout is a timeout.
+        """
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=self.cwd,
+                # o, not opts: adapters may fold settings into
+                # the env overlay inside build_cmd (e.g. the
+                # openhands backend maps model= to LLM_MODEL)
+                env=self._child_env(o.get("env")),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,  # own pg → contained blast
+                timeout=prep["timeout"],
+            )
+        except FileNotFoundError:
+            if self.cwd and not Path(self.cwd).is_dir():
+                _finish("✗", "red", "agent cwd does not exist")
+                raise RangerError(
+                    f"agent cwd does not exist: {self.cwd}"
+                ) from None
+            _finish("✗", "red", f"{backend_name} CLI not found")
+            raise RangerHarnessError(
+                f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
+            ) from None
+        except subprocess.TimeoutExpired:
+            _finish("✗", "red", f"timed out after {prep['timeout']}s")
+            raise RangerTimeout(
+                f"{backend_name} run timed out after {prep['timeout']}s"
+            ) from None
+        except OSError as exc:
+            _finish("✗", "red", _clip(str(exc), 90))
+            raise RangerHarnessError(
+                f"{backend_name} run could not be spawned: {exc}"
+            ) from None
+
+    async def _kill_async(self, proc) -> None:
+        """Kill one async CLI subprocess's whole process group, wait."""
+        # mirrors _kill_tree: start_new_session made the child its own
+        # process-group leader, so one killpg reaches its whole tree
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), 5)
+        except Exception:  # noqa: BLE001 — cleanup must never mask the exit
+            pass
+
+    async def _spawn_async(self, cmd, o, prep, backend_name, adapter):
+        """One async harness spawn with honest error attribution.
+
+        Same cause-mapping contract as `_spawn_sync`; cancellation and
+        timeout kill the subprocess's whole process group.
+        """
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=self.cwd,
+                # o, not opts: adapters may fold settings into
+                # the env overlay inside build_cmd
+                env=self._child_env(o.get("env")),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
+                start_new_session=True,  # own pg → contained blast
+            )
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), prep["timeout"]
+            )
+        except FileNotFoundError:
+            # attribute the failure to its real cause: a missing
+            # agent cwd also raises FileNotFoundError from spawn
+            if self.cwd and not Path(self.cwd).is_dir():
+                raise RangerError(
+                    f"agent cwd does not exist: {self.cwd}"
+                ) from None
+            raise RangerHarnessError(
+                f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
+            ) from None
+        except asyncio.TimeoutError:
+            if proc is not None:
+                await self._kill_async(proc)
+            raise RangerTimeout(
+                f"{backend_name} run timed out after {prep['timeout']}s"
+            ) from None
+        except asyncio.CancelledError:
+            # task cancellation kills the CLI subprocess — same
+            # semantics as KeyboardInterrupt on the sync path
+            if proc is not None:
+                await self._kill_async(proc)
+            raise
+        except OSError as exc:
+            raise RangerHarnessError(
+                f"{backend_name} run could not be spawned: {exc}"
+            ) from None
+        return proc, stdout_b, stderr_b
+
+    def _complete_run(self, prep, adapter, label, use_stats, use_memory,
+                      stdout, t0) -> str:
+        """Shared post-transport block: parse, ledger, telemetry, memory.
+
+        One implementation for BOTH seams (law 1): whatever came out of
+        the sync or async transport goes through the exact same
+        parse_output → _record_costs → last → context pipeline.
+        """
+        answer, info = adapter.parse_output(stdout, use_stats)
+        self._record_costs(len(prep["full_prompt"]), len(answer),
+                           info, time.time() - t0)
+        if use_stats and info is not None:
+            self.last = {
+                "label": label,
+                "wall_s": round(time.time() - t0, 2),
+                **info,
+            }
+        if use_memory:
+            self.context.append({"role": "user", "content": prep["prompt"]})
+            self.context.append({"role": "assistant", "content": answer})
+        return answer
+
     def _run(self, prompt: str, label: str = "run", **ov) -> str:
         prep = self._prepare_run(prompt, label, ov)
         adapter, backend_name = prep["adapter"], prep["backend"]
@@ -2926,45 +3055,8 @@ class Ranger:
             proc = None
             while True:
                 try:
-                    try:
-                        proc = subprocess.run(
-                            cmd,
-                            cwd=self.cwd,
-                            # o, not opts: adapters may fold settings into
-                            # the env overlay inside build_cmd (e.g. the
-                            # openhands backend maps model= to LLM_MODEL)
-                            env=self._child_env(o.get("env")),
-                            capture_output=True,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                            stdin=subprocess.DEVNULL,
-                            start_new_session=True,  # own pg → contained blast
-                            timeout=prep["timeout"],
-                        )
-                    except FileNotFoundError:
-                        # attribute the failure to its real cause: a missing agent
-                        # cwd also raises FileNotFoundError from the spawn
-                        if self.cwd and not Path(self.cwd).is_dir():
-                            _finish("✗", "red", "agent cwd does not exist")
-                            raise RangerError(
-                                f"agent cwd does not exist: {self.cwd}"
-                            ) from None
-                        _finish("✗", "red", f"{backend_name} CLI not found")
-                        raise RangerHarnessError(
-                            f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
-                        ) from None
-                    except subprocess.TimeoutExpired:
-                        _finish("✗", "red", f"timed out after {prep['timeout']}s")
-                        raise RangerTimeout(
-                            f"{backend_name} run timed out after {prep['timeout']}s"
-                        ) from None
-                    except OSError as exc:
-                        _finish("✗", "red", _clip(str(exc), 90))
-                        raise RangerHarnessError(
-                            f"{backend_name} run could not be spawned: {exc}"
-                        ) from None
-
+                    proc = self._spawn_sync(cmd, o, prep,
+                                            backend_name, adapter, _finish)
                     if proc.returncode != 0:
                         _finish("✗", "red", _clip(proc.stderr, 90) or f"exit {proc.returncode}")
                         raise RangerHarnessError(
@@ -2979,20 +3071,11 @@ class Ranger:
                         _finish("↻", "yellow", f"retry {attempt}/{retries}: {_clip(str(exc), 70)}")
                         continue
                     raise
-            answer, info = adapter.parse_output(proc.stdout, use_stats)
-            self._record_costs(len(prep["full_prompt"]), len(answer),
-                               info, time.time() - t0)
-            if use_stats and info is not None:
-                self.last = {
-                    "label": label,
-                    "wall_s": round(time.time() - t0, 2),
-                    **info,
-                }
+            answer = self._complete_run(
+                prep, adapter, label, use_stats, use_memory,
+                proc.stdout, t0)
             first = answer.splitlines()
             _finish("✓", "green", _clip(first[0], 90) if first else "")
-            if use_memory:
-                self.context.append({"role": "user", "content": prompt})
-                self.context.append({"role": "assistant", "content": answer})
             return answer
         except KeyboardInterrupt:
             # Ctrl+C / kernel interrupt: subprocess.run already killed the
@@ -3029,66 +3112,13 @@ class Ranger:
         _LOG.debug("run_async start · label=%s model=%s backend=%s",
                    label, o["model"], backend_name)
 
-        async def _kill(proc) -> None:
-            # mirrors _kill_tree: start_new_session made the child its own
-            # process-group leader, so one killpg reaches its whole tree
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
-            try:
-                await asyncio.wait_for(proc.wait(), 5)
-            except Exception:  # noqa: BLE001 — cleanup must never mask the exit
-                pass
-
         try:
             retries = prep["retries"]
             attempt = 0
             while True:
-                proc = None
                 try:
-                    try:
-                        proc = await asyncio.create_subprocess_exec(
-                            *cmd,
-                            cwd=self.cwd,
-                            # o, not opts: adapters may fold settings into
-                            # the env overlay inside build_cmd
-                            env=self._child_env(o.get("env")),
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                            stdin=asyncio.subprocess.DEVNULL,
-                            start_new_session=True,  # own pg → contained blast
-                        )
-                        stdout_b, stderr_b = await asyncio.wait_for(
-                            proc.communicate(), prep["timeout"]
-                        )
-                    except FileNotFoundError:
-                        # attribute the failure to its real cause: a missing
-                        # agent cwd also raises FileNotFoundError from spawn
-                        if self.cwd and not Path(self.cwd).is_dir():
-                            raise RangerError(
-                                f"agent cwd does not exist: {self.cwd}"
-                            ) from None
-                        raise RangerHarnessError(
-                            f"{backend_name} CLI not found on PATH — {adapter.install_hint}"
-                        ) from None
-                    except asyncio.TimeoutError:
-                        if proc is not None:
-                            await _kill(proc)
-                        raise RangerTimeout(
-                            f"{backend_name} run timed out after {prep['timeout']}s"
-                        ) from None
-                    except asyncio.CancelledError:
-                        # task cancellation kills the CLI subprocess — same
-                        # semantics as KeyboardInterrupt on the sync path
-                        if proc is not None:
-                            await _kill(proc)
-                        raise
-                    except OSError as exc:
-                        raise RangerHarnessError(
-                            f"{backend_name} run could not be spawned: {exc}"
-                        ) from None
-
+                    proc, stdout_b, stderr_b = await self._spawn_async(
+                        cmd, o, prep, backend_name, adapter)
                     stdout = stdout_b.decode("utf-8", errors="replace")
                     stderr = stderr_b.decode("utf-8", errors="replace")
                     if proc.returncode != 0:
@@ -3105,20 +3135,8 @@ class Ranger:
                                   attempt, retries, _clip(str(exc), 70))
                         continue
                     raise
-            answer, info = adapter.parse_output(stdout, use_stats)
-            self._record_costs(len(prep["full_prompt"]), len(answer),
-                               info, time.time() - t0)
-            if use_stats and info is not None:
-                self.last = {
-                    "label": label,
-                    "wall_s": round(time.time() - t0, 2),
-                    **info,
-                }
-            if use_memory:
-                self.context.append(
-                    {"role": "user", "content": prep["prompt"]})
-                self.context.append({"role": "assistant", "content": answer})
-            return answer
+            return self._complete_run(
+                prep, adapter, label, use_stats, use_memory, stdout, t0)
         except asyncio.CancelledError:
             _LOG.debug("run_async cancelled · label=%s duration=%.2fs",
                        label, time.time() - t0)

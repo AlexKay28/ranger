@@ -6,7 +6,9 @@ edit() with per-file isolation; commit() stages + commits only,
 refusing non-repos, clean trees and rail violations.
 """
 
+import os
 import subprocess
+import time
 from unittest import mock
 
 import pytest
@@ -131,11 +133,14 @@ class TestTransform:
                 return subprocess.CompletedProcess(
                     [], 0, stdout="did nothing", stderr="")
             # genuinely touch every other target so the mtime post-check
-            # sees a real change
+            # sees a real change (explicit utime: FS timestamp granularity
+            # can collapse two writes into the same mtime_ns under load)
             for f in folder.glob("*.py"):
                 if str(f) in prompt and str(broken) not in str(f):
                     line = f.read_text(encoding="utf-8")
                     f.write_text(line + "# touched\n", encoding="utf-8")
+                    os.utime(f, ns=(time.time_ns() + 10**9,
+                                    time.time_ns() + 10**9))
                     return subprocess.CompletedProcess(
                         [], 0, stdout="edited it", stderr="")
             return subprocess.CompletedProcess([], 0, stdout="?", stderr="")

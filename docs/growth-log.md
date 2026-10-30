@@ -294,3 +294,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   helper, _parse_extract_answer, pcina baseline decision, the
   2809-LOC file split). Suite: 354 mocked tests green in ~2.9s
   (ARCHITECTURE.md tests:354).
+
+- **Loop cycle 2 — extract the shared transport retry/kill loop.**
+  `_run` (cc 19, span 117) and `_run_async` (cc 17, span 116) each
+  carried their own spawn → error-attribution → retry →
+  parse/ledger/memory pipeline. Now three seams, one law-1
+  contract: `_spawn_sync` / `_spawn_async` (one spawn with honest
+  cause mapping: missing cwd → RangerError, missing CLI →
+  RangerHarnessError + install hint, timeout → RangerTimeout;
+  async kill/cancel paths live in `_kill_async`), and ONE shared
+  `_complete_run` (parse_output → _record_costs → last → context
+  append) used by both transports — the post-run pipeline can no
+  longer drift between sync and async. Retry counters stay
+  in-place; `_run` drops to cc 11 (pcina info), `_run_async`
+  leaves the violation list entirely. Also stabilized a test
+  flake the cycle's CHECK caught: the transform isolation test
+  faked mutation via file writes whose mtime could collapse
+  into the same timestamp under FS granularity — the fake now
+  sets mtime explicitly (os.utime with distinct ns). Suite: 354
+  mocked tests green, 8 consecutive full runs.
