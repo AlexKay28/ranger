@@ -362,3 +362,16 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   (12 commits pushed, d237971..d3d464d; issue closing blocked by
   the PAT's missing issue-write scope — manual step left open).
   Suite: 354 mocked tests green.
+
+- **Loop cycle 6 — transform + until/resolve budgets and dedup.**
+  `Ranger.transform` (cc 15) gains `_transform_spec` (validation up
+  front, zero spawns on a bad spec), the glob-or-refuse body reduced;
+  the DUPLICATED rollback_on_fail machinery in `until()` and
+  `resolve()` — snapshot-taking and the red-budget tail block, both
+  verbatim twins — became `_pre_loop_snapshot(who)` and
+  `_rollback_on_red(result, tag)`, shared. `until` cc 15 → 13,
+  `transform` off the warn list; snapshot tag names and log lines
+  byte-identical (pinned by the red/green truth tables).
+  pcina complexity warns remaining: only legacy `challenge` (cc 20,
+  cognitive 18) plus one nesting warn at line 385. Suite: 354
+  mocked tests green.

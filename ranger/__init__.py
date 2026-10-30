@@ -1224,6 +1224,25 @@ class Ranger:
             raise RangerError(f"agent did not write the expected file: {out}")
         return str(out)
 
+    def _transform_spec(self, pattern, instruction, max_files):
+        """Validate a transform() spec up front; normalize the pattern.
+
+        A bad spec raises TypeError/ValueError BEFORE any spawn —
+        zero harness calls (pinned by test_spec_validation).
+        """
+        if isinstance(pattern, Path):
+            pattern = str(pattern)
+        if not isinstance(pattern, str) or not pattern:
+            raise TypeError(f"pattern must be a non-empty glob, got {pattern!r}")
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise TypeError(
+                f"instruction must be a non-empty string, got {instruction!r}")
+        if (not isinstance(max_files, int) or isinstance(max_files, bool)
+                or max_files < 1):
+            raise ValueError(
+                f"max_files must be a positive int, got {max_files!r}")
+        return pattern
+
     def transform(self, pattern: "str | Path", instruction: str,
                   max_files: int = 10, **ov) -> "list[dict]":
         """Apply ONE bounded edit() to every file matching a glob.
@@ -1238,24 +1257,14 @@ class Ranger:
             agent.transform("src/**/*.py", "add the module docstring",
                             max_files=20)
         """
-        if isinstance(pattern, Path):
-            pattern = str(pattern)
-        if not isinstance(pattern, str) or not pattern:
-            raise TypeError(f"pattern must be a non-empty glob, got {pattern!r}")
-        if not isinstance(instruction, str) or not instruction.strip():
-            raise TypeError(
-                f"instruction must be a non-empty string, got {instruction!r}")
-        if (not isinstance(max_files, int) or isinstance(max_files, bool)
-                or max_files < 1):
-            raise ValueError(
-                f"max_files must be a positive int, got {max_files!r}")
+        pattern = self._transform_spec(pattern, instruction, max_files)
         root = Path(self.cwd or Path.cwd())
-        files = sorted(p for p in root.glob(pattern) if p.is_file())
+        files = sorted(p for p in root.glob(pattern) if p.is_file())[:max_files]
         if not files:
             raise RangerError(
                 f"transform(): no files match {pattern!r} under {root}")
         results: list[dict] = []
-        for f in files[:max_files]:
+        for f in files:
             try:
                 results.append(
                     {"file": str(f), "report": self.edit(f, instruction, **ov)})
@@ -1958,6 +1967,32 @@ class Ranger:
         ok = self.check(f"the goal is fully achieved: {goal}", **ov)
         return ok, {"kind": "check", "ok": ok, "output": ""}
 
+    def _pre_loop_snapshot(self, who: str):
+        """Best-effort pre-loop snapshot for rollback_on_fail (None=absent)."""
+        try:
+            return self.snapshot(
+                f"pre-{who}-{time.strftime('%Y%m%d%H%M%S')}")["tag"]
+        except RangerError as exc:
+            # best-effort and logged — never claimed when absent
+            _LOG.info("%s rollback_on_fail: no snapshot (%s)", who, exc)
+            return None
+
+    def _rollback_on_red(self, result: dict, snap_tag) -> None:
+        """Attach honest rollback evidence to a red-budget result.
+
+        Mutates `result` in place: rolled_back True/False plus the
+        snapshot tag and either the restored paths or the error —
+        absent snap_tag leaves both keys out (nothing claimed).
+        """
+        try:
+            rb = self.rollback(snap_tag)
+            result["rolled_back"] = True
+            result["rollback"] = {"tag": snap_tag,
+                                   "restored": rb["restored"]}
+        except RangerError as exc:
+            result["rolled_back"] = False
+            result["rollback"] = {"tag": snap_tag, "error": str(exc)}
+
     def until(
         self,
         goal: str,
@@ -2021,12 +2056,7 @@ class Ranger:
                     "last_gate": pre_gate}
         snap_tag: str | None = None
         if rollback_on_fail:
-            try:
-                snap_tag = self.snapshot(f"pre-until-{time.strftime('%Y%m%d%H%M%S')}"
-                                         )["tag"]
-            except RangerError as exc:
-                # best-effort and logged — never claimed when absent
-                _LOG.info("until rollback_on_fail: no snapshot (%s)", exc)
+            snap_tag = self._pre_loop_snapshot("until")
         try:
             for i in range(1, max_iter + 1):
                 step = self.ask(
@@ -2056,14 +2086,7 @@ class Ranger:
         result = {"achieved": False, "iterations": len(steps),
                   "steps": steps, "report": report, "last_gate": last_gate}
         if rollback_on_fail and snap_tag is not None:
-            try:
-                rb = self.rollback(snap_tag)
-                result["rolled_back"] = True
-                result["rollback"] = {"tag": snap_tag,
-                                       "restored": rb["restored"]}
-            except RangerError as exc:
-                result["rolled_back"] = False
-                result["rollback"] = {"tag": snap_tag, "error": str(exc)}
+            self._rollback_on_red(result, snap_tag)
         return result
 
     def attempt(
@@ -2153,11 +2176,7 @@ class Ranger:
                     "iterations": 0, "report": "", "last_gate": pre_gate}
         snap_tag: str | None = None
         if rollback_on_fail:
-            try:
-                snap_tag = self.snapshot(f"pre-resolve-{time.strftime('%Y%m%d%H%M%S')}"
-                                         )["tag"]
-            except RangerError as exc:
-                _LOG.info("resolve rollback_on_fail: no snapshot (%s)", exc)
+            snap_tag = self._pre_loop_snapshot("resolve")
         plan_text = self.plan(goal, **ov)
         report = ""
         last_gate = pre_gate
@@ -2191,14 +2210,7 @@ class Ranger:
                   "iterations": iters, "report": report,
                   "last_gate": last_gate}
         if rollback_on_fail and snap_tag is not None:
-            try:
-                rb = self.rollback(snap_tag)
-                result["rolled_back"] = True
-                result["rollback"] = {"tag": snap_tag,
-                                       "restored": rb["restored"]}
-            except RangerError as exc:
-                result["rolled_back"] = False
-                result["rollback"] = {"tag": snap_tag, "error": str(exc)}
+            self._rollback_on_red(result, snap_tag)
         return result
 
     def fix(self, problem: str, gate_cmd: "str | list | None" = None,
