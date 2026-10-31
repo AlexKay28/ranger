@@ -73,6 +73,19 @@ __version__ = "0.7.1"
 _DEFAULT_MODEL_WARNED = False
 
 
+def _initial_model(model: "str | None", backend: str) -> "str | None":
+    """Ctor model resolution: explicit beats RANGER_MODEL beats default."""
+    if model:
+        return model
+    env_model = os.environ.get("RANGER_MODEL")
+    if env_model:
+        return env_model
+    if backend == "opencode":
+        _warn_default_model()
+        return DEFAULT_MODEL
+    return None
+
+
 def _warn_default_model() -> None:
     """Warn once per process when the baked DEFAULT_MODEL is chosen.
 
@@ -205,17 +218,7 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
         # raw explicit choice; effective default is resolved per run so a
         # per-call backend switch never inherits the other backend's default
         self._model_explicit = model
-        if model:
-            self.model = model
-        else:
-            env_model = os.environ.get("RANGER_MODEL")
-            if env_model:
-                self.model = env_model
-            elif backend == "opencode":
-                self.model = DEFAULT_MODEL
-                _warn_default_model()
-            else:
-                self.model = None
+        self.model = _initial_model(model, backend)
         self.cwd = str(Path(cwd).resolve()) if cwd else None
         self.timeout = timeout
         self.auto = auto

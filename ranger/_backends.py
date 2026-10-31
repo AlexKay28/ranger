@@ -172,23 +172,31 @@ class _OpenCodeBackend(_Backend):
         return answer, info
 
     @staticmethod
+    def _parse_json_line(line: str):
+        """One parsed JSON object per JSONL line; None for non-JSON."""
+        try:
+            return json.loads(line)
+        except ValueError:
+            return None
+
+    @staticmethod
     def _scan_jsonl(stdout):
         """Collect text parts, the session id and part times from JSONL."""
         parts_text, session, starts, ends = [], None, [], []
         for line in stdout.splitlines():
-            try:
-                obj = json.loads(line)
-            except ValueError:
+            obj = _OpenCodeBackend._parse_json_line(line)
+            if obj is None:
                 continue
             session = obj.get("sessionID") or session
             part = obj.get("part") or {}
-            if part.get("type") == "text" and "text" in part:
-                parts_text.append(part["text"])
-                t = part.get("time") or {}
-                if t.get("start"):
-                    starts.append(t["start"])
-                if t.get("end"):
-                    ends.append(t["end"])
+            if part.get("type") != "text" or "text" not in part:
+                continue
+            parts_text.append(part["text"])
+            t = part.get("time") or {}
+            if t.get("start"):
+                starts.append(t["start"])
+            if t.get("end"):
+                ends.append(t["end"])
         return parts_text, session, starts, ends
 
     def list_models(self, match):
@@ -303,9 +311,11 @@ class _CodexBackend(_Backend):
         kind = obj.get("type")
         if kind == "thread.started":
             thread = obj.get("thread_id") or thread
-        elif kind == "item.completed":
+            return thread, usage
+        if kind == "item.completed":
             self._collect_item_text(obj.get("item") or {}, texts)
-        elif kind == "turn.completed":
+            return thread, usage
+        if kind == "turn.completed":
             usage = obj.get("usage") or usage
         return thread, usage
 

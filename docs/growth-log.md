@@ -684,3 +684,20 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   change: suite untouched, 358 green. Scan 9.24 → 9.29, size aspect
   clean, docstring_coverage 80% → 86%, all docstring findings
   cleared; check exit 0; MI all-A.
+
+- **Issue #17 resolved — every depth-3 guard inverted.** Nine flagged
+  nesting sites flattened, nesting aspect 9.6 → 10.0, scan 9.29 →
+  9.56. The mechanism, learned by reading pcina's own analyzer:
+  elif chains and else-branches add a depth level each, so the
+  honest inversions are early returns, merged boolean guards and
+  small pure extractors — never eliminated raises/branches:
+  `_initial_model` (ctor model resolution, zero signature change),
+  `_apply_event` early-return event folding, `_resolve_claims`
+  (author-arg flattening, same raise/message), `_scan_jsonl` line
+  parser via `_parse_json_line`, `_sections` continuation-first
+  loop, `_extract_rows` merged many/many-not guards,
+  `_path_violations` single boolean guard (short-circuit
+  preserved), `_collect_skills` → `_absorb_skill_path`. Byte-
+  identical outputs pinned by the untouched 358-test suite; one
+  accidental newline corruption in __init__.py caught by ast.parse
+  before the suite ran and fixed in place. check exit 0; MI all-A.

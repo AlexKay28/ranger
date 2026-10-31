@@ -114,26 +114,26 @@ def _extract_rows(data, many: bool, answer: str) -> list:
     """Normalize parsed JSON into a row list: many=True → array elements,
     many=False → the single object as a one-row list. None rows become {}
     (null is an honest empty row); every row must be a JSON object."""
-    if many:
-        if not isinstance(data, list):
-            raise RangerError(
-                f"extract() expected a JSON array with many=True, got: "
-                f"{answer[:ANSWER_EXCERPT]}"
-            )
-        rows = [row if row is not None else {} for row in data]
-        for i, row in enumerate(rows):
-            if not isinstance(row, dict):
-                raise RangerError(
-                    f"extract() array element {i} is not a JSON object: "
-                    f"{str(row)[:ROW_EXCERPT]!r}"
-                )
-        return rows
-    if not isinstance(data, dict):
+    if many and not isinstance(data, list):
+        raise RangerError(
+            f"extract() expected a JSON array with many=True, got: "
+            f"{answer[:ANSWER_EXCERPT]}"
+        )
+    if not many and not isinstance(data, dict):
         raise RangerError(
             f"extract() expected one JSON object with many=False, got: "
             f"{answer[:ANSWER_EXCERPT]}"
         )
-    return [data]
+    if not many:
+        return [data]
+    rows = [row if row is not None else {} for row in data]
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise RangerError(
+                f"extract() array element {i} is not a JSON object: "
+                f"{str(row)[:ROW_EXCERPT]!r}"
+            )
+    return rows
 
 
 def _parse_extract_answer(answer: str, keys, many: bool):

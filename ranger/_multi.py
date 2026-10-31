@@ -143,16 +143,34 @@ class MultiMixin:
         for line in text.splitlines():
             mm = re.match(rf"^\s*({'|'.join(keys)})\s*:(.*)$", line,
                           re.IGNORECASE)
-            if mm:
-                if current is not None:
-                    out[current] = "\n".join(buf).strip()
-                current = mm.group(1).upper()
-                buf = [mm.group(2)]
-            elif current is not None:
-                buf.append(line)
+            if current is not None and mm is None:
+                buf.append(line)        # continuation of the open section
+                continue
+            if mm is None:
+                continue
+            if current is not None:
+                out[current] = "\n".join(buf).strip()
+            current = mm.group(1).upper()
+            buf = [mm.group(2)]
         if current is not None:
             out[current] = "\n".join(buf).strip()
         return out
+
+    def _resolve_claims(self, author) -> "str | None":
+        """Unverified claims text for review(); a None author means none.
+
+        A Ranger's latest report is injected as claims to VERIFY — never
+        as truth; a string is used as-is; anything else is refused at the
+        boundary. Same raise/message as always, flattened from an elif
+        chain (nesting cycle, behavior identical).
+        """
+        if isinstance(author, _ranger_cls()):
+            return self._last_claim(author)
+        if isinstance(author, str):
+            return author
+        if author is not None:
+            raise TypeError("author must be a Ranger, a claims string, or None")
+        return None
 
     def review(self, subject: str, author: "Ranger | str | None" = None,
                **ov) -> dict:
@@ -179,13 +197,7 @@ class MultiMixin:
 
             critic.review("the parser handles empty input", author=builder)
         """
-        claims = None
-        if isinstance(author, _ranger_cls()):
-            claims = self._last_claim(author)
-        elif isinstance(author, str):
-            claims = author
-        elif author is not None:
-            raise TypeError("author must be a Ranger, a claims string, or None")
+        claims = self._resolve_claims(author)
         if "session" in ov:
             # law 4: a verdict must not be read from a continued thread
             raise TypeError(

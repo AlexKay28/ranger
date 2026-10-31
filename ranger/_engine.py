@@ -202,6 +202,19 @@ class EngineMixin:
             return DEFAULT_MODEL
         return None
 
+    @staticmethod
+    def _absorb_skill_path(p: Path, entry, prose_grants, skill_files) -> None:
+        """File one skill entry: existing path(s) attach, prose grants."""
+        if p.is_dir():
+            found = sorted(p.glob("*.md"))
+            if not found:
+                raise RangerError(f"skill directory has no markdown: {p}")
+            skill_files.extend(found)
+        elif p.is_file():
+            skill_files.append(p)
+        else:
+            prose_grants.append(str(entry))
+
     def _collect_skills(self, granted) -> tuple:
         """Split the skills allow-list into (prose_grants, skill_files).
 
@@ -221,15 +234,7 @@ class EngineMixin:
                 # relative skill paths resolve against the AGENT's cwd —
                 # the world the harness operates in — never the process cwd
                 p = Path(self.cwd or str(Path.cwd())) / p
-            if p.is_dir():
-                found = sorted(p.glob("*.md"))
-                if not found:
-                    raise RangerError(f"skill directory has no markdown: {p}")
-                skill_files.extend(found)
-            elif p.is_file():
-                skill_files.append(p)
-            else:
-                prose_grants.append(str(entry))
+            self._absorb_skill_path(p, entry, prose_grants, skill_files)
         return prose_grants, skill_files
 
     def _grants_block(self, prose_grants) -> str:

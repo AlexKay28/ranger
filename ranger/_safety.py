@@ -81,9 +81,8 @@ class SafetyMixin:
             p = line[PORCELAIN_PATH_AT:].strip().strip('"').rstrip("/")
             if not p:
                 continue
-            if deny and _path_matches(p, deny, root):
-                violations.append(p)
-            elif allow and not _path_matches(p, allow, root):
+            if deny and _path_matches(p, deny, root) \
+                    or allow and not _path_matches(p, allow, root):
                 violations.append(p)
         return violations
 
