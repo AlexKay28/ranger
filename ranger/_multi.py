@@ -398,6 +398,26 @@ class MultiMixin:
             f"ALL of them):\n{pending}"
         )
 
+    @staticmethod
+    def _review_options(ov: dict) -> dict:
+        """review() options: keep everything but memory (its contract)."""
+        return {k: v for k, v in ov.items() if k != "memory"}
+
+    @staticmethod
+    def _refine_pending(rev: dict) -> str:
+        """What the next round must address: requested changes > findings."""
+        return rev["changes"] or rev["findings"]
+
+    def _refine_round(self, critic, goal, work_ov, review_ov,
+                      reviews, pending, i, max_iter) -> "tuple":
+        """One refine_with round: do the pending work, get the review."""
+        report = self.do(self._refine_task(goal, pending), **work_ov)
+        rev = critic.review(subject=goal, author=report, **review_ov)
+        reviews.append(rev)
+        _LOG.info("refine_with iteration %d/%d · verdict=%s",
+                  i, max_iter, rev["verdict"])
+        return report, rev
+
     def refine_with(self, critic: "Ranger", goal: str, max_iter: int = 3,
                     **ov) -> dict:
         """The two-agent until: do, get reviewed, address the changes, repeat.
@@ -429,22 +449,19 @@ class MultiMixin:
                 "remove session= (it can never reach the gate)"
             )
         work_ov = dict(ov)                      # do() takes everything
-        review_ov = {k: v for k, v in ov.items() if k != "memory"}
+        review_ov = self._review_options(ov)
         reviews: list[dict] = []
         pending = ""
         report = ""
         try:
             for i in range(1, max_iter + 1):
-                report = self.do(self._refine_task(goal, pending),
-                                  **work_ov)
-                rev = critic.review(subject=goal, author=report, **review_ov)
-                reviews.append(rev)
-                _LOG.info("refine_with iteration %d/%d · verdict=%s",
-                          i, max_iter, rev["verdict"])
+                report, rev = self._refine_round(
+                    critic, goal, work_ov, review_ov, reviews, pending,
+                    i, max_iter)
                 if rev["passed"]:
                     return {"approved": True, "iterations": i,
                             "report": report, "reviews": reviews}
-                pending = rev["changes"] or rev["findings"]
+                pending = self._refine_pending(rev)
         except KeyboardInterrupt:
             raise KeyboardInterrupt(_interrupt_payload(
                 "refine_with", {"approved": False, "iterations": len(reviews),

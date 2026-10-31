@@ -665,3 +665,12 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   old local), interrupt payloads byte-identical, rollback chaining
   unchanged. until cc 5, resolve cc 8, both ≤ 10; 358 green; scan
   9.15 → 9.21; check exit 0.
+
+- **Issue #15 resolved — refine_with round body extracted.** cc 12
+  → 9 via three pure pieces: `_refine_round` (do + review + log,
+  no decisions), `_refine_pending` (changes-or-findings precedence
+  lookup), `_review_options` (the memory-stripping option split).
+  All raises stay in refine_with at the boundary — the
+  fail-BEFORE-work session check, the critic type check and the
+  budget validation are unmoved; interrupt payload and outcome dict
+  shapes byte-identical. 358 green; scan 9.21 → 9.24; check exit 0.
