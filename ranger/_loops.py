@@ -170,6 +170,67 @@ class LoopsMixin:
         report = self.do(step, **ov)
         return step, report, *self._verdict(goal, gate_cmd, condition, **ov)
 
+    def _bounded_rounds(self, label: str, max_iter: int,
+                        round_fn, interrupt_state):
+        """Shared until/resolve skeleton: rounds, interrupt, exhaustion.
+
+        `round_fn(i)` runs one round and returns a COMPLETED result dict
+        to return immediately, or None to keep iterating (it also updates
+        `interrupt_state()`-visible progress along the way).
+        `interrupt_state()` yields the exact payload a cancelled loop
+        must carry. Returns (done: bool, result, iterations_executed).
+        Honest by construction: a max_iter budget never fabricates
+        success — `done` is False and the caller composes the red result.
+        """
+        executed = 0
+        try:
+            for i in range(1, max_iter + 1):
+                executed = i
+                done_result = round_fn(i)
+                if done_result is not None:
+                    return True, done_result, executed
+        except KeyboardInterrupt:
+            raise KeyboardInterrupt(
+                _interrupt_payload(label, interrupt_state())) from None
+        return False, None, executed
+
+    def _until_loop(self, goal, gate_cmd, condition, steps, progress,
+                    ov, max_iter, snap_tag):
+        """Closures + bounded rounds for until(); composes the red result.
+
+        Pure until()-specific orchestration: the round body, the
+        cancelled-loop payload, the exhausted-budget result and the
+        optional rollback all in one place.
+        """
+        def _interrupt_state():
+            return {"achieved": False, "iterations": len(steps),
+                    "steps": steps, "report": progress["report"],
+                    "last_gate": progress["last_gate"]}
+
+        def _round(i):
+            step, report, ok, last_gate = self._until_round(
+                goal, gate_cmd, condition, steps, ov)
+            steps.append(step)
+            progress["report"], progress["last_gate"] = report, last_gate
+            _LOG.info("until iteration %d/%d · gate(%s) → %s",
+                      i, max_iter, last_gate["kind"],
+                      "achieved" if ok else "not achieved")
+            if ok:
+                return {"achieved": True, "iterations": i, "steps": steps,
+                        "report": report, "last_gate": last_gate}
+            return None
+
+        done, green, _ = self._bounded_rounds("until", max_iter, _round,
+                                             _interrupt_state)
+        if done:
+            return green
+        result = {"achieved": False, "iterations": len(steps),
+                  "steps": steps, "report": progress["report"],
+                  "last_gate": progress["last_gate"]}
+        if snap_tag is not None:
+            self._rollback_on_red(result, snap_tag)
+        return result
+
     def until(
         self,
         goal: str,
@@ -220,9 +281,6 @@ class LoopsMixin:
         """
         if not isinstance(max_iter, int) or max_iter < 0:
             raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
-        steps: list[str] = []
-        report = ""
-        last_gate: dict = {}    # mechanical evidence of the final verdict
         # -- gate sanity pre-check: vacuous-green detection ------------ #
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
@@ -231,32 +289,11 @@ class LoopsMixin:
             return {"achieved": True, "iterations": 0, "steps": [],
                     "report": "", "already_green": True,
                     "last_gate": pre_gate}
-        snap_tag: str | None = None
-        if rollback_on_fail:
-            snap_tag = self._pre_loop_snapshot("until")
-        try:
-            for i in range(1, max_iter + 1):
-                step, report, ok, last_gate = self._until_round(
-                    goal, gate_cmd, condition, steps, ov)
-                steps.append(step)
-                _LOG.info("until iteration %d/%d · gate(%s) → %s",
-                          i, max_iter, last_gate["kind"],
-                          "achieved" if ok else "not achieved")
-                if ok:
-                    return {"achieved": True, "iterations": i, "steps": steps,
-                            "report": report, "last_gate": last_gate}
-        except KeyboardInterrupt:
-            # cancelled, not failed: nothing is claimed achieved, but the
-            # progress already paid for survives in the exception message
-            raise KeyboardInterrupt(_interrupt_payload(
-                "until", {"achieved": False, "iterations": len(steps),
-                          "steps": steps, "report": report,
-                          "last_gate": last_gate})) from None
-        result = {"achieved": False, "iterations": len(steps),
-                  "steps": steps, "report": report, "last_gate": last_gate}
-        if rollback_on_fail and snap_tag is not None:
-            self._rollback_on_red(result, snap_tag)
-        return result
+        steps: list[str] = []
+        progress = {"report": "", "last_gate": {}}
+        snap_tag = self._pre_loop_snapshot("until") if rollback_on_fail else None
+        return self._until_loop(goal, gate_cmd, condition, steps, progress,
+                                ov, max_iter, snap_tag)
 
     def attempt(
         self,
@@ -363,31 +400,35 @@ class LoopsMixin:
         if rollback_on_fail:
             snap_tag = self._pre_loop_snapshot("resolve")
         plan_text = self.plan(goal, **ov)
-        report = ""
-        last_gate = pre_gate
-        iters = 0
-        try:
-            for i in range(1, max_iter + 1):
-                iters = i
-                report, ok, last_gate = self._resolve_round(
-                    goal, plan_text, gate_cmd, condition, ov)
-                _LOG.info("resolve iteration %d/%d · gate(%s) → %s", i,
-                          max_iter, last_gate["kind"],
-                          "PASS" if ok else "not yet")
-                if ok:
-                    return {"status": "PASS", "goal": goal,
-                            "plan": plan_text, "iterations": i,
-                            "report": report, "last_gate": last_gate}
-        except KeyboardInterrupt:
-            # cancelled, not failed: progress already paid for survives
-            raise KeyboardInterrupt(_interrupt_payload(
-                "resolve",
-                {"status": "FAILED", "goal": goal, "plan": plan_text,
-                 "iterations": iters, "report": report,
-                 "last_gate": last_gate})) from None
+        progress = {"report": "", "last_gate": pre_gate}
+
+        def _interrupt_state():
+            return {"status": "FAILED", "goal": goal, "plan": plan_text,
+                    "iterations": progress["iterations"],
+                    "report": progress["report"],
+                    "last_gate": progress["last_gate"]}
+
+        def _round(i):
+            progress["iterations"] = i
+            report, ok, last_gate = self._resolve_round(
+                goal, plan_text, gate_cmd, condition, ov)
+            progress["report"], progress["last_gate"] = report, last_gate
+            _LOG.info("resolve iteration %d/%d · gate(%s) → %s", i,
+                      max_iter, last_gate["kind"],
+                      "PASS" if ok else "not yet")
+            if ok:
+                return {"status": "PASS", "goal": goal,
+                        "plan": plan_text, "iterations": i,
+                        "report": report, "last_gate": last_gate}
+            return None
+
+        done, green, iters = self._bounded_rounds("resolve", max_iter,
+                                                 _round, _interrupt_state)
+        if done:
+            return green
         result = {"status": "FAILED", "goal": goal, "plan": plan_text,
-                  "iterations": iters, "report": report,
-                  "last_gate": last_gate}
+                  "iterations": iters, "report": progress["report"],
+                  "last_gate": progress["last_gate"]}
         if rollback_on_fail and snap_tag is not None:
             self._rollback_on_red(result, snap_tag)
         return result

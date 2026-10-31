@@ -651,3 +651,17 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   _PURE_LABELS session drop stay in the boundary method — zero
   motion. quote()'s byte-identity pin (shared seam) green untouched;
   358 tests green; scan 9.11 → 9.16; check exit 0.
+
+- **Issue #14 resolved — bounded-loop skeleton unified.** until/resolve
+  cc 11-twins now share `_bounded_rounds(label, max_iter, round_fn,
+  interrupt_state)`: it owns the iteration, the KeyboardInterrupt →
+  honest-payload re-raise, and the exhausted-budget outcome; each
+  command keeps only its own round body, stop condition and result
+  shapes. One mid-flight budget violation (until span 91 > 86 — the
+  closures had moved inside it) was caught by `pcina check` and fixed
+  inside the cycle by extracting `_until_loop`; HEAD was never red.
+  Semantics pinned exactly: resolve still counts an interrupted
+  in-flight round (iters set before the round body, mirroring the
+  old local), interrupt payloads byte-identical, rollback chaining
+  unchanged. until cc 5, resolve cc 8, both ≤ 10; 358 green; scan
+  9.15 → 9.21; check exit 0.
