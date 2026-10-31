@@ -600,3 +600,35 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   the mechanical gates (compile, side-effect-free import <2s, main
   guard, shipped-API-only); 358 tests green, scan 9.05, check exit 0,
   MI all-A.
+
+- **System-analysis cycle — principal-analyst audit + structural
+  issue generation (Phases 1–3, zero functional drift).** New
+  artifact `docs/system-analysis.md`: the as-is audit — end-to-end
+  run lifecycle (command wrapper → option resolution → skill
+  collection → prompt composition → transport → completion), the
+  nine in-process data schemas (run-options dict `o`, context,
+  costs ledger, telemetry, loop results, snapshot log, backend
+  registry — ranger has no database by design), all three
+  communication boundaries (Ranger→harness CLIs, Ranger→git,
+  mixins→engine seams), and a per-module responsibility matrix
+  with a finding: no circular imports, no accidental god object —
+  the single-class design is the public API and mixin split already
+  separates the seven responsibility axes. Remaining honest debt is
+  ranked with weighted scan evidence (par_map cc14+_resolve_run_
+  options cc13 twin shapes, until/resolve cc11 loop-skeleton
+  duplication, refine_with cc12, backend docstrings, 9 depth-3
+  guards, `_Spinner` false positive documented as a mock seam).
+  The PAT gained CREATE-only issue scope: six atomic refactoring
+  issues created via `gh issue create` (#12 par_map assembly
+  split, #13 options-merge split, #14 bounded-loop skeleton
+  unification, #15 refine_with round body, #16 backend adapter
+  docs, #17 guard inversions), each with Problem/Proposed
+  solution/Acceptance criteria; generator kept as
+  `scripts/refactor-issues.sh` (--dry-run supported). Token still
+  cannot EDIT or CLOSE issues: #11 is a duplicate stub of #12
+  (created during a scope probe with a placeholder body) and the
+  eight shipped-feature issues #3–#10 remain open — both sets are
+  one human close-click away. Issues deliberately precede code:
+  each maps to a fresh loop cycle if pursued. Gates after the
+  audit commit: 358 green, check exit 0, scan 9.05 (unchanged —
+  audit added docs only).
