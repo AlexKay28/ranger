@@ -674,3 +674,13 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   fail-BEFORE-work session check, the critic type check and the
   budget validation are unmoved; interrupt payload and outcome dict
   shapes byte-identical. 358 green; scan 9.21 → 9.24; check exit 0.
+
+- **Issue #16 resolved — backend adapters documented.** Twelve
+  targeted docstrings on `_backends.py`: class-level contracts for
+  _OpenCodeBackend/_PiBackend/_OpenHandsBackend/_ClaudeBackend
+  (which CLI, which argv shape, which output format) and one-liners
+  on every flagged build_cmd/parse_output/list_models — what the
+  method returns and how options map. Documentation-only, zero code
+  change: suite untouched, 358 green. Scan 9.24 → 9.29, size aspect
+  clean, docstring_coverage 80% → 86%, all docstring findings
+  cleared; check exit 0; MI all-A.

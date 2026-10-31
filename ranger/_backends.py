@@ -121,10 +121,12 @@ class _Backend:
 
 
 class _OpenCodeBackend(_Backend):
+    """opencode CLI adapter: `opencode run`, JSONL parts when stats."""
     name = "opencode"
     install_hint = "install it from https://opencode.ai"
 
     def build_cmd(self, o, full_prompt, skill_files):
+        """Assemble the `opencode run` argv; dry_run maps to the plan agent."""
         cmd = ["opencode", "run", "--model", o["model"]]
         agent_name = o.get("agent") or o.get("mode")
         # dry_run maps to opencode's read-only plan agent (law 4: a
@@ -155,6 +157,7 @@ class _OpenCodeBackend(_Backend):
         return cmd, full_prompt
 
     def parse_output(self, stdout, want_stats):
+        """Parse stdout: plain answer text, or JSONL parts + timings."""
         if not want_stats:
             return stdout.strip(), None
         parts_text, session, starts, ends = self._scan_jsonl(stdout)
@@ -189,6 +192,7 @@ class _OpenCodeBackend(_Backend):
         return parts_text, session, starts, ends
 
     def list_models(self, match):
+        """Model ids via `opencode models`, optionally filtered by match."""
         try:
             proc = subprocess.run(
                 ["opencode", "models"],
@@ -313,6 +317,7 @@ class _CodexBackend(_Backend):
         return texts, thread, usage
 
     def parse_output(self, stdout, want_stats):
+        """Fold codex JSONL events into the final message and info."""
         texts, thread, usage = self._collect_events(stdout)
         answer = "\n".join(texts).strip()
         if not want_stats:
@@ -333,12 +338,14 @@ class _CodexBackend(_Backend):
 
 
 class _PiBackend(_Backend):
+    """pi CLI adapter: `--print` output, effort maps to --thinking levels."""
     name = "pi"
     install_hint = "install it from https://pi.dev (curl -fsSL https://pi.dev/install.sh | sh)"
     supports_sessions = True
     native_file_skills = True   # --skill takes files AND directories
 
     def build_cmd(self, o, full_prompt, skill_files):
+        """Assemble the `pi --print` argv; dry_run is refused loudly."""
         cmd = ["pi", "--print"]
         # pi has no permission system at all — dry_run/read-only cannot
         # be mapped to it, so it refuses loudly instead of pretending
@@ -372,6 +379,7 @@ class _PiBackend(_Backend):
         return stdout.strip(), None
 
     def list_models(self, match):
+        """Model ids via `pi --list-models`, optionally filtered by match."""
         try:
             proc = subprocess.run(
                 ["pi", "--list-models"],
@@ -397,12 +405,14 @@ class _PiBackend(_Backend):
 
 
 class _OpenHandsBackend(_Backend):
+    """OpenHands CLI adapter: JSON stdout carrying the embedded session id."""
     name = "openhands"
     install_hint = "install the OpenHands CLI from https://docs.openhands.dev"
     supports_sessions = True
     native_file_skills = False  # markdown skills are inlined into prompts
 
     def build_cmd(self, o, full_prompt, skill_files):
+        """Assemble the OpenHands headless argv; model via LLM_MODEL env."""
         # headless has no approval flow and no agent/title/thinking/mode
         # flags; the model is selected via LLM_MODEL env (never as a
         # CLI flag) together with --override-with-envs.
@@ -434,12 +444,14 @@ class _OpenHandsBackend(_Backend):
 
 
 class _ClaudeBackend(_Backend):
+    """claude CLI adapter: `--output-format json`, one result object."""
     name = "claude"
     install_hint = "install the Claude Code CLI (https://code.claude.com/docs)"
     supports_sessions = True  # new session ids are READ from json output
     native_file_skills = False  # markdown skills are inlined into prompts
 
     def build_cmd(self, o, full_prompt, skill_files):
+        """Assemble `claude -p` argv; permission modes map from auto/dry_run."""
         # Claude Code headless: `claude -p "<prompt>"` is one
         # non-interactive turn. Agent/mode/title/thinking have no frozen
         # headless flag, and effort has no CLI translation — both raise
@@ -474,6 +486,7 @@ class _ClaudeBackend(_Backend):
         return cmd, full_prompt
 
     def parse_output(self, stdout, want_stats):
+        """Locate the last JSON result line; extract cost and token usage."""
         # --output-format json: one JSON object on stdout with at
         # minimum result, session_id, total_cost_usd and usage fields.
         obj = self._find_result_object(stdout)
