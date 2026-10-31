@@ -130,6 +130,20 @@ class EngineMixin:
             if to is not None:
                 c["tokens_out"] = (c["tokens_out"] or 0) + int(to)
 
+    @staticmethod
+    def _merged_run_options(base: dict, ov: dict) -> dict:
+        """Ctor snapshot merged with known per-call keys. Pure, no raises."""
+        opts = dict(base)
+        opts.update({k: v for k, v in ov.items() if k in _RUN_KEYS})
+        return opts
+
+    @staticmethod
+    def _effective_agent_mode(opts: dict, ov: dict):
+        """Per-call agent/mode beats ctor mode beats ctor agent (law 4)."""
+        per_call_agent = ov.get("agent") or ov.get("mode")
+        ctor_agent = opts.get("mode") or opts.get("agent")
+        return per_call_agent or ctor_agent
+
     def _resolve_run_options(self, label: str, ov: dict) -> tuple:
         """Merge ctor + per-call run options into `o`; validate everything.
 
@@ -137,8 +151,8 @@ class EngineMixin:
         unknown keywords / unknown backends / bad effort, and validates
         the safety-rail specs — all BEFORE any outside world is touched.
         """
-        opts = {k: getattr(self, k) for k in _RUN_KEYS}
-        opts.update({k: v for k, v in ov.items() if k in _RUN_KEYS})
+        opts = self._merged_run_options(
+            {k: getattr(self, k) for k in _RUN_KEYS}, ov)
         unknown = set(ov) - set(_RUN_KEYS)
         if unknown:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
@@ -161,10 +175,7 @@ class EngineMixin:
         # harness session is continuation state, so drop it for pure labels
         if label in _PURE_LABELS:
             o["session"] = None
-        # priority: per-call agent/mode beats constructor mode beats agent
-        per_call_agent = ov.get("agent") or ov.get("mode")
-        ctor_agent = opts.get("mode") or opts.get("agent")
-        o["agent"] = per_call_agent or ctor_agent
+        o["agent"] = self._effective_agent_mode(opts, ov)
         o["mode"] = None
         effort = (o["effort"] or "medium").lower()
         if effort not in ("low", "medium", "high"):

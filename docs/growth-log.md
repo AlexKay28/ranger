@@ -642,3 +642,12 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   exception classes byte-identical; 358 tests untouched and green;
   scan 9.05 → 9.11 (a 7-raise paranoia warn resolved, none added);
   check exit 0.
+
+- **Issue #13 resolved — _resolve_run_options merge/raise split.**
+  cc 13 → 8 via two pure helpers: `_merged_run_options` (ctor
+  snapshot + known per-call keys, no decisions) and
+  `_effective_agent_mode` (per-call beats ctor mode beats ctor
+  agent). Every raise, the backend lookup, the effort check and the
+  _PURE_LABELS session drop stay in the boundary method — zero
+  motion. quote()'s byte-identity pin (shared seam) green untouched;
+  358 tests green; scan 9.11 → 9.16; check exit 0.
