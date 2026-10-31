@@ -632,3 +632,13 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   each maps to a fresh loop cycle if pursued. Gates after the
   audit commit: 358 green, check exit 0, scan 9.05 (unchanged —
   audit added docs only).
+
+- **Issue #12 resolved — par_map assembly/validation split.** cc 14
+  → 9 via two pure helpers: `_par_spec_error` returns
+  `(ExceptionClass, message) | None` for one call spec (raw lookup,
+  never raises — so every raise stays in `par_map` at the trust
+  boundary, law 5) and `_par_execute` owns the semaphore + gather
+  assembly with honest per-item exceptions. Error strings and
+  exception classes byte-identical; 358 tests untouched and green;
+  scan 9.05 → 9.11 (a 7-raise paranoia warn resolved, none added);
+  check exit 0.

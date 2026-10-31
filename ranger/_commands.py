@@ -559,6 +559,52 @@ class CommandsMixin:
                                         label="check", **ov)
         return _parse_check_verdict(answer)
 
+    @staticmethod
+    def _par_spec_error(i: int, call: dict, default_agent) -> "tuple | None":
+        """(ExceptionClass, message) for one bad call spec; None if good.
+
+        Pure validation lookup — it never raises; `par_map` owns the
+        raising, so validation stays at the trust boundary (law 5).
+        """
+        method = call.get("method", "ask")
+        twin = f"{method}_async"
+        if method not in _ASYNC_TWIN_METHODS:
+            return (ValueError,
+                    f"calls[{i}]: method must be one of "
+                    f"{sorted(_ASYNC_TWIN_METHODS)}, got {method!r}")
+        args = call.get("args", [])
+        kwargs = call.get("kwargs", {})
+        agent = call.get("agent", default_agent)
+        if not isinstance(args, (list, tuple)):
+            return (TypeError, f"calls[{i}]: args must be a list, got {args!r}")
+        if not isinstance(kwargs, dict):
+            return (TypeError, f"calls[{i}]: kwargs must be a dict, got {kwargs!r}")
+        if not hasattr(agent, twin):
+            return (TypeError,
+                    f"calls[{i}]: agent has no {twin} — a Ranger is required")
+        return None
+
+    @staticmethod
+    async def _par_execute(specs: "list[tuple]",
+                           max_concurrency: int) -> "list":
+        """Run validated (agent, twin, args, kwargs) specs concurrently.
+
+        Pure assembly: bounded semaphore + gather with per-item honest
+        exceptions. No validation happens here.
+        """
+        if not specs:
+            return []
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _one(agent, twin, args, kwargs):
+            async with semaphore:
+                return await getattr(agent, twin)(*args, **kwargs)
+
+        # return_exceptions=True: a sibling failure must not cancel the
+        # others, and per-item errors are reported in place — never hidden
+        return await asyncio.gather(
+            *(_one(*spec) for spec in specs), return_exceptions=True)
+
     async def par_map(self, calls: "list[dict]",
                       max_concurrency: int = 8) -> "list":
         """Run independent calls concurrently; one result per input.
@@ -597,38 +643,13 @@ class CommandsMixin:
         for i, call in enumerate(calls):
             if not isinstance(call, dict):
                 raise TypeError(f"calls[{i}] must be a dict, got {call!r}")
+            err = self._par_spec_error(i, call, self)
+            if err is not None:
+                raise err[0](err[1])
             method = call.get("method", "ask")
-            twin = f"{method}_async"
-            if method not in _ASYNC_TWIN_METHODS:
-                raise ValueError(
-                    f"calls[{i}]: method must be one of "
-                    f"{sorted(_ASYNC_TWIN_METHODS)}, got {method!r}"
-                )
-            args = call.get("args", [])
-            kwargs = call.get("kwargs", {})
-            agent = call.get("agent", self)
-            if not isinstance(args, (list, tuple)):
-                raise TypeError(f"calls[{i}]: args must be a list, got {args!r}")
-            if not isinstance(kwargs, dict):
-                raise TypeError(f"calls[{i}]: kwargs must be a dict, got {kwargs!r}")
-            if not hasattr(agent, twin):
-                raise TypeError(
-                    f"calls[{i}]: agent has no {twin} — a Ranger is required"
-                )
-            seen.append((agent, twin, list(args), dict(kwargs)))
-        if not seen:
-            return []
-
-        semaphore = asyncio.Semaphore(max_concurrency)
-
-        async def _one(agent, twin, args, kwargs):
-            async with semaphore:
-                return await getattr(agent, twin)(*args, **kwargs)
-
-        # return_exceptions=True: a sibling failure must not cancel the
-        # others, and per-item errors are reported in place — never hidden
-        return await asyncio.gather(
-            *(_one(*spec) for spec in seen), return_exceptions=True)
+            seen.append((call.get("agent", self), f"{method}_async",
+                         list(call.get("args", [])), dict(call.get("kwargs", {}))))
+        return await self._par_execute(seen, max_concurrency)
 
     def gate(self, command: str, timeout: float | None = None) -> bool:
         """Mechanical boolean gate: run a shell command, return exit==0.
