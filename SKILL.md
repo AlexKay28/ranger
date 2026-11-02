@@ -73,6 +73,10 @@ an exit-code boolean and does not call a model.
   entry — real tokens when the backend reports them, else chars/4). The
   red result carries `budget_exhausted: True` when the budget — not
   `max_iter` — stopped it; a round in flight is never cancelled.
+- `skills_budget=N` (per-call or `with_config`) caps each skill file a
+  backend INLINES (codex/claude/openhands) at N chars — an unbounded
+  grant file is a spend bomb. The excerpt is a verbatim head plus an
+  honest end marker; default None keeps whole files.
 - Ctrl+C / notebook interrupt raises `KeyboardInterrupt`, stops the CLI client,
   and retires the progress spinner. Long loops put honest partial state in the
   interrupt message; nothing is claimed complete.

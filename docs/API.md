@@ -95,6 +95,7 @@ ranger.Ranger(
 | `memory` | `True` | record + recall conversation context |
 | `memory_budget` | `20000` | recall cap in characters |
 | `skills` | `None` | allow-list: files/dirs via `--file`, prose as grants |
+| `skills_budget` | `None` (per-call / `with_config`, no ctor param) | opt-in cap (chars) per skill file INLINED into the prompt (codex/claude/openhands); native file-attachment backends (opencode, pi) send full files through their own channel — unaffected. A clipped excerpt ends with a marker naming the full file path. `agent.with_config(skills_budget=...)` keeps it as a policy |
 | `effort` | `"medium"` | "low"/"medium"/"high" depth directive |
 | `stats` | `False` | JSON-mode runs + telemetry in `agent.last` |
 | `backend` | `"opencode"` | which harness to drive — see Backends below |

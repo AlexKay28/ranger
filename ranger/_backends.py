@@ -74,17 +74,36 @@ class _Backend:
             "remove it for this backend (see docs/API.md, Backends)"
         )
 
-    def _inline_skills(self, full_prompt: str, skill_files: list) -> str:
+    @staticmethod
+    def _skill_excerpt(path, text: str, budget) -> str:
+        """One inlined skill file, verbatim — or an honest head excerpt.
+
+        With `budget` (skills_budget, chars) smaller than the file, the
+        FRONT of the file travels (skills front-load their rules) plus
+        a marker saying exactly where the excerpt ends. None (default)
+        keeps whole files — the frozen composition is byte-identical.
+        """
+        if budget is None or len(text) <= budget:
+            return text
+        return (text[:budget].rstrip()
+                + f"\n… [skill excerpt clipped at {budget} chars "
+                  f"by skills_budget — read the full file: {path}]")
+
+    def _inline_skills(self, full_prompt: str, skill_files: list,
+                       budget=None) -> str:
         """Attach markdown skill files by inlining them into the prompt.
 
         Shared shape for backends without a native file-attachment
         flag (codex, claude, openhands): one header, the file blocks,
-        then the task — the exact frozen composition.
+        then the task — the exact frozen composition. `budget` is the
+        optional per-file excerpt cap (skills_budget).
         """
         if not skill_files:
             return full_prompt
         blocks = [
-            f"### Attached skill file: {f}\n" + Path(f).read_text(encoding="utf-8")
+            f"### Attached skill file: {f}\n"
+            + self._skill_excerpt(f, Path(f).read_text(encoding="utf-8"),
+                                 budget)
             for f in skill_files
         ]
         return (
@@ -270,7 +289,8 @@ class _CodexBackend(_Backend):
         for k in ("agent", "mode", "title"):
             if o.get(k):
                 raise self.unavailable(k)
-        full_prompt = self._inline_skills(full_prompt, skill_files)
+        full_prompt = self._inline_skills(full_prompt, skill_files,
+                                          o.get("skills_budget"))
         cmd = self._sandbox_argv(o)
         if o["model"]:
             cmd += ["-m", o["model"]]
@@ -433,7 +453,8 @@ class _OpenHandsBackend(_Backend):
         # so a read-only dry run cannot be guaranteed — refuse it loudly
         if o.get("dry_run"):
             raise self.unavailable("dry_run")
-        full_prompt = self._inline_skills(full_prompt, skill_files)
+        full_prompt = self._inline_skills(full_prompt, skill_files,
+                                          o.get("skills_budget"))
         cmd = ["openhands", "--headless"]
         if o["session"]:
             cmd += ["--resume", o["session"]]
@@ -477,7 +498,8 @@ class _ClaudeBackend(_Backend):
             # prompt (every edit/write) is denied instead
             if o["auto"]:
                 o = dict(o, auto=False)
-        full_prompt = self._inline_skills(full_prompt, skill_files)
+        full_prompt = self._inline_skills(full_prompt, skill_files,
+                                          o.get("skills_budget"))
         cmd = ["claude"]
         if o["model"]:
             cmd += ["--model", o["model"]]

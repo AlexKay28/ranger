@@ -183,6 +183,13 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
     that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
     """
 
+    #: per-run default for the opt-in skill-file excerpt cap (chars):
+    #: None = whole files. Set per call (`ask(..., skills_budget=N)`) or
+    #: keep a policy with `with_config(skills_budget=N)`. Applies where
+    #: backends INLINE skills (codex/claude/openhands); native
+    #: file-attachment backends send full files — unaffected.
+    skills_budget = None
+
     def __init__(
         self,
         model: str | None = None,
@@ -196,7 +203,7 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
         pretty: bool = True,
         memory: bool = True,
         memory_budget: int = _MEMORY_BUDGET,
-        skills: list | None = None,
+        skills: "list | None" = None,
         mode: str | None = None,
         effort: str = "medium",
         stats: bool = False,

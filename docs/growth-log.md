@@ -739,3 +739,24 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   capping remains the only identified candidate and needs a user
   default decision, so this closes the autonomous roadmap. Docs-only;
   369 green, check exit 0, scan 9.56.
+
+- **Skills-excerpt capping — `skills_budget=N` (opt-in, conservative).**
+  Closed the unbounded-spend hole in `_inline_skills`: a granted
+  skill file used to travel whole into codex/claude/openhands prompts
+  — an uncontrolled spend bomb. New run option `skills_budget` (chars,
+  default None = files verbatim, composition byte-identical, pinned)
+  caps each INLINED file at N: the verbatim head travels plus an honest
+  end marker naming the full path. Design decisions made autonomously,
+  conservatively: (1) opt-in default None — no existing prompt byte
+  changes; (2) NOT a ctor param — the pinned 23>22 max_params budget
+  caught the addition mid-cycle, and `with_config(skills_budget=N)`
+  already provides the session-policy handle (setattr over _RUN_KEYS +
+  a class-level None default), so the fix was restructure, never the
+  budget; (3) `EngineMixin._validate_skills_budget` validates at the
+  shared seam — bad values (0/neg/bool/non-int) raise ValueError before
+  any spawn, identically for quote() (pinned); (4) native
+  file-attachment backends (opencode, pi) send whole files via their
+  own channel — documented honestly, the cap neither applies nor lies.
+  12 new tests (380 total, marker+text bumped); commands.md skills
+  section, API.md run-settings table (+ explicit no-ctor-param note),
+  SKILL.md Costs bullet updated. Scan 9.56, check exit 0, MI all-A.

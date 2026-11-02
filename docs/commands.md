@@ -82,7 +82,9 @@ extra skills/tools: markdown files and directories attach via opencode's
 `--file` flag (the codex backend inlines them into the prompt); plain-prose
 entries are injected into the prompt as
 operating grants. `with_config(skills=...)` carries an allow-list on a
-configured copy.
+configured copy. `skills_budget=N` (per-call or `with_config`) caps each
+inlined skill file at N chars — the verbatim head travels, plus a marker
+naming where the excerpt ends; prompt spend stays yours to bound.
 
 ### Mode / effort / stats (shipped)
 - `mode="build"` — run as a named opencode agent (build/plan/general or a

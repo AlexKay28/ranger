@@ -22,7 +22,7 @@ _LOG = logging.getLogger("ranger")
 _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
     "pretty", "memory", "skills", "effort", "stats", "backend", "memory_budget",
-    "retries", "env", "allow", "deny", "dry_run",
+    "retries", "env", "allow", "deny", "dry_run", "skills_budget",
 )
 
 # Quote/clip lengths (chars) — one named place per frozen number, so an
