@@ -709,3 +709,23 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   now state the truth: zero unshipped commands remain, the former
   planned tier shipped as the repair tier. Docs-only; 358 green,
   check exit 0.
+
+- **Cycle A — commands.md planned tier de-staled; Cycle B —
+  `token_budget=` shipped on `until()`/`resolve()`.** (B) Loops are
+  now boundable by SPEND, not just iterations: validation refuses
+  0/negative/bool/non-int budgets before any spawn (not even the
+  pre-check gate runs); `_budget_guard` freezes the metric at loop
+  entry — real `tokens_in` when the backend reports them, else
+  chars/APPROX_CHARS_PER_TOKEN (the quote() estimate, a preview not a
+  bill) — and `_bounded_rounds` checks it BEFORE each round, so a
+  round in flight is never cancelled. A loop the budget (not
+  max_iter) stops carries `budget_exhausted: True` in its red result
+  (until: achieved=False; resolve: status FAILED); the no-budget red
+  shape is byte-identical to before (pinned by exact-dict equality).
+  Mid-cycle `pcina check` caught resolve's docstring pushing its span
+  to 88 lines (limit 86): fixed in-cycle by extracting
+  `_resolve_loop` (mirror of `_until_loop`), never red at HEAD.
+  11 new tests in tests/test_token_budget.py (369 total; count
+  marker + text updated); commands.md/API.md/SKILL.md sections
+  updated; cost_control.py example demonstrates the spend-bounded
+  loop. Scan 9.56, check exit 0, MI all-A.

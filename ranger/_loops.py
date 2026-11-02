@@ -20,7 +20,7 @@ from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
                     _RUN_KEYS, _normalize_patterns,
                     _path_matches, RangerError, RangerTimeout,
                     RangerHarnessError, GATE_OUT_CLIP,
-                    DIAGNOSIS_CLIP)
+                    DIAGNOSIS_CLIP, APPROX_CHARS_PER_TOKEN)
 from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
                          _search_prompt, _check_prompt, _extract_keys_clause,
@@ -170,32 +170,73 @@ class LoopsMixin:
         report = self.do(step, **ov)
         return step, report, *self._verdict(goal, gate_cmd, condition, **ov)
 
+    @staticmethod
+    def _validate_token_budget(token_budget) -> None:
+        """token_budget: None (off) or a positive int — refuse the rest."""
+        if token_budget is None:
+            return
+        if (not isinstance(token_budget, int) or isinstance(token_budget, bool)
+                or token_budget < 1):
+            raise ValueError(
+                f"token_budget must be a positive int, got {token_budget!r}")
+
+    def _budget_guard(self, token_budget):
+        """Predicate: True while the loop may run another round.
+
+        Charges the cumulative `agent.costs` ledger: when the backend
+        reports real tokens they decide, else chars divided by
+        APPROX_CHARS_PER_TOKEN (the quote() estimate — a preview, not a
+        bill). The metric is FIXED at loop entry so tokens/chars can
+        never mix mid-flight. Checked BEFORE each round: a round in
+        flight is never cancelled — see the KeyboardInterrupt contract.
+        """
+        if token_budget is None:
+            return None
+        c0 = self.costs
+        use_tokens = c0["tokens_in"] is not None
+        tokens0 = c0["tokens_in"] or 0
+        chars0 = c0["chars_in"]
+
+        def may_continue():
+            c = self.costs
+            if use_tokens and c["tokens_in"] is not None:
+                spent = (c["tokens_in"] or 0) - tokens0
+            else:
+                spent = (c["chars_in"] - chars0) / APPROX_CHARS_PER_TOKEN
+            return spent < token_budget
+
+        return may_continue
+
     def _bounded_rounds(self, label: str, max_iter: int,
-                        round_fn, interrupt_state):
+                        round_fn, interrupt_state, may_continue=None):
         """Shared until/resolve skeleton: rounds, interrupt, exhaustion.
 
         `round_fn(i)` runs one round and returns a COMPLETED result dict
         to return immediately, or None to keep iterating (it also updates
         `interrupt_state()`-visible progress along the way).
         `interrupt_state()` yields the exact payload a cancelled loop
-        must carry. Returns (done: bool, result, iterations_executed).
-        Honest by construction: a max_iter budget never fabricates
-        success — `done` is False and the caller composes the red result.
+        must carry. `may_continue()` (optional, from `_budget_guard`) is
+        checked before every round; returning (done: bool, result,
+        iterations_executed, budget_exhausted: bool). Honest by
+        construction: a max_iter/token budget never fabricates success —
+        `done` is False and the caller composes the red result.
         """
         executed = 0
         try:
             for i in range(1, max_iter + 1):
+                if may_continue is not None and not may_continue():
+                    return False, None, executed, True
                 executed = i
                 done_result = round_fn(i)
                 if done_result is not None:
-                    return True, done_result, executed
+                    return True, done_result, executed, False
         except KeyboardInterrupt:
             raise KeyboardInterrupt(
                 _interrupt_payload(label, interrupt_state())) from None
-        return False, None, executed
+        return False, None, executed, False
 
     def _until_loop(self, goal, gate_cmd, condition, steps, progress,
-                    ov, max_iter, snap_tag):
+                    ov, max_iter, snap_tag, may_continue=None):
         """Closures + bounded rounds for until(); composes the red result.
 
         Pure until()-specific orchestration: the round body, the
@@ -220,13 +261,15 @@ class LoopsMixin:
                         "report": report, "last_gate": last_gate}
             return None
 
-        done, green, _ = self._bounded_rounds("until", max_iter, _round,
-                                             _interrupt_state)
+        done, green, _, budget_exhausted = self._bounded_rounds(
+            "until", max_iter, _round, _interrupt_state, may_continue)
         if done:
             return green
         result = {"achieved": False, "iterations": len(steps),
                   "steps": steps, "report": progress["report"],
                   "last_gate": progress["last_gate"]}
+        if budget_exhausted:
+            result["budget_exhausted"] = True
         if snap_tag is not None:
             self._rollback_on_red(result, snap_tag)
         return result
@@ -238,6 +281,7 @@ class LoopsMixin:
         gate_cmd: str | list | None = None,
         condition: str | None = None,
         rollback_on_fail: bool = False,
+        token_budget: int | None = None,
         **ov,
     ) -> dict:
         """The loop primitive: plan → do → verify, repeated until green.
@@ -268,6 +312,15 @@ class LoopsMixin:
         never a sympathy iteration because the agent says it's "almost
         done".
 
+        `token_budget=N` bounds the loop by SPEND as well: the
+        cumulative `agent.costs` ledger is charged per round — real
+        tokens when the backend reports them, else chars/4 (the same
+        quote() estimate — a preview, not a bill). Checked BEFORE each
+        round, so a round in flight is never cancelled; when the
+        budget — not max_iter — stops the loop, the red result carries
+        `budget_exhausted: True`. The metric (tokens vs chars) is fixed
+        at loop entry; none of this fabricates success.
+
         Recoverability (issue #7): `rollback_on_fail=True` takes a git
         snapshot before round 1 and, when the budget ends red, restores
         the working tree to it — the result then carries
@@ -281,6 +334,7 @@ class LoopsMixin:
         """
         if not isinstance(max_iter, int) or max_iter < 0:
             raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
+        self._validate_token_budget(token_budget)
         # -- gate sanity pre-check: vacuous-green detection ------------ #
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
@@ -292,8 +346,9 @@ class LoopsMixin:
         steps: list[str] = []
         progress = {"report": "", "last_gate": {}}
         snap_tag = self._pre_loop_snapshot("until") if rollback_on_fail else None
+        may_continue = self._budget_guard(token_budget)
         return self._until_loop(goal, gate_cmd, condition, steps, progress,
-                                ov, max_iter, snap_tag)
+                                ov, max_iter, snap_tag, may_continue)
 
     def attempt(
         self,
@@ -354,6 +409,48 @@ class LoopsMixin:
         ok, last_gate = self._verdict(goal, gate_cmd, condition, **ov)
         return report, ok, last_gate
 
+    def _resolve_loop(self, goal, plan_text, gate_cmd, condition, ov,
+                      max_iter, progress, pre_gate, snap_tag,
+                      rollback_on_fail, may_continue):
+        """Closures + bounded rounds for resolve(); composes FAILED.
+
+        Pure resolve()-specific orchestration: the round body, the
+        cancelled-loop payload, the exhausted-budget result and the
+        optional rollback all in one place.
+        """
+        def _interrupt_state():
+            return {"status": "FAILED", "goal": goal, "plan": plan_text,
+                    "iterations": progress["iterations"],
+                    "report": progress["report"],
+                    "last_gate": progress["last_gate"]}
+
+        def _round(i):
+            progress["iterations"] = i
+            report, ok, last_gate = self._resolve_round(
+                goal, plan_text, gate_cmd, condition, ov)
+            progress["report"], progress["last_gate"] = report, last_gate
+            _LOG.info("resolve iteration %d/%d · gate(%s) → %s", i,
+                      max_iter, last_gate["kind"],
+                      "PASS" if ok else "not yet")
+            if ok:
+                return {"status": "PASS", "goal": goal,
+                        "plan": plan_text, "iterations": i,
+                        "report": report, "last_gate": last_gate}
+            return None
+
+        done, green, iters, budget_exhausted = self._bounded_rounds(
+            "resolve", max_iter, _round, _interrupt_state, may_continue)
+        if done:
+            return green
+        result = {"status": "FAILED", "goal": goal, "plan": plan_text,
+                  "iterations": iters, "report": progress["report"],
+                  "last_gate": progress["last_gate"]}
+        if budget_exhausted:
+            result["budget_exhausted"] = True
+        if rollback_on_fail and snap_tag is not None:
+            self._rollback_on_red(result, snap_tag)
+        return result
+
     def resolve(
         self,
         goal: str,
@@ -361,6 +458,7 @@ class LoopsMixin:
         gate_cmd: str | list | None = None,
         condition: str | None = None,
         rollback_on_fail: bool = False,
+        token_budget: int | None = None,
         **ov,
     ) -> dict:
         """The resolver distilled: plan once, then bounded honest attempts.
@@ -383,6 +481,12 @@ class LoopsMixin:
         exact sub-check that failed). gates must assert contracts, not
         prose.
 
+        `token_budget=N` additionally bounds the loop by SPEND (the
+        `agent.costs` ledger — real tokens when reported, else the
+        chars/4 quote() estimate), checked before each round; a FAILED
+        stopped by the budget rather than max_iter carries
+        `budget_exhausted: True`. Never a sympathy pass either way.
+
             agent.resolve("add coverage for parse()",
                           gate_cmd=["python -m pytest -q",
                                     "python -m pytest -q -k parse"])
@@ -390,6 +494,7 @@ class LoopsMixin:
         if not isinstance(max_iter, int) or max_iter < 0:
             raise ValueError(
                 f"max_iter must be a non-negative int, got {max_iter!r}")
+        self._validate_token_budget(token_budget)
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("resolve pre-check · gate(%s) already green — no work needed",
@@ -400,38 +505,12 @@ class LoopsMixin:
         if rollback_on_fail:
             snap_tag = self._pre_loop_snapshot("resolve")
         plan_text = self.plan(goal, **ov)
-        progress = {"report": "", "last_gate": pre_gate}
-
-        def _interrupt_state():
-            return {"status": "FAILED", "goal": goal, "plan": plan_text,
-                    "iterations": progress["iterations"],
-                    "report": progress["report"],
-                    "last_gate": progress["last_gate"]}
-
-        def _round(i):
-            progress["iterations"] = i
-            report, ok, last_gate = self._resolve_round(
-                goal, plan_text, gate_cmd, condition, ov)
-            progress["report"], progress["last_gate"] = report, last_gate
-            _LOG.info("resolve iteration %d/%d · gate(%s) → %s", i,
-                      max_iter, last_gate["kind"],
-                      "PASS" if ok else "not yet")
-            if ok:
-                return {"status": "PASS", "goal": goal,
-                        "plan": plan_text, "iterations": i,
-                        "report": report, "last_gate": last_gate}
-            return None
-
-        done, green, iters = self._bounded_rounds("resolve", max_iter,
-                                                 _round, _interrupt_state)
-        if done:
-            return green
-        result = {"status": "FAILED", "goal": goal, "plan": plan_text,
-                  "iterations": iters, "report": progress["report"],
-                  "last_gate": progress["last_gate"]}
-        if rollback_on_fail and snap_tag is not None:
-            self._rollback_on_red(result, snap_tag)
-        return result
+        progress = {"report": "", "last_gate": pre_gate,
+                    "iterations": 0}
+        may_continue = self._budget_guard(token_budget)
+        return self._resolve_loop(goal, plan_text, gate_cmd, condition,
+                                  ov, max_iter, progress, pre_gate,
+                                  snap_tag, rollback_on_fail, may_continue)
 
     def fix(self, problem: str, gate_cmd: "str | list | None" = None,
             condition: str | None = None, max_iter: int = 3,

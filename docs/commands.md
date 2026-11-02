@@ -95,7 +95,7 @@ configured copy.
 
 ## ✅ Shipped — core commands
 
-### `until(goal, max_iter=5, gate_cmd=None, condition=None, rollback_on_fail=False) -> dict`
+### `until(goal, max_iter=5, gate_cmd=None, condition=None, rollback_on_fail=False, token_budget=None) -> dict`
 The loop primitive. Each iteration: `ask` for ONE next step, `do` it, then a
 mechanical verdict — `gate_cmd` (pure exit code) or `condition` (agent YES/NO).
 Returns `{"achieved", "iterations", "steps", "report"}`; exhausted budget means
@@ -106,6 +106,11 @@ masquerade as an agent achievement. With `rollback_on_fail=True` a git snapshot
 is taken before round 1 and a red budget restores the working tree
 (`rolled_back: True` + `rollback: {"tag", "restored"}` in the result); without
 a git repo nothing is claimed — the keys are simply absent.
+`token_budget=N` bounds the loop by spend as well: the cumulative
+`agent.costs` ledger is charged per round — real tokens when the backend
+reports them, else the chars/4 `quote()` estimate — checked before each
+round, so a round in flight is never cancelled. A loop the budget (not
+`max_iter`) stops returns `budget_exhausted: True`.
 
 ### `ask(prompt) -> str`
 Raw prompt, raw answer. The escape hatch every other method is built on.
@@ -332,7 +337,7 @@ agent.attempt("add __repr__ to Parser",
               gate_cmd="python -m pytest -q tests/test_parser.py")
 ```
 
-### `resolve(goal, max_iter=3, gate_cmd=None, condition=None, rollback_on_fail=False) -> dict`
+### `resolve(goal, max_iter=3, gate_cmd=None, condition=None, rollback_on_fail=False, token_budget=None) -> dict`
 The resolver distilled into one call: pre-flight gate check (already green →
 `status: "ALREADY_GREEN"`, zero model runs), then ONE `plan()` (think before
 touching), then a bounded loop of plan-guided `do()` rounds with a mechanical
@@ -342,6 +347,10 @@ verdict each — no sympathy pass when the budget ends. Returns
 `rollback_on_fail=True` snapshots before round 1 and restores the tree when
 the budget ends red (`rolled_back: True` + `rollback: {"tag", "restored"}`);
 absent keys mean no snapshot existed — never a claimed restore.
+`token_budget=N` additionally bounds the loop by spend (`agent.costs`:
+real tokens when reported, else the chars/4 quote() estimate, checked
+before each round); a `FAILED` the budget — not `max_iter` — stopped
+carries `budget_exhausted: True`.
 
 ```python
 agent.resolve("add coverage for parse()",

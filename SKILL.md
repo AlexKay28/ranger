@@ -33,6 +33,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
 | Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
 | Bounded repair loop | `until(..., gate_cmd=..., max_iter=N)` | An unbounded `while` loop |
+| Spend-bounded loop | `until(..., token_budget=N)` / `resolve(..., token_budget=N)` — charges `agent.costs` (real tokens, else chars/4 estimate) before each round; a budget stop returns `budget_exhausted: True`, never success | Raising `max_iter` and hoping it is cheap enough |
 | Independent review | `critic.review(subject, author=claims)` | Trusting the author report |
 
 **Use a mechanical gate whenever one exists.** For a repair, the shell test
@@ -67,6 +68,11 @@ an exit-code boolean and does not call a model.
   "chars_out", "tokens_in", "tokens_out", "wall_s"}`, real tokens once
   the backend reports them. Wrap a loop between `costs_reset()` and
   `agent.costs` for bounded per-work-item accounting.
+- `token_budget=N` on `until()`/`resolve()` bounds a loop by SPEND as
+  well: the ledger is charged before every round (metric frozen at loop
+  entry — real tokens when the backend reports them, else chars/4). The
+  red result carries `budget_exhausted: True` when the budget — not
+  `max_iter` — stopped it; a round in flight is never cancelled.
 - Ctrl+C / notebook interrupt raises `KeyboardInterrupt`, stops the CLI client,
   and retires the progress spinner. Long loops put honest partial state in the
   interrupt message; nothing is claimed complete.

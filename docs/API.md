@@ -295,7 +295,7 @@ and returns `exit_code == 0`. Timeout (default: the agent's `timeout`)
 returns `False`. Pure `subprocess` — never recorded into context, never
 costs tokens.
 
-### `until(goal, max_iter=5, gate_cmd=None, condition=None, **ov) -> dict`
+### `until(goal, max_iter=5, gate_cmd=None, condition=None, rollback_on_fail=False, token_budget=None, **ov) -> dict`
 
 The loop primitive. Each iteration: `ask` for ONE concrete next step toward
 the goal → `do` executes it → mechanical verdict. The verdict is `gate_cmd`
@@ -344,6 +344,23 @@ or log without re-running the command yourself.
 
 There is no sympathy iteration: an agent claiming "almost done" cannot buy a
 fifth round — only the gate can.
+
+**Spend budget (`token_budget=N`).** In addition to `max_iter`, the loop
+can be bounded by spend. The cumulative `agent.costs` ledger is charged
+before every round: real `tokens_in` when the backend reports them, else
+`chars_in / 4` (the same estimate `quote()` previews). The metric is fixed
+at loop entry, a round in flight is never cancelled, and a loop the budget
+— not `max_iter` — stopped returns an extra key: `"budget_exhausted": True`.
+Wrap a loop between `costs_reset()` and `agent.costs` for exact scoped
+accounting.
+
+```python
+agent.costs_reset()
+res = agent.until("make tests green", gate_cmd="python -m pytest -q",
+                  max_iter=10, token_budget=20_000)
+if res.get("budget_exhausted"):
+    print("stopped by spend, not by max_iter; spent:", agent.costs)
+```
 
 ### `attempt(goal, gate_cmd=None, condition=None, **ov) -> dict`
 
@@ -405,7 +422,7 @@ res = agent.attempt("ship the fix", gate_cmd=["python -m pytest -q",
 res["last_gate"]["parts"]   # [{"cmd", "ok", "output"}, ...] — only for lists
 ```
 
-### `resolve(goal, max_iter=3, gate_cmd=None, condition=None, **ov) -> dict`
+### `resolve(goal, max_iter=3, gate_cmd=None, condition=None, rollback_on_fail=False, token_budget=None, **ov) -> dict`
 
 The resolver distilled into one command — the protocol the hand-rolled
 resolver scripts follow, with every honesty rule intact:
@@ -435,6 +452,8 @@ res = agent.resolve("add coverage for parse()",
                               "python -m pytest -q -k parse"])
 if res["status"] == "FAILED":
     print(res["last_gate"]["output"])   # which sub-check stayed red, and why
+    if res.get("budget_exhausted"):
+        print("stopped by token_budget, not by max_iter")
 ```
 
 ### `verify_claims(topic, max_claims=5, **ov) -> list[dict]`

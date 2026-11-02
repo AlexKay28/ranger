@@ -52,6 +52,17 @@ def main() -> None:
     # reports them — chars are always real)
     print("\nthis run cost:", agent.costs)
 
+    # 5. a spend-bounded loop: token_budget charges the ledger before
+    #    every round; a loop the budget stops reports it honestly
+    agent.costs_reset()
+    result = agent.until("make README.md describe every module in docs/",
+                         gate_cmd="grep -q system-analysis README.md",
+                         max_iter=6, token_budget=TOKEN_BUDGET * 10)
+    print("\nloop achieved:", result["achieved"],
+          "· iterations:", result["iterations"],
+          "· budget_exhausted:", result.get("budget_exhausted", False))
+    print("the whole loop cost:", agent.costs)
+
 
 if __name__ == "__main__":
     main()
