@@ -760,3 +760,12 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   12 new tests (380 total, marker+text bumped); commands.md skills
   section, API.md run-settings table (+ explicit no-ctor-param note),
   SKILL.md Costs bullet updated. Scan 9.56, check exit 0, MI all-A.
+
+- **Release prep 0.7.1 -> 0.8.0.** Two new backward-compatible public
+  surfaces shipped since 0.7.1 (token_budget= on until()/resolve(),
+  skills_budget run option) plus the extract-validation and docs tiers
+  — a MINOR bump per the publishing discipline. Alignment gates do
+  the verifying: pyproject version == ranger.__version__
+  (test_packaging), API.md/ARCHITECTURE.md version pointers updated.
+  380 green, check exit 0, scan 9.56, MI all-A at the bump. PyPI
+  upload itself stays a human operation per docs/PUBLISHING.md.
