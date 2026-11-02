@@ -701,3 +701,11 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   identical outputs pinned by the untouched 358-test suite; one
   accidental newline corruption in __init__.py caught by ast.parse
   before the suite ran and fixed in place. check exit 0; MI all-A.
+
+- **Docs correctness pass — commands.md planned tier de-staled.** The
+  🔜 header claimed "(1)" planned command while the body listed none,
+  and the closing paragraph still said the 🌱 tier "(fix/transform/
+  commit) composes on top of it" — all three shipped long ago. Both
+  now state the truth: zero unshipped commands remain, the former
+  planned tier shipped as the repair tier. Docs-only; 358 green,
+  check exit 0.

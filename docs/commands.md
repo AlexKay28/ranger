@@ -412,12 +412,11 @@ on a non-repo cwd, a clean tree, or a changeset path hitting the
 rails (instance `allow`/`deny` defaults apply; per-call lists replace).
 `message=None` uses a marked default ("ranger: agent work (…)").
 
-## 🔜 Next batch (planned, same pattern) (1)
+## 🔜 Next batch (planned, same pattern) (0)
 
 ## 🌱 Later (0)
 
-The former planned entries (`fix`, `transform`, `commit`) shipped —
-see the repair tier above. No unshipped commands remain.
+No unshipped commands remain.
 
 ## Non-goals
 
@@ -437,5 +436,6 @@ agent.until("parser.py: implement the TODO, all tests green",
 Shipped surface today includes targeted `critique()` and `trace()` alongside bounded `edit()` and free-roaming `do()`,
 plus the multi-agent interactions, the
 context/memory trio (`context_summarize`/`context_compact`/`context_clear`)
-and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The 🌱 tier
-that remains (fix/transform/commit) composes on top of it.
+and the run-time knobs (`mode`, `effort`, `stats`, `skills`). The former
+planned tier (`fix`, `transform`, `commit`) all shipped — the repair tier
+above.
