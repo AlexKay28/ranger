@@ -97,9 +97,19 @@ agent.extract("failing tests under tests/",
 agent.gate("python -m pytest -q")    # -> exit-code booleans, no model
 agent.until("make the tests green", gate_cmd="python -m pytest -q")
                                     # -> loop: plan/do/verify until green
+agent.until("make the tests green", gate_cmd="python -m pytest -q",
+           token_budget=20_000)     # -> same loop, bounded by spend too
+agent.quote("review src/ for dead code")  # -> the exact prompt priced, free
 agent.costs_reset()                  # -> zero the ledger, returns the old one
 print(agent.costs)                   # -> {"calls": ...} what the loop cost
 ```
+
+Spend control is layered: `quote()` previews a run before you pay (zero
+model calls), `token_budget=` on `until()`/`resolve()` stops a loop the
+moment the ledger crosses the line (red result carries
+`budget_exhausted: True` — never a fabricated success), and
+`agent.costs` reports what everything actually cost. See
+`examples/monitoring/cost_control.py` for the full recipe.
 
 Each call is one fresh headless `opencode run` in the agent's working directory
 (`cwd=`), with permissions auto-approved so it can actually touch the filesystem.

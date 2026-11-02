@@ -729,3 +729,13 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   marker + text updated); commands.md/API.md/SKILL.md sections
   updated; cost_control.py example demonstrates the spend-bounded
   loop. Scan 9.56, check exit 0, MI all-A.
+
+- **Docs cycle — README quick tour tells the spend-control story.**
+  The README's flagship snippet ended at `costs_reset()`/`costs`
+  without `quote()` (free run preview) or `token_budget=` on
+  `until()`/`resolve()` — both shipped. Added both to the tour plus a
+  short layered-spend paragraph pointing to
+  examples/monitoring/cost_control.py. Roadmap note: skill excerpt
+  capping remains the only identified candidate and needs a user
+  default decision, so this closes the autonomous roadmap. Docs-only;
+  369 green, check exit 0, scan 9.56.
