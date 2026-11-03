@@ -769,3 +769,11 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   (test_packaging), API.md/ARCHITECTURE.md version pointers updated.
   380 green, check exit 0, scan 9.56, MI all-A at the bump. PyPI
   upload itself stays a human operation per docs/PUBLISHING.md.
+
+- **Issue hygiene — the backlog retired on GitHub.** The fine-grained
+  PAT gained close/comment scope (previously create-only; scoped probes
+  verified close + comment now succeed). All 15 open issues closed WITH
+  evidence comments: #12-#17 with their resolving commits and gate
+  deltas (ede257e, 47c8a73, e89d7f9, e054252, 5938e4b, d03422d), #11
+  as a stub duplicate of #12, and #3-#10 as shipped features with the
+  version/doc pointers. Open-issue list is now empty.
