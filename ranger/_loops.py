@@ -514,6 +514,7 @@ class LoopsMixin:
 
     def fix(self, problem: str, gate_cmd: "str | list | None" = None,
             condition: str | None = None, max_iter: int = 3,
+            token_budget: "int | None" = None,
             **ov) -> dict:
         """Diagnose once, then bounded repair rounds — evidence-carrying.
 
@@ -525,6 +526,10 @@ class LoopsMixin:
 
         status is exactly "ALREADY_GREEN" | "FIXED" | "FAILED"; the
         result carries the diagnosis and last_gate evidence.
+        `token_budget=N` bounds the rounds by SPEND too (the
+        `agent.costs` ledger, checked before every round, exactly like
+        until()/resolve() — see there); a FAILED the budget stopped
+        carries `budget_exhausted: True`.
 
             agent.fix("tests/test_parser.py::test_tokens fails",
                       gate_cmd="python -m pytest -q -k tokens")
@@ -533,6 +538,7 @@ class LoopsMixin:
                 or max_iter < 1):
             raise ValueError(
                 f"max_iter must be a positive int, got {max_iter!r}")
+        self._validate_token_budget(token_budget)
         pre_ok, pre_gate = self._verdict(problem, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("fix pre-check · already green — no work needed")
@@ -542,7 +548,12 @@ class LoopsMixin:
         clipped = _clip(diagnosis, DIAGNOSIS_CLIP)
         last_gate: dict = pre_gate
         rounds = 0
+        may_continue = self._budget_guard(token_budget)
+        budget_exhausted = False
         for i in range(1, max_iter + 1):
+            if may_continue is not None and not may_continue():
+                budget_exhausted = True
+                break
             rounds = i
             work = (
                 "Repair this problem until the mechanical verdict passes.\n\n"
@@ -558,6 +569,9 @@ class LoopsMixin:
                 return {"status": "FIXED", "problem": problem,
                         "diagnosis": diagnosis, "iterations": i,
                         "last_gate": last_gate}
-        return {"status": "FAILED", "problem": problem,
-                "diagnosis": diagnosis, "iterations": rounds,
-                "last_gate": last_gate}
+        result = {"status": "FAILED", "problem": problem,
+                  "diagnosis": diagnosis, "iterations": rounds,
+                  "last_gate": last_gate}
+        if budget_exhausted:
+            result["budget_exhausted"] = True
+        return result

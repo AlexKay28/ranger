@@ -777,3 +777,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   deltas (ede257e, 47c8a73, e89d7f9, e054252, 5938e4b, d03422d), #11
   as a stub duplicate of #12, and #3-#10 as shipped features with the
   version/doc pointers. Open-issue list is now empty.
+
+- **Review cycle — code review of the v0.8 work; fix() joined the
+  spend-bound loops.** Reviewed the two feature commits with fresh
+  eyes and live probes rather than re-reading diffs: quote() proven
+  honest against the new cap end-to-end (chars_total reflects the
+  skills_budget clip through the same seam — 2617 vs 322 measured,
+  law 1 holds); metric freezing, interrupt semantics and validation
+  boundaries re-verified. One real asymmetry found by review: fix()
+  is a third bounded loop that accepted neither token_budget nor the
+  honest budget-exhausted flag. Added token_budget= to fix() inside
+  its existing loop (validated at the boundary, ledger charged before
+  every round, budget_exhausted: True on a spend-stopped FAILED) —
+  intentionally NOT restructured onto _bounded_rounds, which would
+  have silently changed fix()'s raw-KeyboardInterrupt contract. The
+  pinned-shape test immediately caught a bug in the draft (calling a
+  None guard when token_budget=None) — fixed before commit; the
+  collected-count gate also corrected the marker to the real 386.
+  Docs synced (commands.md, API.md, SKILL.md rule row now names all
+  three loops). 386 green, check exit 0, scan 9.56, MI all-A.

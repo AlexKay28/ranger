@@ -33,7 +33,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
 | Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
 | Bounded repair loop | `until(..., gate_cmd=..., max_iter=N)` | An unbounded `while` loop |
-| Spend-bounded loop | `until(..., token_budget=N)` / `resolve(..., token_budget=N)` — charges `agent.costs` (real tokens, else chars/4 estimate) before each round; a budget stop returns `budget_exhausted: True`, never success | Raising `max_iter` and hoping it is cheap enough |
+| Spend-bounded loop | `until(..., token_budget=N)` / `resolve(..., token_budget=N)` / `fix(..., token_budget=N)` — charges `agent.costs` (real tokens, else chars/4 estimate) before each round; a budget stop returns `budget_exhausted: True`, never success | Raising `max_iter` and hoping it is cheap enough |
 | Independent review | `critic.review(subject, author=claims)` | Trusting the author report |
 
 **Use a mechanical gate whenever one exists.** For a repair, the shell test

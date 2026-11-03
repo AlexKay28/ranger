@@ -108,6 +108,47 @@ class TestResolveTokenBudget:
         assert outcome["iterations"] == 2   # 100<150, 100+100 >= 150 -> stop
 
 
+class TestFixTokenBudget:
+    def test_budget_stops_repair_with_honest_flag(self):
+        agent = Ranger()
+
+        def _do(work, **ov):
+            agent._costs["chars_in"] += 4000
+            return "repaired"
+
+        with mock.patch.object(Ranger, "gate", side_effect=lambda c, **kw: False), \
+             mock.patch.object(Ranger, "diagnose",
+                               side_effect=lambda p, **ov: "it broke"), \
+             mock.patch.object(Ranger, "do", side_effect=_do):
+            outcome = agent.fix("broken thing", gate_cmd="pytest",
+                                max_iter=10, token_budget=750)
+        # one do() round = 1000 est tokens; round 2 is refused (>= 750)
+        assert outcome["status"] == "FAILED"
+        assert outcome["budget_exhausted"] is True
+        assert outcome["iterations"] == 1
+
+    def test_no_budget_failed_shape_is_unchanged(self):
+        agent = Ranger()
+        with mock.patch.object(Ranger, "gate", side_effect=lambda c, **kw: False), \
+             mock.patch.object(Ranger, "diagnose",
+                               side_effect=lambda p, **ov: "it broke"), \
+             mock.patch.object(Ranger, "do", side_effect=lambda w, **ov: "nope"):
+            outcome = agent.fix("broken thing", gate_cmd="pytest", max_iter=1)
+        assert outcome == {"status": "FAILED", "problem": "broken thing",
+                           "diagnosis": "it broke", "iterations": 1,
+                           "last_gate": {"kind": "gate_cmd", "ok": False,
+                                          "output": ""}}
+        assert "budget_exhausted" not in outcome
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "5"])
+    def test_refuses_bad_budgets_before_any_spawn(self, bad):
+        agent = Ranger()
+        with mock.patch.object(Ranger, "gate") as gate:
+            with pytest.raises(ValueError, match="token_budget"):
+                agent.fix("broken thing", token_budget=bad)
+        gate.assert_not_called()
+
+
 class TestTokenBudgetValidation:
     @pytest.mark.parametrize("bad", [0, -1, True, "5", 3.5])
     def test_refuses_bad_budgets_before_any_work(self, bad):

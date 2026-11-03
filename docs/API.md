@@ -776,14 +776,17 @@ never after work has already run.
 Three bounded compositions over the existing primitives (law 6), shipped
 on top of the [safety rails](#safety-rails) and [snapshots](#snapshots--rollback):
 
-**`fix(problem, gate_cmd=None, condition=None, max_iter=3) -> dict`** —
+**`fix(problem, gate_cmd=None, condition=None, max_iter=3, token_budget=None) -> dict`** —
 the bounded repair loop: mechanical pre-verdict (green →
 `"ALREADY_GREEN"`, zero work — never invent work), ONE read-only
 `diagnose()` pass, then at most `max_iter` `do()` repair rounds, each
 ending in a mechanical verdict. The diagnosis is carried inside every
 repair prompt. `status` is exactly `"ALREADY_GREEN" | "FIXED" |
 "FAILED"`; the result carries `{"problem", "diagnosis", "iterations",
-"last_gate"}` — budgets honest, no sympathy pass. Rails mark the work
+"last_gate"}` — budgets honest, no sympathy pass. `token_budget=N`
+bounds the rounds by spend too (the `agent.costs` ledger, checked
+before each round, as in `until()`/`resolve()`); a `FAILED` the budget
+stopped carries `budget_exhausted: True`. Rails mark the work
 rounds: with `deny`/`allow` set, an unverifiable (non-git) cwd refuses
 before any harness spawn.
 
