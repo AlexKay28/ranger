@@ -991,3 +991,10 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   never skipped rails/snapshots) mirrored exactly. With this, every
   finding and enhancement from the independent model review is
   shipped. 472 green, check exit 0, scan 9.41, MI all-A.
+
+- **Release 0.9.0 — the review-honesty era.** Version parity bumped
+  (pyproject + __version__ + version-bearing docs). Since 0.8.1:
+  evidence-carrying check (#31), loud harness schema-drift refusal
+  (#32), the three honesty additions — env_deny rail, snapshots_prune,
+  capabilities (#33) — and the write/edit spec-seam refactor (#30).
+  472 tests green, check exit 0, scan 9.41, MI all-A.

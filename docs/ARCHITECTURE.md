@@ -88,7 +88,7 @@ Ranger is composed from six single-purpose mixins plus a slim core —
   shipping; the suite itself fully mocks subprocesses, so CI runs on
   any machine with no CLIs and no API keys.
 - `main` is the only branch; releases are tagged (current package version:
-  `0.8.1`), CI green on every push.
+  `0.9.0`), CI green on every push.
 
 One-liner for a stranger: *ranger turns the headless opencode/codex
 CLIs into a Python library — the agent is a function call, and the

@@ -55,7 +55,7 @@ from ._engine import EngineMixin
 
 __all__ = ["Ranger", "RangerError", "RangerTimeout", "RangerHarnessError",
            "DEFAULT_MODEL", "register_backend", "backends", "debate"]
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
 # One-time staleness warning guard: a process that resolves a run to the
 # baked DEFAULT_MODEL is told once (per process) that the id may be stale.
