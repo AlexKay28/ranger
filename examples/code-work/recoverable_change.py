@@ -49,6 +49,10 @@ def main() -> None:
     print("rolled back to", restored["tag"], "— restored",
           len(restored["restored"]), "path(s)")
 
+    # maintenance: bound the hidden-ref registry to the newest few refs
+    pruned = agent.snapshots_prune(keep=5)
+    print("snapshot refs kept:", pruned["kept"])
+
 
 if __name__ == "__main__":
     main()

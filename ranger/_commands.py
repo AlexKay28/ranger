@@ -44,6 +44,25 @@ class CommandsMixin:
             ) from None
         return adapter.list_models(match)
 
+    @staticmethod
+    def capabilities() -> dict:
+        """Capability flags of every REGISTERED backend — no agent run.
+
+        Static, like `models()`: capabilities are class-level facts of
+        the adapter classes, never of a run or a Ranger instance.
+        Returns `{name: {"supports_sessions": bool, "native_file_skills":
+        bool}}` for every registered backend — a custom backend shows
+        up the moment `ranger.register_backend()` names it.
+
+            caps = ranger.Ranger.capabilities()
+            assert caps["codex"]["native_file_skills"] is False
+        """
+        return {
+            name: {"supports_sessions": bool(cls.supports_sessions),
+                   "native_file_skills": bool(cls.native_file_skills)}
+            for name, cls in _BACKEND_CLASSES.items()
+        }
+
     def with_config(self, **overrides) -> "Ranger":
         """Return a copy of this Ranger with run settings overridden.
 
@@ -65,7 +84,7 @@ class CommandsMixin:
         clone.last = dict(self.last)
         clone._costs = dict(self._costs)
         clone.snapshot_log = list(self.snapshot_log)
-        for key in ("allow", "deny"):
+        for key in ("allow", "deny", "env_deny"):
             setattr(clone, key, list(getattr(self, key)) if getattr(self, key)
                     else getattr(self, key))
         clone.env = dict(self.env) if self.env else self.env

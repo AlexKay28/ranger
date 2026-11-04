@@ -16,6 +16,12 @@ Status legend:
 Lists `opencode models` IDs; optional case-insensitive substring filter.
 Static method, no agent run needed.
 
+### `Ranger.capabilities() -> dict`
+Capability flags of every registered backend —
+`{name: {"supports_sessions": bool, "native_file_skills": bool}}` —
+static like `models()`, no agent run; `register_backend()` customs appear
+immediately. Read it instead of hardcoding backend names.
+
 ### `agent.with_config(**overrides) -> Ranger`
 Immutable-configured copy of the agent — keep a fast one and a smart one side
 by side. Accepts any of `model`, `timeout`, `auto`, `session`, `agent`, `title`,
@@ -28,6 +34,10 @@ e.g. `"build"`, `"plan"`), `title=`, `thinking=`. Unknown keywords raise
 `TypeError`. Safety rail overrides: `allow=[globs]`, `deny=[globs]` (deny wins;
 each list fully replaces the constructor's) and `dry_run=True` (harness
 read-only/plan mode; mutating commands skip their mutation post-checks).
+Child-env rail: `env_deny=[names]` — environment names stripped from the
+spawned harness child after the `env=` overlay (an explicit `env={...}`
+cannot bypass it; `env_deny=None` keeps today's byte-identical
+inheritance; keep a policy with `with_config(env_deny=[...])`).
 Targeted edits are checked before any subprocess spawns; `do()` probes
 git-verifiability up front and audits `git status` against the rails after.
 See the Safety rails section of docs/API.md.
@@ -336,6 +346,17 @@ untracked leftovers are cleaned **by exact path**, never a shotgun.
 HEAD, branches and commit history stay untouched. Returns
 `{"tag", "sha", "restored": [...]}` — the paths that actually differed.
 Nothing recorded / unknown tag / non-git cwd → `RangerError`.
+
+### `snapshots_prune(keep=5) -> dict`
+Maintenance: hidden-ref snapshots accumulate forever otherwise. Lists the
+ranger namespace with `git for-each-ref --sort=creatordate` (each ref's
+commit records its creation time — the honest order, independent of the
+in-process `snapshot_log` and its gaps across restarts) and deletes the
+OLDEST refs beyond the newest `keep` with `git update-ref -d`; pruned tags
+leave `snapshot_log`. Ref plumbing only — working tree, index, HEAD,
+results and foreign refs untouched. `keep` must be a positive int
+(`ValueError`; `keep=0` would destroy every safety buffer, minimum 1).
+Returns `{"pruned": [...], "kept": [...]}`, tags oldest-first.
 
 ### `attempt(goal, gate_cmd=None, condition=None) -> dict`
 The single-shot honest sibling of `until`: ONE `do()` of the goal, then a

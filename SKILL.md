@@ -183,7 +183,9 @@ two false-greens caught). Follow them when a ranger loop does real work.
   task N's completed report ("already done"), wasting iterations on
   self-doubt. Isolate: `agent.ask(..., memory=False)`, a fresh `Ranger()`,
   `snapshot(tag=...)` before and `rollback(tag)` after each task, or check
-  the cost with `quote()` first.
+  the cost with `quote()` first. Bound the accumulated snapshot refs between
+  tasks with `snapshots_prune(keep=5)` — it deletes only helper hidden
+  refs, never your working tree.
 - **Verify even PASSes.** After a loop claims `achieved`, re-check the
   feature mechanically yourself. Trust, then verify — in that order only
   when the stampede of a deadline demands it; ideally verify, then trust.
@@ -206,6 +208,9 @@ expired model quota, or an expected `RangerError` caused by invalid input.
 
 **Never include secrets.** Redact API tokens, credentials, private prompts,
 absolute private paths, and proprietary source. Link to public output only.
+For ranger runs specifically, the `env_deny=["NAME"]` run option strips
+named environment variables from the spawned harness child — use it when
+you must run an agent in an environment that holds live credentials.
 
 Use this issue format:
 

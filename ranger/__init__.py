@@ -187,6 +187,17 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
     #: async twin — inert everywhere else.
     evidence = None
 
+    #: per-run default for the opt-in child-env deny rail: None = the
+    #: harness child keeps inheriting everything, byte-identical to
+    #: today. Set per call (`ask(..., env_deny=["AWS_SECRET_ACCESS_KEY"])`),
+    #: keep a policy with `with_config(env_deny=[...])`, or assign the
+    #: attribute directly — no ctor keyword exists because the ctor
+    #: sits at its 22-parameter budget, the same trade skills_budget
+    #: and evidence made. Denied NAMES are stripped AFTER the env=
+    #: overlay is applied, so an explicit env={"NAME": ...} cannot
+    #: bypass the rail.
+    env_deny = None
+
     def __init__(
         self,
         model: str | None = None,

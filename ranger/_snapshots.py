@@ -13,6 +13,10 @@ from ._util import (_LOG, _clip, _normalize_patterns, RangerError,
                     _porcelain_paths_z,
                     SNAP_HEX_CLIP, SNAP_TIME_DECIMALS)
 
+# ranger's one and only hidden-ref namespace: every snapshot lands on
+# refs/ranger/snapshots/<tag>, and nothing outside it is ever touched
+_SNAP_REFS = "refs/ranger/snapshots"
+
 
 class SnapshotMixin:
     """Mixin — composed into ranger.Ranger (no bases)."""
@@ -90,7 +94,7 @@ class SnapshotMixin:
                 "commit-tree", tree, "-m", f"ranger snapshot {tag}",
                 env=env,
             ).strip()
-            self._git("update-ref", f"refs/ranger/snapshots/{tag}", sha,
+            self._git("update-ref", f"{_SNAP_REFS}/{tag}", sha,
                       env=env)
         finally:
             try:
@@ -185,6 +189,67 @@ class SnapshotMixin:
         restored = sorted(set(changed) | set(extras))
         _LOG.info("rollback · tag=%s · restored %d path(s)", tag, len(restored))
         return {"tag": tag, "sha": sha, "restored": restored}
+
+    def snapshots_prune(self, keep: int = 5) -> dict:
+        """Delete the OLDEST snapshot REFS beyond the newest `keep`.
+
+        Maintenance for the hidden-ref registry — snapshots accumulate
+        forever otherwise. Every ref under `refs/ranger/snapshots/` is
+        listed by `git for-each-ref --sort=creatordate`: each ref's own
+        commit records the wall time `snapshot()` created it, so the
+        ordering is the honest recorded one and survives process
+        restarts and gaps in the Python-side `snapshot_log` alike. The
+        oldest refs beyond `keep` are deleted with `git update-ref -d`
+        and their entries dropped from `agent.snapshot_log` (a pruned
+        snapshot is no longer rollbackable). The working tree, index,
+        HEAD and results are never touched, and refs outside the ranger
+        namespace are not even considered.
+
+        `keep` must be a positive int (`ValueError` otherwise) — `keep=0`
+        would wipe out every safety buffer in one call, so the minimum
+        is 1. Returns `{"pruned": [...], "kept": [...]}`: snapshot
+        tags, oldest-first. `RangerError` when cwd is not a git
+        repository or git fails — an honest refusal, never a claimed
+        prune.
+
+            agent.snapshots_prune(keep=3)
+            # {"pruned": ["snap-1"], "kept": ["snap-2", "snap-3"]}
+        """
+        if (not isinstance(keep, int) or isinstance(keep, bool)
+                or keep < 1):
+            raise ValueError(f"keep must be a positive int, got {keep!r}")
+        refs = self._snapshot_refs_chrono()
+        pruned, kept = refs[:-keep], refs[-keep:]
+        for ref in pruned:
+            self._git("update-ref", "-d", ref)
+        gone = {self._snap_tag_of(r) for r in pruned}
+        self.snapshot_log = [s for s in self.snapshot_log
+                             if s["tag"] not in gone]
+        _LOG.info("snapshots_prune · pruned %d · kept %d",
+                  len(gone), len(kept))
+        return {"pruned": [self._snap_tag_of(r) for r in pruned],
+                "kept": [self._snap_tag_of(r) for r in kept]}
+
+    def _snapshot_refs_chrono(self) -> "list[str]":
+        """Ranger snapshot refs, OLDEST first.
+
+        `git for-each-ref --sort=creatordate` on the one namespace:
+        each ref's own commit records when `snapshot()` created it.
+        Refs elsewhere in the repository are never listed — the prefix
+        match keep the prune target set ranger-owned, no matter what
+        for-each-ref was asked to show.
+        """
+        listing = self._git("for-each-ref", "--format=%(refname)",
+                            "--sort=creatordate", _SNAP_REFS)
+        return [r.strip() for r in listing.splitlines()
+                if r.strip().startswith(f"{_SNAP_REFS}/")]
+
+    @staticmethod
+    def _snap_tag_of(ref: str) -> str:
+        """Snapshot tag of a hidden ref — the basename after the last /."""
+        # snapshot tags are regex-validated to contain no '/', so the
+        # basename IS the tag
+        return ref.rpartition("/")[2]
 
     def commit(self, message: str | None = None,
                allow: "list[str] | None" = None,

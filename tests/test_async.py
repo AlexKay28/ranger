@@ -95,6 +95,17 @@ class TestSharedSeam:
                 pass  # mocked answers may fail post-parsing; argv is the point
         return None
 
+    def test_env_deny_rail_reaches_the_async_child_too(self):
+        """issue #33: the async twin strips denied env names exactly like
+        the sync transport — same _child_env seam, one rail, no fork."""
+        agent = Ranger(cwd=".")
+        agent.env_deny = ["RANGER_TEST_SECRET"]
+        factory, calls = make_exec_factory()
+        with mock.patch(SPAWN, side_effect=factory):
+            run(agent.ask_async("hi"))
+        child_env = calls[0]["kwargs"]["env"]
+        assert "RANGER_TEST_SECRET" not in child_env
+
     def test_ask_do_search_argv_identical(self, tmp_path):
         sync_agent = Ranger(model="anthropic/claude-sonnet-4-5", cwd=".",
                             timeout=30, retries=0, memory=False)

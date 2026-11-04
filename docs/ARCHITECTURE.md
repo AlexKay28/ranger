@@ -45,7 +45,7 @@ Ranger is composed from six single-purpose mixins plus a slim core —
 | `ranger/_backends.py` | Backend adapters — opencode, codex, pi, openhands, claude — one `build_cmd`/`parse_output` contract per CLI, plus `register_backend()` |
 | `ranger/_debate.py` | The module-level composition: the two-agent `debate()` |
 | `ranger/_safety.py` | `SafetyMixin`: allow/deny path predicates and pre/post guards around mutating commands (law 4) |
-| `ranger/_snapshots.py` | `SnapshotMixin`: git snapshot/rollback/commit rails — hidden-ref snapshots via a temporary index, no destructive verbs |
+| `ranger/_snapshots.py` | `SnapshotMixin`: git snapshot/rollback/commit rails — hidden-ref snapshots via a temporary index, ref pruning, no destructive verbs |
 | `ranger/_loops.py` | `LoopsMixin`: gate evidence and verdicts, `until`/`attempt`/`resolve`/`fix` — bounded, mechanical, never a sympathy pass |
 | `ranger/_multi.py` | `MultiMixin`: `verify_claims`, `review`, `challenge`, `second_opinion`, `refine_with` — frozen reply contracts, adversarial by construction |
 | `ranger/_commands.py` | `CommandsMixin`: the dialogue/fact commands, async twins, `par_map` — thin frozen prompts over the transport engine |
@@ -81,7 +81,7 @@ Ranger is composed from six single-purpose mixins plus a slim core —
 
 ## Quality posture
 
-- 454 tests <!-- tests:454 -->, well under the enforced 60-second suite
+- 472 tests <!-- tests:472 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before

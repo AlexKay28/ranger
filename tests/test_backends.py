@@ -335,3 +335,49 @@ class TestOpenHandsBuildCmd:
         assert "--override-with-envs" in argv
         child_env = run_mock.call_args.kwargs["env"]
         assert child_env["LLM_MODEL"] == "gpt-5.5"
+
+
+# --------------------------------------------------------------------- #
+# capabilities() — the adapter flag truth table (issue #33)
+
+class TestCapabilities:
+    """ranger.Ranger.capabilities(): the class-level capability map of
+    every REGISTERED backend, no instance state, no agent run. Custom
+    backends appear the moment register_backend() names them."""
+
+    def test_shape_covers_every_registered_backend(self):
+        caps = Ranger.capabilities()
+        assert set(caps) == set(ranger.backends())
+        for flags in caps.values():
+            assert set(flags) == {"supports_sessions", "native_file_skills"}
+            assert all(isinstance(v, bool) for v in flags.values())
+
+    def test_flags_tell_the_truth_about_each_adapter_class(self):
+        caps = Ranger.capabilities()
+        for name, cls in ranger._BACKEND_CLASSES.items():
+            assert caps[name] == {
+                "supports_sessions": cls.supports_sessions,
+                "native_file_skills": cls.native_file_skills,
+            }
+        # spot truth vs the frozen adapter research, not just identity
+        assert caps["opencode"]["native_file_skills"] is True
+        assert caps["codex"]["native_file_skills"] is False
+
+    def test_register_backend_is_reflected_immediately(self):
+        class _ProbeBackend(ranger._Backend):
+            name = "probe33"
+            native_file_skills = False
+
+            def build_cmd(self, o, full_prompt, skill_files):
+                return ["probe"], full_prompt
+
+            def parse_output(self, stdout, want_stats):
+                return stdout, None
+
+        ranger.register_backend("probe33", _ProbeBackend)
+        try:
+            caps = Ranger.capabilities()
+            assert caps["probe33"] == {"supports_sessions": True,
+                                       "native_file_skills": False}
+        finally:
+            del ranger._BACKEND_CLASSES["probe33"]   # no cross-test leaks

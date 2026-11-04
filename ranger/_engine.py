@@ -10,10 +10,10 @@ import time
 from pathlib import Path
 
 from ._util import (DEFAULT_MODEL, _LOG, _c, _clip, _kill_tree,
-                    _RUN_KEYS, RangerError, RangerTimeout,
-                    RangerHarnessError, UI_NOTE_CLIP, UI_RETRY_CLIP,
-                    RECALL_MSG_OVERHEAD, KILL_WAIT_S, SECONDS_PER_MIN,
-                    RUN_NOTE_CLIP)
+                    _RUN_KEYS, _normalize_env_names, RangerError,
+                    RangerTimeout, RangerHarnessError, UI_NOTE_CLIP,
+                    UI_RETRY_CLIP, RECALL_MSG_OVERHEAD, KILL_WAIT_S,
+                    SECONDS_PER_MIN, RUN_NOTE_CLIP)
 from ._contracts import _PURE_LABELS
 
 # direct binding, deliberately NOT subprocess.Popen: the sync transport
@@ -79,7 +79,8 @@ def _popen_run(cmd, cwd, env, timeout):
 class EngineMixin:
     """Mixin — composed into ranger.Ranger (no bases)."""
 
-    def _child_env(self, env: dict | None = None) -> dict | None:
+    def _child_env(self, env: dict | None = None,
+                   deny: "list[str] | None" = None) -> dict | None:
         """Environment for child CLI processes.
 
         Full inherited ``os.environ`` (including secrets) extended with
@@ -87,17 +88,26 @@ class EngineMixin:
         merges OVER the per-instance ``env`` (same-key wins, unrelated
         keys survive) — it extends, never replaces. ``None`` overlays
         mean inherit everything untouched.
+
+        ``deny`` (the env_deny rail) REMOVES the named variables AFTER
+        the overlay, so an explicit ``env={...}`` cannot smuggle a
+        denied name into the child — a rail an overlay can bypass is
+        not a rail. ``None`` (default) keeps the byte-identical
+        inheritance of today.
         """
         overlay: dict = dict(self.env) if self.env else {}
         if env:
             overlay.update(env)
-        if self.cwd is None and not overlay:
+        if self.cwd is None and not overlay and not deny:
             return None
         child = dict(os.environ)
         if self.cwd is not None:
             child["PWD"] = self.cwd
         if overlay:
             child.update(overlay)
+        if deny:
+            for var in deny:
+                child.pop(var, None)
         return child
 
     @property
@@ -205,6 +215,9 @@ class EngineMixin:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
         self._validate_skills_budget(opts.get("skills_budget"))
         self._validate_evidence(opts.get("evidence"))
+        # the env_deny rail validates on the shared seam too, so even a
+        # read-only command refuses a malformed spec before any spawn
+        _normalize_env_names("env_deny", opts.get("env_deny"))
         # safety-rail specs are validated on the shared seam too, so even
         # read-only commands reject a malformed spec before any spawn
         self._resolve_safety(ov)
@@ -396,7 +409,7 @@ class EngineMixin:
                 # o, not opts: adapters may fold settings into
                 # the env overlay inside build_cmd (e.g. the
                 # openhands backend maps model= to LLM_MODEL)
-                env=self._child_env(o.get("env")),
+                env=self._child_env(o.get("env"), o.get("env_deny")),
                 timeout=prep["timeout"],
             )
         except FileNotFoundError:
@@ -452,7 +465,7 @@ class EngineMixin:
                 cwd=self.cwd,
                 # o, not opts: adapters may fold settings into
                 # the env overlay inside build_cmd
-                env=self._child_env(o.get("env")),
+                env=self._child_env(o.get("env"), o.get("env_deny")),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,

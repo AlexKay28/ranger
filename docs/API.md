@@ -97,6 +97,7 @@ ranger.Ranger(
 | `skills` | `None` | allow-list: files/dirs via `--file`, prose as grants |
 | `skills_budget` | `None` (per-call / `with_config`, no ctor param) | opt-in cap (chars) per skill file INLINED into the prompt (codex/claude/openhands); native file-attachment backends (opencode, pi) send full files through their own channel — unaffected. A clipped excerpt ends with a marker naming the full file path. `agent.with_config(skills_budget=...)` keeps it as a policy |
 | `evidence` | `None` (per-call / `with_config`, no ctor param) | opt-in richer `check()` return: with `evidence=True`, `check()` / `check_async()` return `{"ok": bool, "evidence": str}` — the one short evidence line the frozen prompt allows after the YES/NO verdict — instead of the bare bool. Inert for every other command |
+| `env_deny` | `None` (per-call / `with_config`, no ctor param) | child-env safety rail: list of environment NAMES removed from the spawned harness CLI's environment, stripped AFTER the `env=` overlay — an explicit `env={"NAME": ...}` cannot smuggle a denied name back in. Names absent from the environment are silent no-ops. Applies to the harness child runs (sync and async twins); `gate()` and ranger's own git plumbing keep today's env. Like `skills_budget`/`evidence` there is no ctor keyword (the ctor sits at its parameter budget), so keep a policy with `with_config(env_deny=[...])` or assign the attribute |
 | `effort` | `"medium"` | "low"/"medium"/"high" depth directive |
 | `stats` | `False` | JSON-mode runs + telemetry in `agent.last` |
 | `backend` | `"opencode"` | which harness to drive — see Backends below |
@@ -120,6 +121,11 @@ CLI runs, and the `gate()` shell command) sees exactly this environment:
    `env=` override) is merged **on top** of the inherited environment: it
    extends, it never replaces. Existing keys with the same name are
    overwritten by the overlay; everything else passes through untouched.
+4. **The `env_deny=` rail, if any** — a list of environment *names* that is
+   REMOVED from the final child environment. Stripping happens **after**
+   the overlay, so a denied name cannot be smuggled back in with an
+   explicit `env={"NAME": ...}` — a rail an overlay could bypass would not
+   be a rail. Denied names absent from the environment are silent no-ops.
 
 `env=None` (the default) means no overlay: the child inherits everything as
 before. Example:
@@ -128,9 +134,16 @@ before. Example:
 agent = ranger.Ranger(cwd=".", env={"OPENCODE_LOG": "debug"})
 ```
 
-Note that the overlay cannot *remove* an inherited variable (set it to an
-empty string instead), and secrets in your environment are passed through to
-the child by design.
+Note that the `env=` overlay cannot *remove* an inherited variable —
+removal is what the `env_deny=` rail is for. Secrets in your environment
+are passed through to the agent's harness child **by design** (the agent
+may need them); `env_deny` is the mechanical off-switch per name:
+
+```python
+agent.ask("hi", env_deny=["AWS_SECRET_ACCESS_KEY",
+                          "OPENROUTER_API_KEY"])   # this run only
+lean = agent.with_config(env_deny=["AWS_SECRET_ACCESS_KEY"])
+```
 
 ### Per-call overrides
 
@@ -951,6 +964,21 @@ commit history are untouched. Returns `{"tag", "sha", "restored": [...]}`
 — the paths that actually differed. `RangerError` when nothing is
 recorded, the tag is unknown, or cwd is not a git repository.
 
+**`snapshots_prune(keep=5) -> dict`** — bound the hidden-ref registry,
+which otherwise accumulates forever. Lists every ref under
+`refs/ranger/snapshots/` with `git for-each-ref --sort=creatordate`
+(each ref's own commit records when `snapshot()` created it — the honest
+recorded order, which survives process restarts and gaps in the
+Python-side `snapshot_log` alike) and deletes the OLDEST refs beyond the
+newest `keep` via `git update-ref -d`. Pruned tags also leave
+`agent.snapshot_log`, so a pruned snapshot is no longer rollbackable.
+Ref plumbing only: the working tree, index, HEAD and results are never
+touched, and refs outside the ranger namespace are not even considered.
+`keep` must be a positive int (`ValueError` otherwise) — `keep=0` would
+wipe out every safety buffer in one call, so the minimum is 1. Returns
+`{"pruned": [...], "kept": [...]}`: snapshot tags, oldest-first.
+`RangerError` when cwd is not a git repository or git fails.
+
 **`until(..., rollback_on_fail=False)` / `resolve(..., rollback_on_fail=False)`**
 — when `True`, a snapshot is taken before round 1; if the budget ends red,
 the tree is restored and the result carries `rolled_back: True` plus
@@ -967,6 +995,9 @@ agent.rollback("before-refactor")     # {"tag": ..., "restored": [...]}
 result = agent.until("make tests green", gate_cmd="python -m pytest -q",
                      rollback_on_fail=True)
 # result.get("rolled_back") is True only if a red budget was actually rewound
+
+# maintenance: keep the newest 3 restore points, prune the older refs
+agent.snapshots_prune(keep=3)   # {"pruned": [...], "kept": [...]}
 ```
 
 ## Backends (harness adapters)
@@ -977,6 +1008,20 @@ different headless harness with the identical public API. All harness-specific t
 schemas, sandbox semantics — lives in one adapter class per backend; the
 command contracts, context memory and loops are untouched (paradigm law 7:
 the harness is a replaceable data plane).
+
+**`Ranger.capabilities() -> dict`** — the capability map as code, static
+like `models()` (capabilities are facts of the adapter classes, never of
+a run). `capabilities()` returns
+`{name: {"supports_sessions": bool, "native_file_skills": bool}}`
+for every registered backend, custom `register_backend()` backends
+included the moment they are named. Read it to decide frontend behavior
+instead of hardcoding backend names:
+
+```python
+caps = ranger.Ranger.capabilities()
+if not caps["codex"]["native_file_skills"]:
+    ...   # markdown skills will ride along inlined into the prompt
+```
 
 Capability map:
 

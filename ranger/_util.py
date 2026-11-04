@@ -22,7 +22,7 @@ _RUN_KEYS = (
     "model", "timeout", "auto", "session", "agent", "mode", "title", "thinking",
     "pretty", "memory", "skills", "effort", "stats", "backend", "memory_budget",
     "retries", "env", "allow", "deny", "dry_run", "skills_budget",
-    "evidence",
+    "evidence", "env_deny",
 )
 
 # Quote/clip lengths (chars) — one named place per frozen number, so an
@@ -89,6 +89,28 @@ def _normalize_patterns(name: str, value) -> "list[str] | None":
         if not pats[-1]:
             raise ValueError(f"{name} must not contain empty patterns")
     return pats or None
+
+def _normalize_env_names(name: str, value) -> "list[str] | None":
+    """Validate an env-NAME deny spec: None, or a non-empty list of names."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raise TypeError(
+            f"{name} must be a list of environment names, got a bare "
+            f"{type(value).__name__} — wrap it: {name}=[{value!r}]"
+        )
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(
+            f"{name} must be a list of environment names, got {value!r}")
+    names = []
+    for n in value:
+        if not isinstance(n, str):
+            raise TypeError(f"{name} entries must be str, got {n!r}")
+        names.append(n)
+        if not names[-1]:
+            raise ValueError(f"{name} must not contain empty names")
+    return names or None
+
 
 def _path_matches(path: "Path | str", patterns, root=None) -> bool:
     """True when the path hits any glob — repo/cwd-relative or absolute."""

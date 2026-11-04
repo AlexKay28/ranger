@@ -41,6 +41,7 @@ class FakeGit:
             "ls-tree": ("kept.py\x00a.py\x00", 0),
             "read-tree": ("", 0),
             "clean": ("", 0),
+            "for-each-ref": ("", 0),
         }
         for k, v in (git_replies or {}).items():
             self.git_replies[k] = (v, 0) if isinstance(v, str) else v
@@ -214,6 +215,91 @@ class TestRollback:
             rb = agent.rollback()
         assert rb["tag"] == "newer"
         assert ["git", "read-tree", "--reset", "-u", "T2"] in git_calls(fake)
+
+
+# --------------------------------------------------------------------- #
+# snapshots_prune() — bound the hidden-ref registry (issue #33)
+
+class TestSnapshotsPrune:
+    """Prune is ref plumbing only: `git for-each-ref --sort=creatordate`
+    lists the ranger namespace oldest-first (each ref's own commit
+    records when snapshot() created it), `update-ref -d` deletes the
+    surplus oldest refs, and the working tree / index / results are
+    never touched."""
+
+    REFS = ("refs/ranger/snapshots/snap-1\n"
+            "refs/ranger/snapshots/snap-2\n"
+            "refs/ranger/snapshots/pre-until-20260101000000-1-1\n")
+
+    def test_prunes_oldest_refs_beyond_keep_in_order(self):
+        agent = Ranger(cwd="/repo")
+        agent.snapshot_log = [
+            {"tag": "snap-1", "sha": "S1", "tree": "T1", "time": 1.0},
+            {"tag": "snap-2", "sha": "S2", "tree": "T2", "time": 2.0},
+        ]
+        fake = FakeGit(git_replies={"for-each-ref": self.REFS})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            out = agent.snapshots_prune(keep=2)
+        assert out == {"pruned": ["snap-1"],
+                       "kept": ["snap-2", "pre-until-20260101000000-1-1"]}
+        # ref-deletion evidence: the exact update-ref -d plumbing
+        assert ["git", "update-ref", "-d",
+                "refs/ranger/snapshots/snap-1"] in git_calls(fake)
+        # pruned tags leave the registry — no ghost rollback targets
+        assert [s["tag"] for s in agent.snapshot_log] == ["snap-2"]
+
+    def test_ref_not_in_the_log_prunes_by_its_own_recorded_order(self):
+        # log gaps (restarts, entries pruned elsewhere) are fine: the
+        # order comes from the refs' recorded creation times, not the log
+        agent = Ranger(cwd="/repo")
+        fake = FakeGit(git_replies={"for-each-ref": self.REFS})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            out = agent.snapshots_prune(keep=1)
+        assert out == {"pruned": ["snap-1", "snap-2"],
+                       "kept": ["pre-until-20260101000000-1-1"]}
+        deletions = [c for c in git_calls(fake)
+                     if c[1:3] == ["update-ref", "-d"]]
+        assert deletions == [
+            ["git", "update-ref", "-d", "refs/ranger/snapshots/snap-1"],
+            ["git", "update-ref", "-d", "refs/ranger/snapshots/snap-2"]]
+
+    def test_keep_covers_everything_prunes_nothing(self):
+        agent = Ranger(cwd="/repo")
+        fake = FakeGit(git_replies={"for-each-ref": self.REFS})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            out = agent.snapshots_prune(keep=10)
+        assert out["pruned"] == []
+        assert not any(c[1:3] == ["update-ref", "-d"]
+                      for c in git_calls(fake))
+
+    def test_foreign_refs_are_never_considered_or_deleted(self):
+        agent = Ranger(cwd="/repo")
+        refs = ("refs/heads/main\nrefs/remotes/origin/main\n"
+                "refs/ranger/other\n" + self.REFS)
+        fake = FakeGit(git_replies={"for-each-ref": refs})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            out = agent.snapshots_prune(keep=2)
+        deletions = [c for c in git_calls(fake)
+                     if c[1:3] == ["update-ref", "-d"]]
+        assert deletions == [["git", "update-ref", "-d",
+                              "refs/ranger/snapshots/snap-1"]]
+        # foreign refs are also absent from the summary — less is more
+        assert "main" not in "".join(out["kept"] + out["pruned"])
+
+    def test_non_positive_or_non_int_keep_refuses(self):
+        agent = Ranger(cwd="/repo")
+        for bad in (0, -3, True, "3", 2.0, None):
+            with pytest.raises(ValueError, match="keep must be a positive"):
+                agent.snapshots_prune(keep=bad)
+        # keep=0 would wipe EVERY safety buffer in one call — minimum 1
+
+    def test_git_failure_is_an_honest_ranger_error(self):
+        agent = Ranger(cwd="/repo")
+        fake = FakeGit(git_replies={"for-each-ref": ("", 128)})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            with pytest.raises(RangerError, match="for-each-ref"):
+                agent.snapshots_prune(keep=2)
+        assert agent.snapshot_log == []    # nothing was claimed pruned
 
 
 class TestPathsChangedSinceNulDelimited:

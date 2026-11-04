@@ -570,6 +570,93 @@ class TestEnvLayering:
         assert agent._child_env(None)["FOO"] == "1"  # None never clears
 
 
+class TestEnvDeny:
+    """issue #33: the env_deny rail — listed env NAMES never reach the
+    spawned harness child. Applied AFTER the env= overlay, so an
+    explicit overlay cannot smuggle a denied name back in (a rail an
+    overlay can bypass is not a rail). Default None: byte-identical
+    inheritance of today. All subprocess calls mocked."""
+
+    def test_denied_name_is_stripped_from_the_child_env(self):
+        agent = Ranger(cwd=".")
+        agent.env_deny = ["RANGER_TEST_SECRET"]
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            agent.ask("hi")
+        assert "RANGER_TEST_SECRET" not in run_mock.call_args.kwargs["env"]
+
+    def test_rail_strips_after_the_overlay_bypass_blocked(self):
+        # pinned decision: an explicit env={"NAME": ...} carrying a
+        # denied name is stripped TOO — the rail cannot be overridden
+        agent = Ranger(cwd=".")
+        agent.env_deny = ["AWS_SECRET_ACCESS_KEY"]
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            agent.ask("hi", env={"AWS_SECRET_ACCESS_KEY": "leak",
+                                 "KEPT": "1"})
+        child_env = run_mock.call_args.kwargs["env"]
+        assert "AWS_SECRET_ACCESS_KEY" not in child_env
+        assert child_env["KEPT"] == "1"        # unrelated keys survive
+
+    def test_per_call_deny_replaces_the_policy_like_allow_deny(self):
+        agent = Ranger(cwd=".")
+        agent.env_deny = ["ONE"]
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            agent.ask("hi", env_deny=["TWO"], env={"ONE": "a", "TWO": "b"})
+        child_env = run_mock.call_args.kwargs["env"]
+        assert "ONE" in child_env and "TWO" not in child_env
+
+    def test_with_config_keeps_a_deny_policy(self):
+        clone = Ranger(cwd=".", env={"RANGER_TEST_MARKER": "1"}) \
+            .with_config(env_deny=["RANGER_TEST_MARKER"])
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            clone.ask("hi")
+        assert "RANGER_TEST_MARKER" not in run_mock.call_args.kwargs["env"]
+
+    def test_absent_names_are_silent_noops(self):
+        agent = Ranger(cwd=".")
+        agent.env_deny = ["NEVER_SET_ANYWAY"]
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            agent.ask("hi")
+        assert run_mock.call_args.kwargs["env"] == {
+            **os.environ, "PWD": agent.cwd}
+
+    def test_deny_without_overlay_builds_explicit_env_even_cwd_less(self):
+        # cwd=None + no overlay normally means env=None (full inherit);
+        # with a rail active the env must become explicit, or the denied
+        # names would leak through Popen's inherit-everything default
+        agent = Ranger()
+        agent.env_deny = ["RANGER_TEST_SECRET"]
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            agent.ask("hi")
+        child_env = run_mock.call_args.kwargs["env"]
+        assert child_env is not None
+        assert "RANGER_TEST_SECRET" not in child_env
+        assert child_env == dict(os.environ)
+
+    def test_default_none_is_byte_identical_full_inherit(self):
+        agent = Ranger()
+        assert agent.env_deny is None
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("ok")) as run_mock:
+            agent.ask("hi")
+        assert run_mock.call_args.kwargs["env"] is None
+
+    def test_bad_specs_refuse_on_the_shared_seam_before_spawn(self):
+        agent = Ranger(cwd=".")
+        with mock.patch("ranger._engine._Popen") as spawn_mock:
+            for bad in ("SECRET", 42, {"A": 1}, [42], [""]):
+                with pytest.raises((TypeError, ValueError)):
+                    agent.ask("hi", env_deny=bad)
+                with pytest.raises((TypeError, ValueError)):
+                    agent.quote("hi", env_deny=bad)  # seam validates too
+            spawn_mock.assert_not_called()
+
+
 class TestGateEvidence:
     """until() must carry WHY the gate said what it said.
 

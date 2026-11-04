@@ -28,6 +28,9 @@ def main() -> None:
     # registration is public too — one class + one call = a new harness
     print("[registered]", ranger.backends())
 
+    # and so is the capability map — facts of the adapter classes, no run
+    print("[capabilities]", ranger.Ranger.capabilities()[backend])
+
 
 if __name__ == "__main__":
     main()

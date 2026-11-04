@@ -956,3 +956,24 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   shape. Codex deliberately untouched — its pinned contract says
   non-JSON noise is never fatal. 10 new tests (444 -> 454), incl.
   the async twin. 454 green, check exit 0, scan 9.44, MI all-A.
+
+- **Cycle 8 — three honesty additions (#33): env_deny rail,
+  snapshots_prune, capabilities.** (1) env_deny: a deny-list of env
+  NAMES stripped from spawned harness children (sync + async, after
+  the overlay — a rail an explicit env= can bypass is not a rail;
+  pinned). Not a ctor param: __init__ sits AT the 22-param budget, so
+  env_deny follows the skills_budget/evidence precedent — class
+  attribute default None + per-call override + with_config policy,
+  validated at the shared seam. gate()/git plumbing deliberately keep
+  their env (caller/ranger-owned processes). (2) snapshots_prune(
+  keep=N): bounded maintenance for refs/ranger/snapshots — oldest
+  pruned beyond the newest N, order from git for-each-ref
+  --sort=creatordate (honest recorded ref times, survives log gaps),
+  deletion via update-ref -d (the exact inverse of creation), pruned
+  tags dropped from snapshot_log (no ghost rollback targets), keep=0
+  refused (wiping every safety buffer is not maintenance),
+  namespace-filter pins foreign refs survive. Returns {"pruned",
+  "kept"}. LIVE-verified against real git. (3) Ranger.capabilities():
+  static like models(); flags are adapter-class facts;
+  register_backend customs appear immediately. 18 new tests
+  (454 -> 472). 472 green, check exit 0, scan 9.41, MI all-A.
