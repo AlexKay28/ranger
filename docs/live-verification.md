@@ -2,8 +2,8 @@
 
 Date: 2026-11-04 · harness: **opencode v2.2.5** (the installed local
 CLI; the 388-test suite is fully mocked, so this pass is the
-complementary truth) · model: `opencode/glm-5.3-flash-free`
-(a real, non-mocked LLM) · scratch git repo, non-interactive, all
+complementary truth) · model: a free flash-class model (a real, non-mocked LLM;
+the concrete id is internal — redacted by the hygiene gate) · scratch git repo, non-interactive, all
 runs through the repo checkout of `ranger` 0.8.0.
 
 Every contract below was verified against REAL subprocess runs and a
