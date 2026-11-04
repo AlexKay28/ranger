@@ -915,3 +915,13 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   real git in a scratch repo (rename old-side caught, untracked
   non-ASCII caught, spaced modified path caught by the allow rail).
   435 green, check exit 0, scan 9.43, MI all-A.
+
+- **Release 0.8.1 — the review-fix era ships.** Version parity bumped
+  (pyproject + __version__ + the two version-bearing docs). Contents
+  since 0.8.0: the two P0 silent-state bugs (with_config isolation,
+  live model property), collision-proof loop snapshots + the shared
+  max_iter validator, transform()'s error contract, the split-residue
+  sweep + ARCHITECTURE file-map gate + pcina/MI gates in CI, REAL sync
+  containment (contained kill-tree on timeout/interrupt, ~130 seam
+  sites re-pointed), and -z porcelain truth for rails/snapshots.
+  435 tests green, check exit 0, scan 9.43, MI all-A.
