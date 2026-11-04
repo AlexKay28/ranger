@@ -814,3 +814,20 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   evidence; rollback restores on red. commands.md/API.md/SKILL.md
   synced (rollback rule row + fix sections). 388 green, check exit 0,
   scan 9.56, MI all-A.
+
+- **Live-harness verification (goal item 2) — 0.8.0 truth-tested on a
+  real opencode v2.2.5 + real model, zero deviation.** Since the suite
+  is fully mocked, the complementary pass ran the repo checkout
+  against a REAL harness: ask() honest ledger; a real until() loop
+  (30.6s, 6 CLI calls) that refused to fake success when the GATE
+  command itself was broken and carried the gate's own diagnosis; the
+  vacuous-green pre-check returned achieved/0 iterations/0 calls in
+  0.0s; token_budget stopped a live loop with budget_exhausted: True
+  from real ledger chars (and 220/400 budgets showed the frozen
+  in-flight-round rule); snapshot/mutation/rollback restored a real
+  agent deletion down to the untracked .pyc straggler; deny rails
+  refused with the named violated path and an error text matching the
+  actual tree state. Evidence artifact: docs/live-verification.md
+  (dated, pasted outputs). No code change — the mocked contracts are
+  truthful; one usage law demonstrated anew (the agent rewrote add()
+  despite keep-it prose — gates assert contracts, prose does not).
