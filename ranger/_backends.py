@@ -6,14 +6,11 @@ External flag and schema behavior is frozen from official docs of each CLI (land
 from __future__ import annotations
 
 import json
-import os
-import re
 import subprocess
-import time
 from pathlib import Path
 
-from ._util import (RangerError, RangerTimeout, RangerHarnessError, _c,
-                    _clip, MODELS_TIMEOUT_S)
+from ._util import (RangerError, RangerTimeout, RangerHarnessError,
+                    MODELS_TIMEOUT_S)
 
 # ====================================================================== #
 # Harness backends (adapters)

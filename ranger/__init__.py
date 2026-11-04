@@ -31,30 +31,20 @@ Discover available models and configure runs:
 
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
+# `subprocess`, `os` and `_Spinner` look import-only here — they ARE
+# load-bearing seams: tests patch the package attributes
+# `ranger.subprocess`, `ranger.os` and `ranger._Spinner`. `_Backend` is
+# subclassed via `ranger._Backend`, `_ASYNC_TWIN_METHODS` is read via the
+# package, and the names in __all__ are deliberate re-exports.
 import os
-import re
 import subprocess
-import sys
-import time
-import uuid
 from pathlib import Path
 
-from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
-                    _clip, _interrupt_payload, _kill_tree, _Spinner,
-                    _RUN_KEYS, _normalize_patterns,
-                    _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError)
-from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS, _MEMORY_BUDGET,
-                         _do_prompt, _edit_prompt, _write_prompt,
-                         _search_prompt, _check_prompt, _extract_keys_clause,
-                         _extract_prompt, _parse_extract_json, _extract_rows,
-                         _parse_extract_answer, _parse_check_verdict)
-from ._backends import (_Backend, _OpenCodeBackend, _CodexBackend,
-                        _PiBackend, _OpenHandsBackend, _ClaudeBackend,
-                        _BACKEND_CLASSES, backends, register_backend)
+from ._util import (DEFAULT_MODEL, _LOG, _Spinner, _normalize_patterns,
+                    RangerError, RangerTimeout, RangerHarnessError)
+from ._contracts import _ASYNC_TWIN_METHODS, _MEMORY_BUDGET
+from ._backends import (_Backend, _BACKEND_CLASSES, backends,
+                        register_backend)
 from ._debate import debate
 from ._safety import SafetyMixin
 from ._snapshots import SnapshotMixin

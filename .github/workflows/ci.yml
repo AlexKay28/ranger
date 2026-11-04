@@ -43,3 +43,29 @@ jobs:
           python -m venv /tmp/rangers-wheel
           /tmp/rangers-wheel/bin/python -m pip install dist/*.whl
           /tmp/rangers-wheel/bin/python -c "import ranger; assert ranger.__version__ == '$VER'"
+
+  gates:
+    name: Quality gates (pcina budgets + radon MI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + gate tools
+        run: python3 -m pip install -e .[dev] pcina radon
+      - name: Budget gate — pcina check must pass
+        run: pcina check ranger/
+      - name: Quality-score floor — pcina scan rated >= 9.0
+        run: |
+          score=$(pcina scan ranger/ | grep -oE 'rated at [0-9.]+' | grep -oE '[0-9.]+')
+          echo "pcina scan rating: $score/10"
+          python3 -c "import sys; sys.exit(0 if float('$score') >= 9.0 else 1)"
+      - name: Maintainability gate — no radon MI rank C
+        run: |
+          bad=$(python3 -m radon mi ranger/ -s -n C)
+          if [ -n "$bad" ]; then
+            echo "::error::radon MI rank C blocks the merge:"
+            echo "$bad"
+            exit 1
+          fi

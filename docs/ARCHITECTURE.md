@@ -13,7 +13,7 @@ any harness you register) from plain Python. You write code, not chat.
 ┌────────────────────────────────────────────────────────────┐
 │  your python code  (loops, if/else, pipelines)             │  ← control plane
 ├────────────────────────────────────────────────────────────┤
-│  ranger.Ranger            ranger/__init__.py               │
+│  ranger.Ranger            ranger/ (core + mixins)          │
 │  ┌──────────────┐ ┌───────────┐ ┌───────────────────────┐   │
 │  │ commands      │ │ memory   │ │ interactions          │   │
 │  │ ask/do/write/ │ │ recall+ │ │ review/challenge/      │   │
@@ -34,9 +34,22 @@ any harness you register) from plain Python. You write code, not chat.
 
 ## File map
 
+Ranger is composed from six single-purpose mixins plus a slim core —
+`scripts/split_module.py` is the reproducible record of that split.
+
 | File | Role |
 |---|---|
-| `ranger/__init__.py` | The whole library: harness adapters, the `Ranger` class, `debate()`, the live progress UI, helpers |
+| `ranger/__init__.py` | Slim package core: the `Ranger` class (composed FROM the six mixins below), constructor + model precedence, the package-level mock seams (`ranger.subprocess`, `ranger.os`, `ranger._Spinner`, `ranger._warn_default_model`), and the public re-exports (`debate`, `register_backend`, the exceptions) |
+| `ranger/_util.py` | Shared constants, exceptions and small helpers: the spinner, path-match predicates, process-tree kill, message clipping |
+| `ranger/_contracts.py` | Frozen prompt/parse contracts (law 2): prompt templates, verdict grammars, mechanical parsers |
+| `ranger/_backends.py` | Backend adapters — opencode, codex, pi, openhands, claude — one `build_cmd`/`parse_output` contract per CLI, plus `register_backend()` |
+| `ranger/_debate.py` | The module-level composition: the two-agent `debate()` |
+| `ranger/_safety.py` | `SafetyMixin`: allow/deny path predicates and pre/post guards around mutating commands (law 4) |
+| `ranger/_snapshots.py` | `SnapshotMixin`: git snapshot/rollback/commit rails — hidden-ref snapshots via a temporary index, no destructive verbs |
+| `ranger/_loops.py` | `LoopsMixin`: gate evidence and verdicts, `until`/`attempt`/`resolve`/`fix` — bounded, mechanical, never a sympathy pass |
+| `ranger/_multi.py` | `MultiMixin`: `verify_claims`, `review`, `challenge`, `second_opinion`, `refine_with` — frozen reply contracts, adversarial by construction |
+| `ranger/_commands.py` | `CommandsMixin`: the dialogue/fact commands, async twins, `par_map` — thin frozen prompts over the transport engine |
+| `ranger/_engine.py` | `EngineMixin`: the transport engine — run-option resolution, prompt composition, sync+async spawn/kill/complete pipelines, the costs ledger |
 | `tests/test_ranger.py` | Contract tests: argv shapes, prompt contracts, error paths, backend flag maps |
 | `tests/test_logic.py` | Correctness layer: truth tables — verdict grammar, model precedence, recall budget arithmetic, interaction flow outcomes |
 | `tests/test_docs.py` | Doc-drift gates — CI fails if code grows without docs or examples |
@@ -44,7 +57,7 @@ any harness you register) from plain Python. You write code, not chat.
 | `docs/PARADIGM.md` | The backbone: agent-is-a-function, seven design laws |
 | `docs/commands.md` | Command catalog by maturity tier (shipped / next / needs-bigger-machinery) |
 | `docs/growth-log.md` | The growth-loop audit trail |
-| `examples/` | Seven runnable apps, quickstart → discovery → loops → controls → backends → multi_agent → growth_loop |
+| `examples/` | Seven runnable folders — `getting-started`, `code-work`, `monitoring`, `agent-reasoning`, `multiagent`, `backends`, `dummy` — quickstart → loops → controls → multi-agent, each main-guarded |
 
 ## The three architectural decisions everything follows
 
@@ -68,7 +81,7 @@ any harness you register) from plain Python. You write code, not chat.
 
 ## Quality posture
 
-- 420 tests <!-- tests:420 -->, well under the enforced 60-second suite
+- 423 tests <!-- tests:423 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before

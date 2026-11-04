@@ -2,37 +2,19 @@
 from __future__ import annotations
 
 import asyncio
-import fnmatch
-import json
-import logging
-import os
 import re
-import signal
-import subprocess
-import sys
-import threading
 import time
 import uuid
 from pathlib import Path
 
-from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
-                    _clip, _interrupt_payload, _kill_tree,
-                    _RUN_KEYS, _normalize_patterns,
-                    _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError, APPROX_CHARS_PER_TOKEN,
+from ._util import (RangerError, RangerTimeout, RangerHarnessError,
+                    _RUN_KEYS, APPROX_CHARS_PER_TOKEN,
                     SLUG_CLIP, UUID_HEX_CLIP)
-from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
+from ._contracts import (_ASYNC_TWIN_METHODS,
                          _do_prompt, _edit_prompt, _write_prompt,
-                         _search_prompt, _check_prompt, _extract_keys_clause,
-                         _extract_prompt, _parse_extract_json, _extract_rows,
-                         _parse_extract_answer, _parse_check_verdict)
-
-
-def _warn_default_model():
-    """Mock seam forwarder: the patchable guard lives on the package."""
-    import ranger
-    ranger._warn_default_model()
-
+                         _search_prompt, _check_prompt,
+                         _extract_prompt, _parse_extract_answer,
+                         _parse_check_verdict)
 
 from ._backends import _BACKEND_CLASSES  # noqa: E402 (runs reference it)
 
@@ -283,7 +265,20 @@ class CommandsMixin:
         """
         pattern = self._transform_spec(pattern, instruction, max_files)
         root = Path(self.cwd or Path.cwd())
-        files = sorted(p for p in root.glob(pattern) if p.is_file())[:max_files]
+        try:
+            # Path.glob leaks native errors on some patterns: an absolute
+            # glob raises NotImplementedError, an unparsable one a
+            # ValueError on newer pathlib — both are caller input, so
+            # they cross the trust boundary as RangerError (law 5)
+            files = sorted(p for p in root.glob(pattern)
+                           if p.is_file())[:max_files]
+        except NotImplementedError:
+            raise RangerError(
+                f"transform(): pattern must be RELATIVE to the agent cwd "
+                f"({root}); got absolute pattern {pattern!r}") from None
+        except ValueError as exc:
+            raise RangerError(
+                f"transform(): invalid glob pattern {pattern!r} ({exc})") from None
         if not files:
             raise RangerError(
                 f"transform(): no files match {pattern!r} under {root}")

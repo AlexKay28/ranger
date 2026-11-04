@@ -860,3 +860,20 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   spending a plan() call before returning FAILED. 27 new tests via a
   4x5 parametrized reject-matrix plus collision pins (393 -> 420).
   420 green, check exit 0, scan 9.52, MI all-A.
+
+- **Review-driven cycle 3 — hygiene triple (#27, #28, #29).**
+  (1) transform() no longer leaks the engine's errors on user patterns:
+  absolute globs and unparseable globs raise RangerError naming the
+  pattern (law 5). (2) The module-split residue is gone: 268 dead
+  imports removed across ranger/*.py (AST-verified; patch targets and
+  deliberate re-exports kept and documented), the duplicate
+  _warn_default_model shim deleted, ARCHITECTURE.md's file map now
+  describes the real post-split modules and a new doc gate pins every
+  module is listed (the map had still described the monolith), the
+  vestigial PLANNED_COMMANDS whitelist retired while keeping the
+  shipped-set strength of the catalog gate. (3) CI now enforces law 1
+  mechanically: a gates job runs pcina check (exit 0), pcina scan
+  (>= 9.0 floor, rating parsed — pcina has no --fail-under), and
+  radon MI. scripts/report_imports.py kept as the re-runnable
+  dead-import checker. 3 new tests (420 -> 423) — net -50 lines.
+  423 green, check exit 0, scan 9.47, MI all-A.

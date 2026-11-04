@@ -6,8 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from ._util import (RangerError, RangerHarnessError, ANSWER_EXCERPT,
-                    ROW_EXCERPT)
+from ._util import RangerError, ANSWER_EXCERPT, ROW_EXCERPT
 
 _PURE_LABELS = frozenset({"check", "critique", "diagnose", "extract", "lint",
                           "read", "search", "summarize", "test", "trace"})

@@ -174,6 +174,27 @@ class TestTransform:
         # the allowed one ran exactly once
         assert run.call_count == 1
 
+    def test_absolute_pattern_raises_ranger_error_not_native(self, tmp_path):
+        # issue #27: Path.glob leaks NotImplementedError on absolute
+        # patterns — the trust boundary must re-raise as RangerError,
+        # naming the pattern and the root, with zero harness calls
+        agent = Ranger(cwd=tmp_path)
+        with mock.patch(f"{RANGER_MOD}.run") as run:
+            with pytest.raises(RangerError, match="RELATIVE"):
+                agent.transform(str(tmp_path / "*.py"), "x")
+        run.assert_not_called()
+
+    def test_unparseable_pattern_raises_ranger_error_not_native(self, tmp_path):
+        # '**' mid-component: newer pathlib raises a native ValueError
+        # on unparseable globs — the boundary maps it to RangerError too
+        # (older pathlib simply matches nothing, which is already the
+        # honest "no files match" RangerError; either way: RangerError)
+        agent = Ranger(cwd=tmp_path)
+        with mock.patch(f"{RANGER_MOD}.run") as run:
+            with pytest.raises(RangerError):
+                agent.transform("**b/*.py", "x")
+        run.assert_not_called()
+
     def test_spec_validation(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         for bad in (42, "", None):

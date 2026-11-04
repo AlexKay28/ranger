@@ -149,9 +149,6 @@ def test_every_shipped_command_has_an_example_usage():
 
 # --- commands.md catalog gates -------------------------------------------
 
-# Methods the catalog may legitimately list as planned (🔜/🌱 tiers).
-PLANNED_COMMANDS = {"fix", "transform", "commit"}
-
 _CATALOG_HEADER = re.compile(r"^### `(?:ranger\.)?(?:Ranger\.|agent\.)?(\w+)\s*\(",
                              re.MULTILINE)
 
@@ -170,21 +167,22 @@ def test_commands_catalog_matches_shipped_surface():
     assert catalog == expected, (
         f"commands.md ✅ tier drifted: undocumented {expected - catalog}, "
         f"ghost entries {catalog - expected} — sync docs/commands.md with "
-        f"ranger/__init__.py"
+        f"the ranger/ package"
     )
 
 
-def test_commands_catalog_planned_tier_only_lists_known_planned():
-    """The 🔜/🌱 tiers may only list names that are not shipped yet."""
+def test_commands_catalog_planned_tier_only_lists_unshipped():
+    """The 🔜/🌱 tiers may only list names that are NOT shipped yet.
+
+    The former name whitelist outlived its members (`fix`, `transform`,
+    `commit` all shipped); the honest general gate is the shipped-set
+    overlap: a method that exists must never sit in a planned tier.
+    """
     _, planned_area = _catalog_sections(COMMANDS_TEXT)
     listed = set(_CATALOG_HEADER.findall(planned_area))
     shipped = set(PUBLIC_METHODS) | {"debate"}
     assert not (listed & shipped), (
         f"commands.md lists shipped methods as planned: {listed & shipped}"
-    )
-    assert not (listed - PLANNED_COMMANDS), (
-        f"commands.md plans unknown commands {listed - PLANNED_COMMANDS} — "
-        f"add them to PLANNED_COMMANDS or remove the section"
     )
 
 
@@ -249,4 +247,27 @@ def test_architecture_test_count_marker_matches_reality():
         f"docs/ARCHITECTURE.md claims {markers[0]} tests but the suite "
         f"collects {collected}. Update the `<!-- tests:{collected} -->` "
         f"marker (and the surrounding prose) in the Quality posture bullet."
+    )
+
+
+# --- ARCHITECTURE.md file-map gate -----------------------------------------
+
+def test_architecture_file_map_covers_every_module():
+    """The file map must describe the ACTUAL package layout.
+
+    The module split (scripts/split_module.py) once left the map
+    describing the pre-split monolith — pin the current truth: every
+    `ranger/*.py` module appears in the map, and the stale pre-split
+    phrasing is gone.
+    """
+    arch = (REPO / "docs" / "ARCHITECTURE.md").read_text()
+    assert "The whole library" not in arch, (
+        "ARCHITECTURE.md still describes the pre-split monolith "
+        "('The whole library') — update the file map to the actual modules"
+    )
+    missing = [m.name for m in sorted((REPO / "ranger").glob("*.py"))
+               if m.name not in arch]
+    assert not missing, (
+        f"ARCHITECTURE.md file map misses modules: {missing} — document "
+        f"each module's role (read its module docstring)"
     )

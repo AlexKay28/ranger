@@ -1,32 +1,14 @@
 """Bounded agent loops: gates and verdicts, until/attempt/resolve/fix — mechanical verdicts, honest budgets, never a sympathy pass."""
 from __future__ import annotations
 
-import asyncio
-import fnmatch
 import itertools
-import json
-import logging
 import os
-import re
-import signal
 import subprocess
-import sys
-import threading
 import time
-import uuid
-from pathlib import Path
 
-from ._util import (DEFAULT_MODEL, _LOG, _NO_COLOR, _RESET, _COLORS, _c,
-                    _clip, _interrupt_payload, _kill_tree,
-                    _RUN_KEYS, _normalize_patterns,
-                    _path_matches, RangerError, RangerTimeout,
-                    RangerHarnessError, GATE_OUT_CLIP,
+from ._util import (_LOG, _clip, _interrupt_payload, _kill_tree,
+                    RangerError, GATE_OUT_CLIP,
                     DIAGNOSIS_CLIP, APPROX_CHARS_PER_TOKEN)
-from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
-                         _do_prompt, _edit_prompt, _write_prompt,
-                         _search_prompt, _check_prompt, _extract_keys_clause,
-                         _extract_prompt, _parse_extract_json, _extract_rows,
-                         _parse_extract_answer, _parse_check_verdict)
 
 # process-wide pre-loop tag counter: two rollback loops started inside
 # the same second (or two agents in one process) can never collide (#23)
