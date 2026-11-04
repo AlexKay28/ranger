@@ -18,6 +18,13 @@ from functools import partial
 from unittest import mock
 
 
+def git_sub(cmd) -> str:
+    """Git SUBcommand of a argv, skipping an optional `-c key=value`
+    prefix (issue #25: parsed git calls now run `git -c
+    core.quotepath=false <sub> ...` for literal output bytes)."""
+    return cmd[3] if cmd[1:2] == ["-c"] else cmd[1]
+
+
 class FakePopen:
     """One fake spawned harness proc; communicates its recorded output.
 

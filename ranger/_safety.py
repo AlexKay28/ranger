@@ -4,8 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ._util import (_normalize_patterns, _path_matches, RangerError,
-                    RAISED_PATHS_LISTED,
-                    PORCELAIN_MIN, PORCELAIN_PATH_AT)
+                    RAISED_PATHS_LISTED, _porcelain_paths_z)
 
 
 class SafetyMixin:
@@ -49,18 +48,18 @@ class SafetyMixin:
     def _path_violations(self, allow, deny, root) -> "list[str]":
         """Changed paths that fall outside the rails, from git status.
 
-        Each porcelain line is a "XY <path>" record; a path violates
-        when it matches the deny list, or when an allow list exists
-        and it does not match it.
+        `status --porcelain -z` (issue #25): NUL-delimited records
+        keep paths with spaces, quote-needing names and rename pairs
+        whole, and `-c core.quotepath=false` keeps the bytes literal.
+        A rename counts BOTH its sides — a change away from a denied
+        path is as much a rail violation as a change into one. A path
+        violates when it matches the deny list, or when an allow list
+        exists and it does not match it.
         """
-        porcelain = self._git("status", "--porcelain")
+        porcelain = self._git("-c", "core.quotepath=false",
+                              "status", "--porcelain", "-z")
         violations = []
-        for line in porcelain.splitlines():
-            if len(line) < PORCELAIN_MIN:
-                continue
-            p = line[PORCELAIN_PATH_AT:].strip().strip('"').rstrip("/")
-            if not p:
-                continue
+        for p in _porcelain_paths_z(porcelain):
             if deny and _path_matches(p, deny, root) \
                     or allow and not _path_matches(p, allow, root):
                 violations.append(p)

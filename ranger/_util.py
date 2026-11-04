@@ -62,8 +62,8 @@ UUID_HEX_CLIP = 6        # uuid hex suffix in generated filenames
 SNAP_HEX_CLIP = 8        # uuid hex suffix in snapshot git-index names
 SNAP_TIME_DECIMALS = 3   # snapshot timestamp precision
 
-# git status --porcelain v1 line anatomy: "XY <path>", path starts at col 3,
-# and a shorter line carries no path at all.
+# git status --porcelain v1 record anatomy: "XY <path>" (or, with -z,
+# "XY<path>\0"), path starts at col 3; a shorter record carries no path.
 PORCELAIN_MIN = 4
 PORCELAIN_PATH_AT = 3
 
@@ -108,6 +108,37 @@ def _path_matches(path: "Path | str", patterns, root=None) -> bool:
         for pat in (patterns or [])
         for form in forms
     )
+
+
+def _porcelain_paths_z(out: str) -> "list[str]":
+    """Every changed path from `git status --porcelain -z` (issue #25).
+
+    -z records are NUL-terminated and never quoted, so paths with
+    spaces, non-ASCII names and rename `old -> new` arrows survive
+    intact. A rename/copy record (X or Y is R/C) carries BOTH paths —
+    real `git status --porcelain -z` emits the NEW path first, then
+    the old one (`"R  new\\0old\\0"`) — and a rename counts as touching
+    both sides: moving a file AWAY from a denied path or INTO one is
+    equally outside the rails. Every other record is one path.
+    """
+    fields = out.split("\0")
+    paths = []
+    i = 0
+    while i < len(fields):
+        rec = fields[i]
+        i += 1
+        if len(rec) < PORCELAIN_MIN:
+            continue
+        p = rec[PORCELAIN_PATH_AT:].rstrip("/")
+        if p:
+            paths.append(p)
+        # rename/copy: the record owns the NEXT field too (the old path)
+        if ("R" in rec[:2] or "C" in rec[:2]) and i < len(fields):
+            old = fields[i].rstrip("/")
+            i += 1
+            if old:
+                paths.append(old)
+    return paths
 
 
 class RangerError(RuntimeError):

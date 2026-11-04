@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ._util import (_LOG, _clip, _normalize_patterns, RangerError,
                     LOG_SHA_CLIP, LOG_MSG_CLIP,
-                    PORCELAIN_MIN, PORCELAIN_PATH_AT,
+                    _porcelain_paths_z,
                     SNAP_HEX_CLIP, SNAP_TIME_DECIMALS)
 
 
@@ -134,15 +134,23 @@ class SnapshotMixin:
         Returns (changed, extras): modified/deleted tracked paths
         (git diff --name-only) and post-snapshot untracked creations
         present now but absent from the snapshot tree — each by exact
-        path, never a shotgun.
+        path, never a shotgun. Issue #25: all three listings are
+        NUL-delimited (`-z`, with `-c core.quotepath=false` so bytes
+        stay literal) — paths with spaces and non-ASCII names survive,
+        and a rename's two paths stay two fields (`--name-only -z`
+        emits `new\\0old\\0`, never a merged line).
         """
-        changed = [l for l in self._git("diff", "--name-only", sha).splitlines()
-                   if l.strip()]
-        untracked = [l for l in self._git(
-            "ls-files", "--others", "--exclude-standard").splitlines()
-            if l.strip()]
+        changed = [p for p in self._git("-c", "core.quotepath=false",
+                                        "diff", "--name-only", "-z",
+                                        sha).split("\0") if p]
+        untracked = [p for p in self._git(
+            "-c", "core.quotepath=false",
+            "ls-files", "--others", "--exclude-standard",
+            "-z").split("\0") if p]
         snap_files = set(
-            l for l in self._git("ls-tree", "-r", "--name-only", tree).split() if l
+            p for p in self._git("-c", "core.quotepath=false",
+                                 "ls-tree", "-r", "--name-only",
+                                 "-z", tree).split("\0") if p
         )
         extras = [p for p in untracked if p not in snap_files]
         return changed, extras
@@ -188,11 +196,12 @@ class SnapshotMixin:
         operations are simply not part of the method.
 
         Honest refusals (RangerError): cwd is not a git repository;
-        nothing changed (`git status --porcelain` empty — a clean tree
-        is never "committed"); a changeset path hits the safety rails
-        (`deny` wins, `allow` restricts — the #3 defaults apply when
-        no per-call lists are given, and a denied path is never
-        staged). `message=None` uses a marked default so agent commits
+        nothing changed (`git status --porcelain -z` empty — a clean
+        tree is never "committed"); a changeset path hits the safety
+        rails (`deny` wins, `allow` restricts — the #3 defaults apply
+        when no per-call lists are given, and a denied path is never
+        staged; a rename counts BOTH its sides, #25). `message=None`
+        uses a marked default so agent commits
         are identifiable in `git log`.
         """
         effective_allow = _normalize_patterns(
@@ -200,17 +209,16 @@ class SnapshotMixin:
         effective_deny = _normalize_patterns(
             "deny", deny if deny is not None else self.deny)
         root = self._repo_root("commit()")
-        porcelain = self._git("status", "--porcelain")
+        # NUL-delimited porcelain (#25): spaces, renames and non-ASCII
+        # quote-needing paths keep their exact bytes
+        porcelain = self._git("-c", "core.quotepath=false",
+                              "status", "--porcelain", "-z")
         if not porcelain.strip():
             raise RangerError(
                 "commit(): nothing to commit — the working tree is clean")
-        for line in porcelain.splitlines():
-            if len(line) < PORCELAIN_MIN:
-                continue
-            p = line[PORCELAIN_PATH_AT:].strip().strip('"').rstrip("/")
-            if p:
-                self._assert_path_allowed(p, effective_allow,
-                                           effective_deny, root)
+        for p in _porcelain_paths_z(porcelain):
+            self._assert_path_allowed(p, effective_allow,
+                                      effective_deny, root)
         msg = message or f"ranger: agent work ({time.strftime('%Y-%m-%d %H:%M')})"
         self._git("add", "-A", "--")
         self._git("commit", "-m", msg)

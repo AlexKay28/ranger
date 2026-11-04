@@ -899,3 +899,19 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   and fixed during conversion: the unknown-run-option test now asserts
   BOTH seams never spawned. 423 -> 425 tests; suite back under the 60s
   budget (3.2s). 425 green, check exit 0, scan 9.47, MI all-A.
+
+- **Review-driven cycle 5 — porcelain truth: -z everywhere (#25).**
+  The rails/snapshot git plumbing parsed human-form porcelain
+  (line[3:] slicing) — a rename record became the phantom path
+  "old -> new", spaces and quoted non-ASCII broke allow/deny and
+  path listings. All plumbing now speaks NUL-delimited git: a shared
+  _porcelain_paths_z parser (status --porcelain -z; rename/copy
+  records carry NEW then OLD — probed against real git before
+  coding), diff --name-only -z / ls-files -z / ls-tree -z, with
+  -c core.quotepath=false belt-and-braces. Semantics decision:
+  renames are changeset members on BOTH sides (renaming away from
+  or into a denied path both violate). Fixtures migrated to the real
+  captured -z bytes; 10 new tests (425 -> 435). Verified LIVE against
+  real git in a scratch repo (rename old-side caught, untracked
+  non-ASCII caught, spaced modified path caught by the allow rail).
+  435 green, check exit 0, scan 9.43, MI all-A.

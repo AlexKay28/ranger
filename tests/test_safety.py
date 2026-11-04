@@ -14,7 +14,7 @@ import pytest
 import ranger
 from ranger import Ranger, RangerError
 
-from _fakes import FakePopen, harness_and_git
+from _fakes import FakePopen, git_sub, harness_and_git
 
 RANGER_MOD = "ranger.subprocess"
 
@@ -25,9 +25,11 @@ class FakeRunner:
     def __init__(self, agent_replies=None, git_replies=None, git_fails=False):
         self.runs = []          # every cmd, in order
         self.agent_replies = list(agent_replies or [])
+        # issue #25: parsed git calls answer in `status --porcelain -z`
+        # form now — NUL-terminated records, no quoting/renames arrows
         self.git_replies = {
             "rev-parse": "/repo\n",
-            "status": " M src/ok.py\n",
+            "status": " M src/ok.py\x00",
         }
         self.git_replies.update(git_replies or {})
         self.git_fails = git_fails
@@ -35,7 +37,7 @@ class FakeRunner:
     def __call__(self, cmd, **kw):
         self.runs.append(list(cmd))
         if cmd[0] == "git":
-            sub = cmd[1]
+            sub = git_sub(cmd)
             if sub == "rev-parse" and self.git_fails:
                 return subprocess.CompletedProcess(
                     cmd, 128, stdout="", stderr="fatal: not a git repository")
@@ -188,8 +190,10 @@ class TestDoRails:
 
     def test_do_post_run_violation_raises_naming_paths(self):
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
+        # issue #25: status answers are -z records (NUL-terminated)
         fake = FakeRunner(agent_replies=["did it\n"],
-                          git_replies={"status": " M src/ok.py\n?? secrets.key\n"})
+                          git_replies={"status":
+                                       " M src/ok.py\x00?? secrets.key\x00"})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match=r"secrets\.key"):
                 agent.do("goal")
@@ -300,3 +304,73 @@ class TestDryRunArgv:
             run.return_value = fake_harness("plan")
             agent.do("goal", dry_run=True)
         assert agent.costs["calls"] == 1
+
+
+# --------------------------------------------------------------------- #
+# issue #25: `status --porcelain -z` records — renames, spaces, non-ASCII
+
+# REAL bytes captured from a scratch repo (`R  deny_target.py\0deny_me.py\0`
+# is what `git status --porcelain -z` emits for `git mv deny_me.py
+# deny_target.py` — the NEW path first, then the old one; plain porcelain
+# says `R  deny_me.py -> deny_target.py`). -z records are NUL-terminated
+# and never quoted, even for `"another file.py"`.
+RENAMED_STATUS_Z = (
+    "R  deny_target.py\x00deny_me.py\x00"
+    " M ok.py\x00"
+    "?? another file.py\x00")
+
+# REAL bytes captured with non-ASCII names and -z (no core.quotepath
+# escapes: the ü renders as literal UTF-8, never "\303\274…").
+UNICODE_STATUS_Z = " M ünïcode.py\x00?? new ünïcode2.py\x00"
+
+
+class TestPorcelainZRecords:
+    """do()'s post-run boundary parses -z records: a rename is checked
+    on BOTH sides, and spaces/non-ASCII paths stay whole."""
+
+    def test_rename_record_checks_the_new_path(self):
+        agent = Ranger(cwd="/repo", deny=["**/deny_target.py"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": RENAMED_STATUS_Z})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match=r"deny_target\.py"):
+                agent.do("goal")
+
+    def test_rename_record_checks_the_old_path_too(self):
+        # renaming AWAY from a denied path is as much a violation: the
+        # old side of the `new\0old` pair must be checked too
+        agent = Ranger(cwd="/repo", deny=["**/deny_me.py"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": RENAMED_STATUS_Z})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match=r"deny_me\.py"):
+                agent.do("goal")
+
+    def test_spaced_untracked_path_is_seen_whole(self):
+        # "another file.py" — a path with a space — no longer splits on
+        # the space: an allow=src/** rail flags the exact whole path
+        agent = Ranger(cwd="/repo", allow=["src/**"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": RENAMED_STATUS_Z})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match=r"another file\.py"):
+                agent.do("goal")
+
+    def test_admitting_rails_are_not_spooked_by_renames(self):
+        # the same -z fixture under rails that admit every path: no
+        # phantom `old -> new` path, no false positive, quiet pass
+        agent = Ranger(cwd="/repo", allow=["**"], deny=["**/secrets*"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": RENAMED_STATUS_Z})
+        with harness_and_git(fake):
+            assert agent.do("goal") == "did it"
+
+    def test_non_ascii_path_matches_literal_bytes(self):
+        # quoting is off (-z + core.quotepath=false): ünïcode.py
+        # matches a plain glob byte-for-byte, not a "\303\274" escape
+        agent = Ranger(cwd="/repo", deny=["**/ünïcode.py"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": UNICODE_STATUS_Z})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match="ünïcode.py"):
+                agent.do("goal")

@@ -16,7 +16,7 @@ import pytest
 
 from ranger import Ranger, RangerError
 
-from _fakes import FakePopen, harness_and_git
+from _fakes import FakePopen, git_sub, harness_and_git
 
 RANGER_MOD = "ranger.subprocess"
 
@@ -25,19 +25,22 @@ class FakeRunner:
     def __init__(self, agent_replies=None, git_replies=None, git_fails=False):
         self.runs = []
         self.agent_replies = list(agent_replies or [])
+        # issue #25: status answers are `--porcelain -z` records now —
+        # NUL-terminated, never quoted, renames as `XY new\0old\0`
         self.git_replies = {"rev-parse": "/repo\n",
-                            "status": " M src/ok.py\n"}
+                            "status": " M src/ok.py\x00"}
         self.git_replies.update(git_replies or {})
         self.git_fails = git_fails
 
     def __call__(self, cmd, **kw):
         self.runs.append(list(cmd))
         if cmd[0] == "git":
-            if cmd[1] == "rev-parse" and self.git_fails:
+            sub = git_sub(cmd)
+            if sub == "rev-parse" and self.git_fails:
                 return subprocess.CompletedProcess(
                     cmd, 128, stdout="", stderr="fatal: not a git repository")
             return subprocess.CompletedProcess(
-                cmd, 0, stdout=self.git_replies.get(cmd[1], ""), stderr="")
+                cmd, 0, stdout=self.git_replies.get(sub, ""), stderr="")
         reply = self.agent_replies.pop(0) if self.agent_replies else "ok\n"
         return FakePopen(stdout=reply)
 
@@ -213,13 +216,15 @@ class TestCommit:
     def test_happy_path_stages_and_commits_only(self):
         agent = Ranger(cwd="/repo")
         fake = FakeRunner(git_replies={"rev-parse": "/repo\n",
-                                       "status": " M src/a.py\n",
+                                       "status": " M src/a.py\x00",
                                        "commit": ""})
         with harness_and_git(fake):
             sha = agent.commit("my fix", allow=["src/**"])
         argvs = [c for c in fake.runs]
         assert argvs[0] == ["git", "rev-parse", "--show-toplevel"]
-        assert argvs[1] == ["git", "status", "--porcelain"]
+        # issue #25: literal, NUL-delimited status records
+        assert argvs[1] == ["git", "-c", "core.quotepath=false",
+                            "status", "--porcelain", "-z"]
         assert argvs[2] == ["git", "add", "-A", "--"]
         assert argvs[3] == ["git", "commit", "-m", "my fix"]
         assert argvs[4] == ["git", "rev-parse", "HEAD"]
@@ -236,7 +241,8 @@ class TestCommit:
         with harness_and_git(fake):
             with pytest.raises(RangerError, match="nothing to commit"):
                 agent.commit()
-        assert fake.runs[-1] == ["git", "status", "--porcelain"]  # no add
+        assert fake.runs[-1] == ["git", "-c", "core.quotepath=false",
+                                 "status", "--porcelain", "-z"]  # no add
 
     def test_non_repo_is_refused(self):
         agent = Ranger(cwd="/somewhere")
@@ -247,8 +253,9 @@ class TestCommit:
 
     def test_rail_violation_in_changeset_never_stages(self):
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
+        # issue #25: -z records — status now answers NUL-terminated
         fake = FakeRunner(git_replies={
-            "status": " M src/ok.py\n?? secrets.key\n"})
+            "status": " M src/ok.py\x00?? secrets.key\x00"})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match="denied"):
                 agent.commit()
@@ -257,7 +264,7 @@ class TestCommit:
 
     def test_default_message_is_marked(self):
         agent = Ranger(cwd="/repo")
-        fake = FakeRunner(git_replies={"status": " M a.py\n"})
+        fake = FakeRunner(git_replies={"status": " M a.py\x00"})
         with harness_and_git(fake):
             agent.commit()
         commit_argv = next(c for c in fake.runs if c[:2] == ["git", "commit"])
@@ -266,10 +273,45 @@ class TestCommit:
     def test_per_call_rails_replace_the_deny(self):
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
         fake = FakeRunner(git_replies={
-            "status": " M secrets.py\n"})
+            "status": " M secrets.py\x00"})
         with harness_and_git(fake):
             # replacing deny=[] clears the rail for THIS commit
             agent.commit(deny=[])
+        assert ["git", "add", "-A", "--"] in [c for c in fake.runs]
+
+    # ------------------------------------------------------------------ #
+    # issue #25: -z changeset records — renames and whole-path matching
+
+    # REAL `git status --porcelain -z` form: a rename is `R  new\0old\0`
+    # (captured from a scratch repo; plain porcelain would say
+    # `R  old -> new`). commit() must refuse when EITHER side hits the
+    # rails — staging would sweep the denied path into the commit.
+    def test_commit_rename_away_from_denied_source_never_stages(self):
+        agent = Ranger(cwd="/repo", deny=["**/secrets.py"])
+        fake = FakeRunner(git_replies={
+            "status": "R  safe_new.py\x00secrets.py\x00"})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match="denied"):
+                agent.commit()
+        assert not any(c[:2] == ["git", "add"] for c in fake.runs)
+
+    def test_commit_rename_into_denied_target_never_stages(self):
+        agent = Ranger(cwd="/repo", deny=["**/secrets.py"])
+        fake = FakeRunner(git_replies={
+            "status": "R  secrets.py\x00plain_old.py\x00"})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match="denied"):
+                agent.commit()
+        assert not any(c[:2] == ["git", "add"] for c in fake.runs)
+
+    def test_commit_spaced_and_non_ascii_paths_stage_whole(self):
+        # paths with a space and with literal non-ASCII bytes pass the
+        # rails intact (no quoting to strip, no space to split on)
+        agent = Ranger(cwd="/repo", allow=["**"])
+        fake = FakeRunner(git_replies={
+            "status": " M my notes/has space.py\x00?? data/ünïcode.py\x00"})
+        with harness_and_git(fake):
+            agent.commit()
         assert ["git", "add", "-A", "--"] in [c for c in fake.runs]
 
 

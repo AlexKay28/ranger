@@ -16,6 +16,8 @@ import pytest
 import ranger
 from ranger import Ranger, RangerError
 
+from _fakes import git_sub
+
 RANGER_MOD = "ranger.subprocess"
 
 
@@ -26,16 +28,17 @@ class FakeGit:
         self.runs = []                 # every cmd seen, in order
         self.kws = []                  # kwargs per call (env etc.)
         self.agent_replies = list(agent_replies or [])
-        # replies keyed by git SUBCOMMAND, overridable per test
+        # replies keyed by git SUBCOMMAND, overridable per test;
+        # issue #25: the path listings answer in -z form (NUL-delim)
         self.git_replies = {
             "rev-parse": ("/repo", 0),
             "add": ("", 0),
             "write-tree": ("TREE1", 0),
             "commit-tree": ("SHA1", 0),
             "update-ref": ("", 0),
-            "diff": ("a.py\nb.py\n", 0),
-            "ls-files": ("new1.py\nkept.py\n", 0),
-            "ls-tree": ("kept.py\na.py\n", 0),
+            "diff": ("a.py\x00b.py\x00", 0),
+            "ls-files": ("new1.py\x00kept.py\x00", 0),
+            "ls-tree": ("kept.py\x00a.py\x00", 0),
             "read-tree": ("", 0),
             "clean": ("", 0),
         }
@@ -49,7 +52,7 @@ class FakeGit:
         if cmd[0] != "git":
             reply = self.agent_replies.pop(0) if self.agent_replies else "ok\n"
             return subprocess.CompletedProcess(cmd, 0, stdout=reply, stderr="")
-        sub = cmd[1]
+        sub = git_sub(cmd)
         if sub == "rev-parse" and self.git_fails:
             return subprocess.CompletedProcess(cmd, 128, stdout="",
                                                stderr="fatal: not a git repository")
@@ -184,10 +187,15 @@ class TestRollback:
         assert rb["tag"] == "t1" and rb["sha"] == "SHA1"
         assert rb["restored"] == ["a.py", "b.py", "new1.py"]
         argvs = git_calls(fake)
-        # diff vs the snapshot decides the "restored" report — BEFORE restoring
-        assert ["git", "diff", "--name-only", "SHA1"] in argvs
-        assert ["git", "ls-files", "--others", "--exclude-standard"] in argvs
-        assert ["git", "ls-tree", "-r", "--name-only", "TREE1"] in argvs
+        # diff vs the snapshot decides the "restored" report — BEFORE
+        # restoring; issue #25: every path listing is -z NUL-delimited
+        # and runs with literal output bytes
+        assert ["git", "-c", "core.quotepath=false",
+                "diff", "--name-only", "-z", "SHA1"] in argvs
+        assert ["git", "-c", "core.quotepath=false",
+                "ls-files", "--others", "--exclude-standard", "-z"] in argvs
+        assert ["git", "-c", "core.quotepath=false",
+                "ls-tree", "-r", "--name-only", "-z", "TREE1"] in argvs
         # the rewind: index+worktree <- snapshot tree, HEAD untouched
         assert ["git", "read-tree", "--reset", "-u", "TREE1"] in argvs
         # leftovers die by exact path, never a shotgun clean
@@ -206,6 +214,55 @@ class TestRollback:
             rb = agent.rollback()
         assert rb["tag"] == "newer"
         assert ["git", "read-tree", "--reset", "-u", "T2"] in git_calls(fake)
+
+
+class TestPathsChangedSinceNulDelimited:
+    """issue #25: the `-z` path listings keep spaced, non-ASCII and
+    renamed paths whole. Fixtures mirror REAL captured output —
+    `git diff --name-only -z` emits a rename's two paths as two
+    NUL-separated fields (e.g. `deny_target.py\\0deny_me.py\\0`),
+    never a merged `old -> new` line; all listings end in a bare NUL.
+    """
+
+    def _rolled_back(self, agent, fake):
+        agent.snapshot_log.append({"tag": "t1", "sha": "SHA1",
+                                   "tree": "TREE1", "time": 0.0})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            return agent.rollback("t1")
+
+    def test_spaced_and_non_ascii_paths_stay_whole(self):
+        agent = Ranger(cwd="/repo")
+        # REAL -z formats: spaces never quoted, ü rendered as literal
+        # UTF-8 (verified: -z leaves `ünïcode.py` whole, never
+        # "\"\\303\\274n\\303\\257code.py\"")
+        fake = FakeGit(git_replies={
+            "diff": "src/has space.py\x00data/ünïcode.py\x00",
+            "ls-files": "new dir/spaced out.py\x00",
+            "ls-tree": "data/ünïcode.py\x00",
+        })
+        rb = self._rolled_back(agent, fake)
+        # changed (both) + untracked extra (absent from the tree)
+        assert rb["restored"] == sorted(
+            ["src/has space.py", "data/ünïcode.py",
+             "new dir/spaced out.py"])
+        # leftovers die by EXACT whole path — the old newline/space
+        # parsing would have shredded both of these on their spaces
+        assert ["git", "clean", "-fd", "--",
+                "new dir/spaced out.py"] in git_calls(fake)
+
+    def test_rename_pairs_list_both_paths(self):
+        agent = Ranger(cwd="/repo")
+        # REAL `git diff --name-only -z` bytes after `git mv
+        # deny_me.py deny_target.py` plus a plain modification: the
+        # rename shows BOTH paths as separate fields; both belong in
+        # "restored"
+        fake = FakeGit(git_replies={
+            "diff": "deny_target.py\x00deny_me.py\x00ok.py\x00",
+            "ls-files": "",
+            "ls-tree": "",
+        })
+        rb = self._rolled_back(agent, fake)
+        assert rb["restored"] == ["deny_me.py", "deny_target.py", "ok.py"]
 
 
 # --------------------------------------------------------------------- #
