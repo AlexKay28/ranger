@@ -96,6 +96,7 @@ ranger.Ranger(
 | `memory_budget` | `20000` | recall cap in characters |
 | `skills` | `None` | allow-list: files/dirs via `--file`, prose as grants |
 | `skills_budget` | `None` (per-call / `with_config`, no ctor param) | opt-in cap (chars) per skill file INLINED into the prompt (codex/claude/openhands); native file-attachment backends (opencode, pi) send full files through their own channel — unaffected. A clipped excerpt ends with a marker naming the full file path. `agent.with_config(skills_budget=...)` keeps it as a policy |
+| `evidence` | `None` (per-call / `with_config`, no ctor param) | opt-in richer `check()` return: with `evidence=True`, `check()` / `check_async()` return `{"ok": bool, "evidence": str}` — the one short evidence line the frozen prompt allows after the YES/NO verdict — instead of the bare bool. Inert for every other command |
 | `effort` | `"medium"` | "low"/"medium"/"high" depth directive |
 | `stats` | `False` | JSON-mode runs + telemetry in `agent.last` |
 | `backend` | `"opencode"` | which harness to drive — see Backends below |
@@ -296,6 +297,29 @@ early first-word YES/NO also parses, modulo punctuation). ranger returns
 first line confesses inability ("cannot verify", "unknown"...), or
 **contradictory YES and NO verdict lines** all raise `RangerError`. History
 and harness sessions are dropped for the call — it is a pure query.
+
+**Opt-in `evidence=True`** (a run option; keep a policy with
+`with_config(evidence=True)`) returns a richer dict instead of the bare
+bool — the verdict's own one-line evidence, the `last_gate` philosophy
+applied to conditions:
+
+```python
+result = agent.check("the server binds 8080", evidence=True)
+# {"ok": True, "evidence": "config.yaml binds port 8080"}
+```
+
+- `"ok"`: the same mechanical True/False the bare form returns.
+- `"evidence"`: the one short line the frozen prompt allows after the
+  verdict — the next non-empty line after a standalone YES/NO, or the
+  remainder of the first line after an inline verdict word (leading
+  punctuation stripped); `""` when the reply honestly carried none.
+- All `RangerError` paths (unparseable / unconfident / contradictory) are
+  byte-identical with or without `evidence=` — the option only enriches
+  the success path, it never invents a verdict or softens an error.
+- `evidence=` must be a bool (or `None` for off); anything else raises
+  `ValueError` at the options seam, before any harness spawn.
+- Off by default: without the option `check()` returns exactly today's
+  bare bool.
 
 ### `gate(command, timeout=None) -> bool`
 
@@ -656,7 +680,9 @@ methods remain the primary API.
 - `edit_async(file, instruction, **ov) -> str` — twin of `edit()`; same
   "target must have been modified" mtime post-check
 - `check_async(condition, **ov) -> bool` — twin of `check()`; the strict
-  YES/NO verdict grammar is the shared parser, not a copy
+  YES/NO verdict grammar is the shared parser, not a copy, and the
+  `evidence=True` option shapes the return exactly like `check()`'s
+  (one shared return-shaping helper)
 
 Behavioral contract, pinned by mocked tests: per-call `retries` honored
 (transport-class only), timeouts raise `RangerTimeout` and kill the

@@ -182,6 +182,15 @@ class EngineMixin:
             raise ValueError(
                 f"skills_budget must be a positive int, got {skills_budget!r}")
 
+    @staticmethod
+    def _validate_evidence(evidence) -> None:
+        """evidence: None (off) or a bool — refuse the rest."""
+        if evidence is None:
+            return
+        if not isinstance(evidence, bool):
+            raise ValueError(
+                f"evidence must be a bool, got {evidence!r}")
+
     def _resolve_run_options(self, label: str, ov: dict) -> tuple:
         """Merge ctor + per-call run options into `o`; validate everything.
 
@@ -195,6 +204,7 @@ class EngineMixin:
         if unknown:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
         self._validate_skills_budget(opts.get("skills_budget"))
+        self._validate_evidence(opts.get("evidence"))
         # safety-rail specs are validated on the shared seam too, so even
         # read-only commands reject a malformed spec before any spawn
         self._resolve_safety(ov)

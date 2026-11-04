@@ -433,7 +433,7 @@ class CommandsMixin:
         )
         return self._run(prompt, label="critique", **ov)
 
-    def check(self, condition: str, **ov) -> bool:
+    def check(self, condition: str, **ov):
         """Verify a claim about repo state; return True or False.
 
         The agent may run whatever it needs (commands, file reads) to
@@ -441,12 +441,32 @@ class CommandsMixin:
         word of the reply must be YES or NO. Anything else raises
         RangerError rather than guessing.
 
+        Opt-in run option ``evidence=True`` returns instead the dict
+        ``{"ok": bool, "evidence": str}`` — the one short line of
+        evidence the frozen prompt allows after the verdict ("" when
+        the reply carried none), the same last_gate philosophy as
+        gate(). Default is off: a bare bool is returned, exactly today.
+        Keep a policy with `with_config(evidence=True)`.
+
             agent.check("all tests pass")        # -> bool
             agent.check("README mentions the license")
+            agent.check("server binds 8080", evidence=True)
+                # -> {"ok": True, "evidence": "config.yaml binds 8080"}
         """
         prompt = _check_prompt(condition)
         answer = self._run(prompt, label="check", **ov)
-        return _parse_check_verdict(answer)
+        return self._check_result(answer, ov)
+
+    def _check_result(self, answer: str, ov: dict):
+        """check() return shaping: bool today, evidence dict opted in.
+
+        Shared by check() and its async twin; `evidence=` rides the run
+        options (validated once at the seam), so the twin needs no fork.
+        """
+        if not bool(ov.get("evidence", self.evidence)):
+            return _parse_check_verdict(answer)
+        ok, ev = _parse_check_verdict(answer, evidence=True)
+        return {"ok": ok, "evidence": ev}
 
     def extract(self, request: str, keys: "list[str] | tuple[str, ...]",
                 many: bool = True, **ov) -> "list[dict] | dict":
@@ -558,11 +578,15 @@ class CommandsMixin:
             raise RangerError(f"agent did not modify the edit() target: {target}")
         return report
 
-    async def check_async(self, condition: str, **ov) -> bool:
-        """Async twin of check(): same strict YES/NO verdict grammar."""
+    async def check_async(self, condition: str, **ov):
+        """Async twin of check(): same strict YES/NO verdict grammar.
+
+        Same evidence= run option and shaped return as check() — the
+        return shaping is one helper, not a fork of the contract.
+        """
         answer = await self._run_async(_check_prompt(condition),
                                         label="check", **ov)
-        return _parse_check_verdict(answer)
+        return self._check_result(answer, ov)
 
     @staticmethod
     def _par_spec_error(i: int, call: dict, default_agent) -> "tuple | None":

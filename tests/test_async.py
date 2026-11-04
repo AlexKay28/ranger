@@ -288,6 +288,26 @@ class TestRunAsyncBehavior:
             with pytest.raises(RangerError, match="parse a YES/NO"):
                 run(agent.check_async("readme exists"))
 
+    def test_check_async_evidence_opt_in(self):
+        agent = Ranger(model="m", cwd=".")
+        factory, calls = make_exec_factory(
+            stdout=b"YES\nasync pins the evidence line\n")
+        # OFF by default: byte-identical bare bool, today's contract
+        with mock.patch(SPAWN, side_effect=factory):
+            assert run(agent.check_async("readme exists")) is True
+        # opted in: the same evidence dict shape as check()
+        with mock.patch(SPAWN, side_effect=factory):
+            assert run(agent.check_async("readme exists",
+                                        evidence=True)) == {
+                "ok": True, "evidence": "async pins the evidence line"}
+        # non-bool evidence rejects at the seam, before any spawn
+        factory2, calls2 = make_exec_factory()
+        with mock.patch(SPAWN, side_effect=factory2):
+            with pytest.raises(ValueError,
+                               match="evidence must be a bool"):
+                run(agent.check_async("readme exists", evidence="yes"))
+        assert calls2 == []
+
     def test_write_async_missing_file_raises(self, tmp_path):
         agent = Ranger(model="m", cwd=".")
         factory, _ = make_exec_factory(stdout=b"all done\n")

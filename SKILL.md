@@ -30,7 +30,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Recoverable mutation | `snapshot(tag=...)` before, `rollback(tag)` after — or `until(..., rollback_on_fail=True)` / `fix(..., rollback_on_fail=True)` | `git checkout` hand-rolled; hoping nothing breaks |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
 | Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `trace(symbol)` / `test()` / `lint()` / `diagnose(error)` / `critique(file_or_diff)` / `extract(goal, keys=[...])` (typed JSON rows) | `do()` |
-| Agent-verified fact | `check(condition)` | Truthy prose; it must parse YES/NO |
+| Agent-verified fact | `check(condition)` — add `evidence=True` for `{"ok", "evidence"}` (the verdict's own one-line evidence) instead of the bare bool | Truthy prose; it must parse YES/NO |
 | Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
 | Bounded repair loop | `until(..., gate_cmd=..., max_iter=N)` | An unbounded `while` loop |
 | Spend-bounded loop | `until(..., token_budget=N)` / `resolve(..., token_budget=N)` / `fix(..., token_budget=N)` — charges `agent.costs` (real tokens, else chars/4 estimate) before each round; a budget stop returns `budget_exhausted: True`, never success | Raising `max_iter` and hoping it is cheap enough |

@@ -229,10 +229,16 @@ than a structured verdict.
 agent.critique("src/parser.py")
 ```
 
-### `check(condition) -> bool`
+### `check(condition, **ov) -> bool`
 Boolean verdict on repo state. The agent must actually verify (commands, file
 reads) and answer with YES/NO as the first word; unparseable answers raise
 `RangerError` instead of guessing. The loop-grade primitive for gates.
+Opt-in run option `evidence=True` returns `{"ok": bool, "evidence": str}`
+instead of the bare bool — the one short evidence line the frozen prompt
+allows after the verdict (the inline remainder for early first-word verdicts,
+`""` when the reply carried none). The `gate()`/`last_gate` evidence
+philosophy extended to conditions. Off by default: `check()` returns exactly
+today's bool. Keep a policy with `with_config(evidence=True)`.
 
 ### `extract(request, keys, many=True) -> list[dict] | dict`
 Structured-data grammar beyond YES/NO (law 2): the agent verifies facts
@@ -273,7 +279,8 @@ not modified during the run, same mtime post-check.
 
 ### `check_async(condition, **ov) -> bool`
 Async twin of `check`; the strict YES/NO verdict grammar is shared with the
-sync command — one parser, not two.
+sync command — one parser, not two. The `evidence=True` run option and its
+shaped return are the twin's too, via the same return-shaping helper.
 
 ### `par_map(calls, max_concurrency=8) -> list`
 Bounded-concurrency map over independent calls. Each call is a dict with

@@ -709,6 +709,66 @@ def test_check_rejects_unparseable_verdicts():
             agent.check("all tests pass")
 
 
+# --------------------------------------------------------------------- #
+# check(evidence=True): the opt-in verdict-evidence shape (issue #31)
+
+def test_check_evidence_opt_in_green():
+    agent = Ranger()
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run("YES\nconfig.yaml binds port 8080")):
+        assert agent.check("server binds 8080", evidence=True) == {
+            "ok": True, "evidence": "config.yaml binds port 8080"}
+
+
+def test_check_evidence_opt_in_red():
+    agent = Ranger()
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run("NO\ntwo tests fail: test_a, test_b")):
+        assert agent.check("all tests pass", evidence=True) == {
+            "ok": False, "evidence": "two tests fail: test_a, test_b"}
+
+
+@pytest.mark.parametrize("reply,ok,ev", [
+    ("Yes, verified on disk", True, "verified on disk"),   # inline tail
+    ("YES", True, ""),                                    # no line: honest ""
+])
+def test_check_evidence_opt_in_variants(reply, ok, ev):
+    agent = Ranger()
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(reply)):
+        assert agent.check("cond", evidence=True) == {"ok": ok, "evidence": ev}
+
+
+def test_check_off_by_default_keeps_the_bare_bool():
+    """NO CHANGE pin: without evidence=, check() returns exactly today's bool."""
+    agent = Ranger()
+    assert agent.evidence is None            # per-run default: off
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run("YES\nconfig.yaml binds port 8080")):
+        assert agent.check("server binds 8080") is True      # bare bool, no dict
+
+
+@pytest.mark.parametrize("bad", ["yes", 1])
+def test_check_evidence_rejects_non_bool(bad):
+    agent = Ranger()
+    with mock.patch("ranger._engine._Popen") as m:
+        with pytest.raises(ValueError, match="evidence must be a bool"):
+            agent.check("cond", evidence=bad)
+    m.assert_not_called()   # rejected at the seam, before any harness call
+
+
+def test_check_evidence_policy_via_with_config():
+    base = Ranger()
+    pinned = base.with_config(evidence=True)
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run("YES\npolicy-carried line")):
+        assert pinned.check("cond") == {"ok": True,
+                                         "evidence": "policy-carried line"}
+    assert base.evidence is None            # copy, not mutation
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run("YES\nlonely verdict")):
+        assert base.check("cond") is True
+
+
 def test_gate_exit_code_booleans():
     agent = Ranger()
     with mock.patch("ranger.subprocess.Popen",

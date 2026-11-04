@@ -180,6 +180,13 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
     #: file-attachment backends send full files — unaffected.
     skills_budget = None
 
+    #: per-run default for the opt-in check() evidence return: None = off
+    #: (check() keeps returning a bare bool). Set per call
+    #: (`check(..., evidence=True)`) or keep a policy with
+    #: `with_config(evidence=True)`. Meaningful only for check() and its
+    #: async twin — inert everywhere else.
+    evidence = None
+
     def __init__(
         self,
         model: str | None = None,

@@ -925,3 +925,18 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   containment (contained kill-tree on timeout/interrupt, ~130 seam
   sites re-pointed), and -z porcelain truth for rails/snapshots.
   435 tests green, check exit 0, scan 9.43, MI all-A.
+
+- **Cycle 6 — evidence-carrying check (#31), first 0.9-era feature.**
+  The check() verdict grammar always demanded an evidence line and
+  then threw it away. Opt-in run option evidence=True now returns
+  {"ok": bool, "evidence": str} — the one short line the frozen
+  prompt already allows after the verdict ("" when the reply carried
+  none, never invented; same last_gate philosophy extended to
+  conditions). Off = the bare bool, byte-identical (pinned).
+  Validation once at the shared seam (_validate_evidence, wired like
+  skills_budget); check_async gets it free through one shared
+  _check_result helper — the twin contract stays one, not forked.
+  Parser: the frozen core is _check_verdict with its body and all
+  RangerError paths byte-identical; _parse_check_verdict(answer,
+  evidence=False) wraps. 9 new tests (435 -> 444). 444 green,
+  check exit 0, scan 9.44, MI all-A.

@@ -155,7 +155,7 @@ def _parse_extract_answer(answer: str, keys, many: bool):
     return rows if many else rows[0]
 
 
-def _parse_check_verdict(answer: str) -> bool:
+def _check_verdict(answer: str) -> bool:
     """Boil a check() answer down to True/False or raise RangerError.
 
     Shared by the sync `check()` and the async twin — the verdict
@@ -183,7 +183,7 @@ def _parse_check_verdict(answer: str) -> bool:
     if match:
         first_line = lines[0] if lines else ""
         rest = first_line[re.match(r"\W*(yes|no)\b", first_line,
-                                   re.IGNORECASE).end():]
+                                    re.IGNORECASE).end():]
         if re.search(r"\b(cannot|can'?t|couldn'?t|unable|unable to|"
                      r"unknown|unsure|not sure|no idea)\b", rest,
                      re.IGNORECASE):
@@ -195,5 +195,51 @@ def _parse_check_verdict(answer: str) -> bool:
     raise RangerError(
         f"check() could not parse a YES/NO verdict from:\n{answer[:ANSWER_EXCERPT]}"
     )
+
+
+def _first_nonempty(lines: list, start: int) -> str:
+    """First non-empty (stripped) line from index `start` on; "" if none."""
+    for line in lines[start:]:
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _check_evidence_line(answer: str) -> str:
+    """The one short evidence line a parsed check() verdict may carry.
+
+    Call only on the success path of `_check_verdict` — the verdict is
+    already established; this surfaces the line the frozen prompt allows
+    after it: the next non-empty line after a standalone YES/NO, else
+    the remainder of the first line after an inline verdict word
+    (leading punctuation stripped); "" when the reply carried none —
+    honest, never invented.
+    """
+    lines = answer.strip().splitlines()
+    for i, line in enumerate(lines[:10]):
+        if re.fullmatch(r"\W*(yes|no)\W*", line.strip(), re.IGNORECASE):
+            return _first_nonempty(lines, i + 1)
+    if not lines:
+        return ""
+    m = re.match(r"\W*(yes|no)\b", lines[0], re.IGNORECASE)
+    if not m:
+        return ""
+    return re.sub(r"^\W+", "", lines[0][m.end():].strip())
+
+
+def _parse_check_verdict(answer: str, evidence: bool = False):
+    """Parse a check() answer into True/False — or, with ``evidence=True``,
+    into ``(verdict, evidence_line)``.
+
+    Shared by the sync `check()` and the async twin — the verdict
+    grammar is one contract (law 2), not two. All RangerError paths are
+    byte-identical with or without ``evidence``: the option only
+    enriches the success path, it never softens an error or invents
+    a line the reply did not carry.
+    """
+    verdict = _check_verdict(answer)
+    if not evidence:
+        return verdict
+    return verdict, _check_evidence_line(answer)
 
 
