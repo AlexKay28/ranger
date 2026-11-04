@@ -245,11 +245,13 @@ class CommandsMixin:
             if not out.is_absolute():
                 out = Path(self.cwd or Path.cwd()) / out
         prompt = _write_prompt(task, out)
-        allow, deny, _ = self._resolve_safety(ov)
+        allow, deny, dry = self._resolve_safety(ov)
         self._assert_path_allowed(out, allow, deny)
         self._auto_snapshot("pre-write")
-        return {"prompt": prompt, "out": out,
-                "dry_run": ov.get("dry_run", False)}
+        # instance-blind dry_run was the divergence: the postcheck saw
+        # False while with_config(dry_run=True) made the run read-only —
+        # the same resolution as _resolve_safety keeps them in sync
+        return {"prompt": prompt, "out": out, "dry_run": dry}
 
     @staticmethod
     def _write_after(spec: dict) -> None:
@@ -363,12 +365,13 @@ class CommandsMixin:
             before = target.stat().st_mtime_ns
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
-        allow, deny, _ = self._resolve_safety(ov)
+        allow, deny, dry = self._resolve_safety(ov)
         self._assert_path_allowed(target, allow, deny)
         self._auto_snapshot("pre-edit")
+        # same fix as write(): dry_run resolves instance-first via
+        # _resolve_safety — per-call still wins, the postcheck agrees
         return {"prompt": _edit_prompt(target, instruction),
-                "target": target, "before": before,
-                "dry_run": ov.get("dry_run", False)}
+                "target": target, "before": before, "dry_run": dry}
 
     @staticmethod
     def _edit_after(spec: dict, report: str) -> str:

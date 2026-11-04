@@ -248,6 +248,23 @@ class TestVerifyClaims:
             with pytest.raises(RangerError, match="CLAIM"):
                 agent.verify_claims("t")
 
+    def test_claims_evidence_never_stamps_pass_on_red(self, tmp_path):
+        """audit: evidence= (policy or per-call) is presentation — a
+        red check reply must stamp FAIL, never a truthy-dict PASS."""
+        pinned = Ranger(cwd=tmp_path).with_config(evidence=True)
+        replies = [fake_run("CLAIM: the sky is green"),
+                   fake_run("NO\nthe sky is not green")]
+        with mock.patch("ranger._engine._Popen", side_effect=replies):
+            results = pinned.verify_claims("t")
+        assert results == [{"claim": "the sky is green",
+                            "verdict": "FAIL", "ok": False}]
+        replies = [fake_run("CLAIM: the sky is green"),
+                   fake_run("NO\nthe sky is not green")]
+        with mock.patch("ranger._engine._Popen", side_effect=replies):
+            results = Ranger(cwd=tmp_path).verify_claims("t", evidence=True)
+        assert results == [{"claim": "the sky is green",
+                            "verdict": "FAIL", "ok": False}]
+
 
 def popen_seq(*specs):
     """Iterator of mocked Popens from (returncode, output) tuples."""

@@ -21,10 +21,13 @@ _SNAP_REFS = "refs/ranger/snapshots"
 class SnapshotMixin:
     """Mixin — composed into ranger.Ranger (no bases)."""
 
-    def _git(self, *args, env: dict | None = None, timeout: float = 60) -> str:
-        """Run ONE git plumbing call in the agent cwd; return stripped stdout.
+    def _git(self, *args, env: dict | None = None, timeout: float = 60,
+             cwd: str | None = None) -> str:
+        """Run ONE git plumbing call; return stripped stdout.
 
-        The same `ranger.subprocess.run` seam as harness runs, so tests
+        Runs in `cwd` when given (rollback's tree-wide listings need the
+        repo ROOT, not a subdirectory cwd), else in the agent cwd. The
+        same `ranger.subprocess.run` seam as harness runs, so tests
         stay fully mocked. Raises RangerError on a non-zero exit — the
         snapshot machinery must never turn a git failure into a silent
         no-op (failure is an exception, law 5).
@@ -32,7 +35,7 @@ class SnapshotMixin:
         try:
             proc = subprocess.run(
                 ["git", *args],
-                cwd=self.cwd,
+                cwd=cwd or self.cwd,
                 env=env or self._child_env(),
                 capture_output=True,
                 text=True,
@@ -60,7 +63,9 @@ class SnapshotMixin:
         """Commit the current state to a hidden git ref (recoverability).
 
         Captures tracked + untracked-but-not-ignored files through a
-        TEMPORARY index (`GIT_INDEX_FILE` in `.git/`), so neither the
+        TEMPORARY index (`GIT_INDEX_FILE` under the real git dir —
+        `git rev-parse --absolute-git-dir`, so linked worktrees whose
+        `.git` is a file work too), so neither the
         real index + staged state nor the working tree are touched. The
         commit lands on `refs/ranger/snapshots/<tag>` (inspectable with
         plain git) and is recorded in the explicit Python-side registry
@@ -84,8 +89,19 @@ class SnapshotMixin:
             raise ValueError(f"invalid snapshot tag: {tag!r}")
         if any(s["tag"] == tag for s in self.snapshot_log):
             raise ValueError(f"snapshot tag already used: {tag!r}")
-        index = Path(root) / ".git" / f"ranger-index-{os.getpid()}-{uuid.uuid4().hex[:SNAP_HEX_CLIP]}"
-        env = {**(self._child_env() or {}), "GIT_INDEX_FILE": str(index)}
+        # the REAL git dir, not root/.git: in a linked worktree .git is a
+        # FILE, and the temp index would land outside the repository
+        git_dir = self._git("rev-parse", "--absolute-git-dir").strip()
+        if not git_dir:  # pragma: no cover — git never answers rc 0 + empty
+            git_dir = str(Path(root) / ".git")
+        index = Path(git_dir) / f"ranger-index-{os.getpid()}-{uuid.uuid4().hex[:SNAP_HEX_CLIP]}"
+        # inherit, THEN overlay, THEN strip the env_deny rail — all in
+        # ONE _child_env call, so the temp-index env gets exactly the
+        # child-CLI env treatment (audit A: flattening os.environ here
+        # used to lose PATH/HOME for the cwd=None default agent, and a
+        # deny rail the git child can bypass would not be a rail).
+        env = self._child_env(env={"GIT_INDEX_FILE": str(index)},
+                              deny=self.env_deny)
         try:
             # add -A on the TEMP index only — no real index/worktree touch
             self._git("add", "-A", "--", env=env)
@@ -132,7 +148,7 @@ class SnapshotMixin:
             )
         return tag, entry
 
-    def _paths_changed_since(self, sha, tree) -> tuple:
+    def _paths_changed_since(self, sha, tree, root) -> tuple:
         """Honest path diff of the CURRENT tree vs a snapshot.
 
         Returns (changed, extras): modified/deleted tracked paths
@@ -143,18 +159,26 @@ class SnapshotMixin:
         stay literal) — paths with spaces and non-ASCII names survive,
         and a rename's two paths stay two fields (`--name-only -z`
         emits `new\\0old\\0`, never a merged line).
+
+        All three listings run in `root` (the repo ROOT), never the
+        agent cwd: git lists relative to its cwd, so running them in a
+        subdirectory would scope the diff/untracked scan to that
+        subtree while snapshot() captured the WHOLE tree — root-level
+        leftovers would survive rollback while `restored` claimed
+        completeness. From the root, every path comes back
+        root-relative and `clean` receives the same forms.
         """
         changed = [p for p in self._git("-c", "core.quotepath=false",
                                         "diff", "--name-only", "-z",
-                                        sha).split("\0") if p]
+                                        sha, cwd=root).split("\0") if p]
         untracked = [p for p in self._git(
             "-c", "core.quotepath=false",
             "ls-files", "--others", "--exclude-standard",
-            "-z").split("\0") if p]
+            "-z", cwd=root).split("\0") if p]
         snap_files = set(
             p for p in self._git("-c", "core.quotepath=false",
                                  "ls-tree", "-r", "--name-only",
-                                 "-z", tree).split("\0") if p
+                                 "-z", tree, cwd=root).split("\0") if p
         )
         extras = [p for p in untracked if p not in snap_files]
         return changed, extras
@@ -170,22 +194,26 @@ class SnapshotMixin:
         the snapshot itself never preserved staged-vs-worktree
         distinctions), then any post-snapshot untracked leftovers are
         removed by exact path (`git clean -fd -- <paths>`, never a
-        shotgun). HEAD, branches and your commit history are untouched.
+        shotgun). The listings, the rewind and the clean all run from
+        the repo ROOT, so a rollback from a subdirectory cwd restores
+        the WHOLE tree, not just the agent's subtree. HEAD, branches
+        and your commit history are untouched.
 
         RangerError when nothing is recorded, the tag is unknown, or cwd
         stopped being a git repository — an honest refusal, never a
         claimed restore.
         """
         tag, entry = self._rollback_target(tag)
-        self._repo_root("rollback()")
+        root = self._repo_root("rollback()")
         sha, tree = entry["sha"], entry["tree"]
-        changed, extras = self._paths_changed_since(sha, tree)
+        changed, extras = self._paths_changed_since(sha, tree, root)
         # 1) index+worktree <- snapshot tree; `-u` deletes files whose only
         #    justification was a post-snapshot index entry
-        self._git("read-tree", "--reset", "-u", tree)
-        # 2) untracked leftovers go away by exact path — no shotgun clean
+        self._git("read-tree", "--reset", "-u", tree, cwd=root)
+        # 2) untracked leftovers go away by exact path — no shotgun clean;
+        #    from the ROOT, so root-level stragglers die like any other
         if extras:
-            self._git("clean", "-fd", "--", *extras)
+            self._git("clean", "-fd", "--", *extras, cwd=root)
         restored = sorted(set(changed) | set(extras))
         _LOG.info("rollback · tag=%s · restored %d path(s)", tag, len(restored))
         return {"tag": tag, "sha": sha, "restored": restored}
@@ -254,7 +282,15 @@ class SnapshotMixin:
     def commit(self, message: str | None = None,
                allow: "list[str] | None" = None,
                deny: "list[str] | None" = None) -> str:
-        """Stage and commit the agent's own work in cwd. Returns the sha.
+        """Stage and commit working-tree changes, REPO-WIDE. Returns the sha.
+
+        The scope is honest and tree-wide (audit finding C): `git add
+        -A --` carries no pathspec, so everything the repo-wide
+        porcelain reported is staged and committed — cwd only decides
+        where git runs, and changes the agent left OUTSIDE cwd are
+        committed too. There is no subtree-scoped staging mode; point
+        the agent's cwd at the repo root when the whole-tree view is
+        the intent.
 
         Only ever runs `git add -A --` + `git commit -m`: it never
         pushes, resets, cleans or rewrites history — destructive

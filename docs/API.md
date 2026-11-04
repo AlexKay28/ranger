@@ -854,11 +854,14 @@ apply to every file exactly as in `edit()`. No matches is an honest
 (`TypeError`/`ValueError`, zero spawns on a bad spec).
 
 **`commit(message=None, allow=None, deny=None) -> str`** — stage and
-commit the agent's own work in cwd; returns the commit sha. The full
+commit the working tree, **repo-wide**; returns the commit sha. The full
 git vocabulary of this method is `rev-parse`, `status --porcelain`,
 `add -A --`, `commit -m`, `rev-parse HEAD` — **no push, no reset, no
 clean, no checkout, no rewrite**: destructive operations are not
-delegated, they are absent. Honest refusals (`RangerError`): non-repo
+delegated, they are absent. The scope is the WHOLE repository, not just
+the agent's cwd: `add -A` carries no pathspec, so changes outside cwd are
+staged and committed too (point `cwd` at the repo root when the
+whole-tree view is the intent). Honest refusals (`RangerError`): non-repo
 cwd; clean working tree; a changeset path hitting the rails (instance
 `allow`/`deny` defaults apply when per-call lists are absent; a
 denied path is never staged). `message=None` uses a marked default so
@@ -939,7 +942,9 @@ mechanism — no container sandbox needed.
 
 **`snapshot(tag=None) -> dict`** — commit the current state (tracked +
 untracked-but-not-ignored) to a hidden ref `refs/ranger/snapshots/<tag>`
-through a **temporary index** (`GIT_INDEX_FILE` under `.git/`): the real
+through a **temporary index** (`GIT_INDEX_FILE` under the real git dir —
+`git rev-parse --absolute-git-dir`, so linked worktrees whose `.git` is
+a file work too): the real
 index, staged state and working tree are untouched. The commit is also
 recorded in the Python-side registry `agent.snapshot_log`
 (`{"tag", "sha", "tree", "time"}`). `tag=None` auto-names `snap-1`,
@@ -959,7 +964,10 @@ recorded in the Python-side registry `agent.snapshot_log`
 `git ls-files --others` decide the honest restored list, then
 `git read-tree --reset -u <tree>` rewinds index+worktree, and any
 post-snapshot untracked leftovers are removed **by exact path**
-(`git clean -fd -- <paths>`, never a shotgun). HEAD, branches and your
+(`git clean -fd -- <paths>`, never a shotgun). The listings, rewind and
+clean all run from the repo ROOT, so a rollback from a subdirectory cwd
+still covers the WHOLE tree — a root-level leftover cannot survive while
+`restored` claims completeness. HEAD, branches and your
 commit history are untouched. Returns `{"tag", "sha", "restored": [...]}`
 — the paths that actually differed. `RangerError` when nothing is
 recorded, the tag is unknown, or cwd is not a git repository.

@@ -298,6 +298,24 @@ class TestDryRunArgv:
             assert agent.write("report", path=out, dry_run=True) == str(out)
         assert not out.is_file()               # nothing was applied
 
+    def test_dry_run_policy_skips_write_edit_postchecks(self, tmp_path):
+        """audit fix: with_config(dry_run=True) makes write()/edit()
+        read-only for the RUN — the postchecks must resolve the SAME
+        policy (instance-blind dry_run made every one fail loudly)."""
+        agent = Ranger(cwd=tmp_path).with_config(dry_run=True)
+        target = tmp_path / "t.py"
+        target.write_text("x = 1", encoding="utf-8")
+        out = tmp_path / "never.md"
+        with mock.patch("ranger._engine._Popen") as run:
+            run.return_value = fake_harness("planned changes ...")
+            assert agent.edit(target, "double it") == "planned changes ..."
+            assert agent.write("report", path=out) == str(out)
+        argv = run.call_args_list[0].args[0]
+        assert argv[argv.index("--agent") + 1] == "plan"  # run was read-only
+        # and the untouched targets prove it: no postcheck RangerError
+        assert target.read_text(encoding="utf-8") == "x = 1"
+        assert not out.is_file()
+
     def test_dry_run_costs_still_record(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         with mock.patch("ranger._engine._Popen") as run:

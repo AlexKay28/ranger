@@ -168,6 +168,42 @@ def test_per_call_override_beats_default():
     assert m.call_args.args[0][m.call_args.args[0].index("--model") + 1] == "fast/model"
 
 
+def _strict_popen(cmd, **kw):
+    """Popen stand-in enforcing the real seam contract: argv must be
+    all-str (subprocess raises the raw TypeError on a non-str — the
+    failure the per-call model=None bug surfaced)."""
+    bad = next((a for a in cmd if not isinstance(a, str)), None)
+    if bad is not None:
+        raise TypeError(f"expected str, got {type(bad).__name__}")
+    return fake_run("ok")
+
+
+def test_per_call_model_none_is_no_override():
+    """model=None must fall through to the instance model (audit fix) —
+    not leak None into argv (opencode: raw TypeError; codex: dropped)."""
+    agent = Ranger(model="agent/model", cwd="/tmp/demo")
+    with mock.patch("ranger._engine._Popen",
+                    side_effect=_strict_popen) as m:
+        assert agent.ask("x", model=None) == "ok"
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "agent/model"
+    # and nothing overrode the per-call seam for a real string either
+    with mock.patch("ranger._engine._Popen",
+                    side_effect=_strict_popen) as m:
+        agent.ask("x", model="other/model")
+    assert m.call_args.args[0][m.call_args.args[0].index("--model") + 1] == "other/model"
+
+
+def test_per_call_model_non_str_still_raises():
+    """Validation stays: only None is the new 'no override' — a non-str
+    model keeps failing at the spawn seam, loudly."""
+    agent = Ranger(model="agent/model", cwd="/tmp/demo")
+    for bad in (3, 1.5):
+        with mock.patch("ranger._engine._Popen", side_effect=_strict_popen):
+            with pytest.raises(TypeError):
+                agent.ask("x", model=bad)
+
+
 def test_unknown_run_option_raises():
     agent = Ranger()
     with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")):
@@ -767,6 +803,80 @@ def test_check_evidence_policy_via_with_config():
     with mock.patch("ranger._engine._Popen",
                     return_value=fake_run("YES\nlonely verdict")):
         assert base.check("cond") is True
+
+
+# --------------------------------------------------------------------- #
+# audit: an evidence policy/per-call option is PRESENTATION — it can
+# never decide a mechanical verdict (a non-empty dict is always truthy,
+# so until()/attempt()/resolve()/fix() and verify_claims() must resolve
+# evidence to None at every internal check() call site)
+
+RED_REPLY = "NO\ntwo tests still fail: test_a, test_b"
+
+
+def test_until_evidence_policy_cannot_turn_red_green():
+    pinned = Ranger().with_config(evidence=True)
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(RED_REPLY)), \
+         mock.patch.object(Ranger, "ask",
+                           side_effect=lambda p, **kw: "a step"), \
+         mock.patch.object(Ranger, "do",
+                           side_effect=lambda p, **kw: "did it"):
+        out = pinned.until("goal", max_iter=1, condition="cond")
+    assert out["achieved"] is False and out["last_gate"]["ok"] is False
+    # positive pin: the same policy keeps check()'s public dict shape
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(RED_REPLY)):
+        assert pinned.check("cond") == {
+            "ok": False, "evidence": "two tests still fail: test_a, test_b"}
+
+
+def test_until_per_call_evidence_cannot_turn_red_green():
+    agent = Ranger()
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(RED_REPLY)), \
+         mock.patch.object(Ranger, "ask",
+                           side_effect=lambda p, **kw: "a step"), \
+         mock.patch.object(Ranger, "do",
+                           side_effect=lambda p, **kw: "did it"):
+        out = agent.until("goal", max_iter=1, condition="cond",
+                          evidence=True)
+    assert out["achieved"] is False and out["last_gate"]["ok"] is False
+
+
+def test_attempt_per_call_evidence_red_is_not_passed():
+    agent = Ranger()
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(RED_REPLY)), \
+         mock.patch.object(Ranger, "do",
+                           side_effect=lambda p, **kw: "tried"):
+        out = agent.attempt("goal", condition="cond", evidence=True)
+    assert out["passed"] is False and out["last_gate"]["ok"] is False
+
+
+def test_resolve_evidence_policy_red_is_failed():
+    pinned = Ranger().with_config(evidence=True)
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(RED_REPLY)), \
+         mock.patch.object(Ranger, "plan",
+                           side_effect=lambda p, **kw: "1. do it"), \
+         mock.patch.object(Ranger, "do",
+                           side_effect=lambda p, **kw: "did"):
+        out = pinned.resolve("goal", max_iter=1, condition="cond")
+    assert out["status"] == "FAILED" and out["last_gate"]["ok"] is False
+
+
+def test_fix_evidence_policy_red_is_failed():
+    pinned = Ranger().with_config(evidence=True)
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(RED_REPLY)), \
+         mock.patch.object(Ranger, "diagnose",
+                           side_effect=lambda p, **kw: "it is broken"), \
+         mock.patch.object(Ranger, "do",
+                           side_effect=lambda p, **kw: "did"):
+        out = pinned.fix("the build is red", condition="green",
+                         max_iter=1)
+    assert out["status"] == "FAILED" and out["last_gate"]["ok"] is False
 
 
 def test_gate_exit_code_booleans():

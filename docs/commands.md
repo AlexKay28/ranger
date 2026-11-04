@@ -342,8 +342,10 @@ keeps their subprocess accounting at exactly one harness run).
 ### `rollback(tag=None) -> dict`
 Restore the working tree to a snapshot (tag, or the last one taken).
 `git read-tree --reset -u <tree>` rewinds index+worktree; post-snapshot
-untracked leftovers are cleaned **by exact path**, never a shotgun.
-HEAD, branches and commit history stay untouched. Returns
+untracked leftovers are cleaned **by exact path**, never a shotgun. The
+listings and the clean run from the repo ROOT, so a rollback from a
+subdirectory cwd still covers the whole tree. HEAD, branches and commit
+history stay untouched. Returns
 `{"tag", "sha", "restored": [...]}` — the paths that actually differed.
 Nothing recorded / unknown tag / non-git cwd → `RangerError`.
 
@@ -462,10 +464,12 @@ sibling's failure never stops the batch. Rails and `dry_run` apply per
 file exactly as in `edit()`. No matches → honest `RangerError`.
 
 ### `commit(message=None, allow=None, deny=None) -> str`
-Stage and commit the agent's work in cwd; returns the commit sha.
-Only ever `git add -A --` + `git commit -m` — never push, reset,
-clean, checkout or a force anything. Refuses honestly (`RangerError`)
-on a non-repo cwd, a clean tree, or a changeset path hitting the
+Stage and commit the working tree, **repo-wide**; returns the commit
+sha. Only ever `git add -A --` + `git commit -m` — never push, reset,
+clean, checkout or a force anything. `add -A` carries no pathspec: cwd
+only decides where git runs, and changes outside cwd are committed too.
+Refuses honestly (`RangerError`) on a non-repo cwd, a clean tree, or a
+changeset path hitting the
 rails (instance `allow`/`deny` defaults apply; per-call lists replace).
 `message=None` uses a marked default ("ranger: agent work (…)").
 

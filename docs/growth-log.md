@@ -998,3 +998,21 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   (#32), the three honesty additions — env_deny rail, snapshots_prune,
   capabilities (#33) — and the write/edit spec-seam refactor (#30).
   472 tests green, check exit 0, scan 9.41, MI all-A.
+
+- **Cycles 10–11 — second-pass audit, truth-composition fixes.** A
+  fresh independent audit (0.9.0-era, previous backlog #21–#33 all
+  fixed) graded the repo B+ and surfaced the one composition bug:
+  with_config(evidence=True) turned every RED verdict green in
+  until/attempt/resolve/fix/verify_claims (a non-empty evidence dict
+  is always truthy). Mechanical verdicts now force evidence=None at
+  every internal call site — a presentation option can never flip a
+  verdict. Also: write/edit specs resolve dry_run through the
+  shared seam (with_config(dry_run=True) no longer fails postchecks);
+  per-call model=None is "no override" (was a raw TypeError);
+  cwd=None snapshots survive (temp-index env routed through
+  _child_env — PATH/HOME inherited, env_deny rail holds for the git
+  child too; index lives under --absolute-git-dir, worktree-safe);
+  subdir rollback covers the whole tree (listings from repo root);
+  commit() contract honestly says repo-wide staging (pinned argv).
+  14 new tests (472 -> 486). 486 green, check exit 0, scan 9.40,
+  MI all-A.

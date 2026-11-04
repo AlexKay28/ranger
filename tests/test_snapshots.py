@@ -6,6 +6,7 @@ is flow truth: pre-round snapshots are best-effort, explicit calls raise
 honestly, rollback_on_fail restores only when a snapshot exists.
 """
 
+import os
 import subprocess
 from contextlib import contextmanager
 from functools import partial
@@ -57,12 +58,26 @@ class FakeGit:
         if sub == "rev-parse" and self.git_fails:
             return subprocess.CompletedProcess(cmd, 128, stdout="",
                                                stderr="fatal: not a git repository")
+        # the temp-index plumbing probes the REAL git dir (audit A: a
+        # linked worktree's .git is a file, root/.git would be wrong)
+        if "--absolute-git-dir" in cmd:
+            out, rc = self.git_replies.get("absolute-git-dir",
+                                           ("/repo/.git", 0))
+            return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
         out, rc = self.git_replies[sub]
         return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
 
 
 def git_calls(fake):
     return [c for c in fake.runs if c[0] == "git"]
+
+
+def git_kw(fake, *prefix):
+    """kwargs (env, cwd, ...) of the first git call matching a prefix."""
+    for cmd, kw in zip(fake.runs, fake.kws):
+        if cmd[0] == "git" and cmd[:len(prefix)] == list(prefix):
+            return kw
+    return None
 
 
 class _AgentPopenFake:
@@ -117,14 +132,16 @@ class TestSnapshot:
                         "tree": "TREE1", "root": "/repo"}
         argvs = git_calls(fake)
         assert argvs[0] == ["git", "rev-parse", "--show-toplevel"]
-        assert argvs[1] == ["git", "add", "-A", "--"]
-        assert argvs[2] == ["git", "write-tree"]
-        assert argvs[3][:2] == ["git", "commit-tree"]
-        assert "TREE1" in argvs[3] and "ranger snapshot before-refactor" in argvs[3]
-        assert argvs[4] == ["git", "update-ref",
+        # the REAL git dir, not root/.git — linked worktrees' .git is a file
+        assert argvs[1] == ["git", "rev-parse", "--absolute-git-dir"]
+        assert argvs[2] == ["git", "add", "-A", "--"]
+        assert argvs[3] == ["git", "write-tree"]
+        assert argvs[4][:2] == ["git", "commit-tree"]
+        assert "TREE1" in argvs[4] and "ranger snapshot before-refactor" in argvs[4]
+        assert argvs[5] == ["git", "update-ref",
                             "refs/ranger/snapshots/before-refactor", "SHA1"]
         # the index used is TEMPORARY — the real index is never touched
-        add_kw = fake.kws[1]
+        add_kw = fake.kws[2]
         assert add_kw["env"]["GIT_INDEX_FILE"].startswith("/repo/.git/ranger-index-")
         assert agent.snapshot_log == [
             {"tag": "before-refactor", "sha": "SHA1", "tree": "TREE1",
@@ -149,15 +166,55 @@ class TestSnapshot:
                 with pytest.raises(ValueError, match="invalid snapshot tag"):
                     agent.snapshot(bad)
 
-    def test_temp_index_env_is_isolated(self):
-        agent = Ranger(cwd="/repo")
+    def test_temp_index_env_inherits_child_env_defaults(self):
+        # audit A, the hollow test made real: cwd=None + no overlay →
+        # _child_env() is None, and the OLD spread handed git an env
+        # with NO PATH/HOME — snapshots silently never ran (git not
+        # found) for the DEFAULT Ranger(). Inherit FIRST, then overlay.
+        agent = Ranger()          # cwd=None — the package default agent
         fake = FakeGit()
         with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
             agent.snapshot("t")
-        git_adds = [c for c in fake.runs if c[:3] == ["git", "add", "-A"]]
-        kw = None
-        # env flows through kwargs on every call; assert via call capture
-        assert git_adds, "snapshot must run git add -A on the temp index"
+        env = git_kw(fake, "git", "add", "-A")["env"]
+        assert env["PATH"] == os.environ.get("PATH")
+        assert env["HOME"] == os.environ.get("HOME")
+        assert env["GIT_INDEX_FILE"].startswith("/repo/.git/ranger-index-")
+
+    def test_temp_index_env_overlay_wins_over_os_environ(self):
+        # an explicit env= key OVERRIDES the inherited value — merging,
+        # not clobbering, in both directions
+        agent = Ranger(cwd="/repo",
+                       env={"RANGER_TEST_MARKER": "42", "PATH": "/custom"})
+        fake = FakeGit()
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            agent.snapshot("t")
+        env = git_kw(fake, "git", "add", "-A")["env"]
+        assert env["RANGER_TEST_MARKER"] == "42"
+        assert env["PATH"] == "/custom"    # the overlay wins, not os.environ
+        assert env["GIT_INDEX_FILE"].startswith("/repo/.git/ranger-index-")
+
+    def test_env_deny_rail_holds_on_the_temp_index_env(self):
+        # with_config(env_deny=[...]) strips names from the git child
+        # too — a rail the snapshot env could bypass is not a rail
+        agent = Ranger().with_config(env_deny=["RANGER_TEST_SECRET"])
+        fake = FakeGit()
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake), \
+             mock.patch.dict(os.environ, {"RANGER_TEST_SECRET": "shh"}):
+            agent.snapshot("t")
+        env = git_kw(fake, "git", "add", "-A")["env"]
+        assert "RANGER_TEST_SECRET" not in env
+        assert env["PATH"] == os.environ.get("PATH")   # the rest survives
+
+    def test_temp_index_lives_in_the_real_git_dir(self):
+        # linked worktree: .git is a FILE, so root/.git was never the
+        # git dir — the index follows rev-parse --absolute-git-dir
+        agent = Ranger(cwd="/repo")
+        fake = FakeGit(git_replies={"absolute-git-dir":
+                                    "/repo/.git/worktrees/wt"})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            agent.snapshot("t")
+        index = git_kw(fake, "git", "add", "-A")["env"]["GIT_INDEX_FILE"]
+        assert index.startswith("/repo/.git/worktrees/wt/ranger-index-")
 
 
 # --------------------------------------------------------------------- #
@@ -215,6 +272,40 @@ class TestRollback:
             rb = agent.rollback()
         assert rb["tag"] == "newer"
         assert ["git", "read-tree", "--reset", "-u", "T2"] in git_calls(fake)
+
+    def test_subdir_rollback_covers_the_whole_tree_not_the_subtree(self):
+        # audit B: the listings used to run in the SUBDIR cwd, so git
+        # answered cwd-relative and root-level leftovers survived
+        # while "restored" claimed completeness. snapshot() captures
+        # tree-wide (add -A), so the rewind must list and clean from
+        # the ROOT: untracked extras BOTH at root and inside the
+        # subtree go away, and the tracked rewind stays tree-wide.
+        agent = Ranger(cwd="/repo/sub")
+        agent.snapshot_log.append({"tag": "t1", "sha": "SHA1",
+                                   "tree": "TREE1", "time": 0.0})
+        fake = FakeGit(git_replies={
+            "diff": "sub/inside.py\x00",
+            "ls-files": "root_extra.py\x00sub/inner.py\x00",
+            "ls-tree": "",
+        })
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            rb = agent.rollback("t1")
+        # every listing runs FROM THE REPO ROOT (root-relative paths)
+        assert git_kw(fake, "git", "-c", "core.quotepath=false",
+                      "diff")["cwd"] == "/repo"
+        assert git_kw(fake, "git", "-c", "core.quotepath=false",
+                      "ls-files")["cwd"] == "/repo"
+        assert git_kw(fake, "git", "-c", "core.quotepath=false",
+                      "ls-tree")["cwd"] == "/repo"
+        # BOTH extras — root-level AND inside the subtree — die by path
+        assert ["git", "clean", "-fd", "--",
+                "root_extra.py", "sub/inner.py"] in git_calls(fake)
+        assert git_kw(fake, "git", "clean")["cwd"] == "/repo"
+        # the tracked rewind stays TREE-WIDE: the whole snapshot tree
+        assert ["git", "read-tree", "--reset", "-u", "TREE1"] in git_calls(fake)
+        assert git_kw(fake, "git", "read-tree")["cwd"] == "/repo"
+        assert rb["restored"] == ["root_extra.py", "sub/inner.py",
+                                  "sub/inside.py"]
 
 
 # --------------------------------------------------------------------- #
@@ -466,6 +557,34 @@ class TestAutoSnapshotAndLoops:
         with harness_and_git(fake):
             assert agent.do("fix things") == "did it"   # skipped, logged
         assert [s["tag"] for s in agent.snapshot_log] == ["pre-do-1"]
+
+
+# --------------------------------------------------------------------- #
+# commit() — the honest REPO-WIDE staging contract (audit C)
+
+class TestCommitScope:
+    """Audit C decision: staging stays tree-wide (`git add -A --` with
+    NO pathspec), pinned by tests outside this file; the docstring and
+    API.md now SAY so instead of claiming "the agent's work in cwd".
+    cwd decides where git runs, not what is staged — the repo-wide
+    porcelain check matches the repo-wide staging, so the rails see
+    exactly what gets committed."""
+
+    def test_add_stages_tree_wide_no_pathspec(self):
+        agent = Ranger(cwd="/repo/sub")
+        fake = FakeGit(git_replies={
+            "status": " M sub/a.py\x00?? root_outside.py\x00",
+            "commit": "",
+        })
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            sha = agent.commit("work")
+        assert sha == "/repo"    # the rev-parse reply doubles as the sha
+        argvs = git_calls(fake)
+        # tree-wide staging: NO pathspec limits the add to the subtree —
+        # a file changed OUTSIDE cwd is staged too (the honest contract)
+        assert [c for c in argvs if c[:2] == ["git", "add"]] == \
+            [["git", "add", "-A", "--"]]
+        assert ["git", "commit", "-m", "work"] in argvs
 
 
 def argv_of(fake, *prefix):

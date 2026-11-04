@@ -252,7 +252,7 @@ class EngineMixin:
         Resolved AFTER the effective backend is known so a per-call
         backend switch never inherits the wrong package default.
         """
-        if "model" in ov:
+        if ov.get("model") is not None:
             return ov["model"]
         if self._model_explicit is not None:
             return self._model_explicit

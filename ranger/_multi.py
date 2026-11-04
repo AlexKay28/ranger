@@ -64,7 +64,11 @@ class MultiMixin:
         results = []
         for claim in claims:
             try:
-                ok = self.check(claim, **ov)
+                # mechanical stamp: evidence=None forces the bare bool —
+                # an evidence policy can never flip a verdict truthy
+                # (a non-empty dict is always truthy), so 'PASS' on a
+                # red claim is impossible even with evidence=True
+                ok = self.check(claim, **{**ov, "evidence": None})
                 verdict = "PASS" if ok else "FAIL"
             except RangerError:
                 ok, verdict = None, "UNCERTAIN"

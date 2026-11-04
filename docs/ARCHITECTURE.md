@@ -81,7 +81,7 @@ Ranger is composed from six single-purpose mixins plus a slim core —
 
 ## Quality posture
 
-- 472 tests <!-- tests:472 -->, well under the enforced 60-second suite
+- 472 tests <!-- tests:486 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before

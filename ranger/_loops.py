@@ -108,10 +108,16 @@ class LoopsMixin:
             if parts is not None:
                 last_gate["parts"] = parts
             return ok, last_gate
+        # mechanical verdicts never read a presentation option: the
+        # internal check() calls force evidence=None so a policy
+        # with_config(evidence=True) can never turn a RED gate green
+        # (a non-empty evidence dict is always truthy) — bare bool only.
+        ov_mechanical = {**ov, "evidence": None}
         if condition is not None:
-            ok = self.check(condition, **ov)
+            ok = self.check(condition, **ov_mechanical)
             return ok, {"kind": "condition", "ok": ok, "output": ""}
-        ok = self.check(f"the goal is fully achieved: {goal}", **ov)
+        ok = self.check(f"the goal is fully achieved: {goal}",
+                        **ov_mechanical)
         return ok, {"kind": "check", "ok": ok, "output": ""}
 
     def _pre_loop_snapshot(self, who: str):
