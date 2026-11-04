@@ -1046,3 +1046,13 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   LABELS comment moved to its set, dead pre_gate parameter dropped,
   pcina budget comment measured fresh. 7 new tests (506 -> 513).
   513 green, check exit 0, scan 9.41, MI all-A.
+
+- **Release 0.9.1 — the second-audit converge release.** Version
+  parity bumped. Since 0.9.0: the P0 evidence-policy verdict fix
+  (mechanical loops never read a presentation option), cwd=None
+  snapshots survive, subdir rollback tree-wide, honest repo-wide
+  commit contract, do-rails delta baseline (live-verified),
+  cwd-relative globs bite write/edit, codex joined the drift
+  guard, validation before side effects, honest Windows kill
+  degradation, and the doc-drift batch with new docs gates.
+  513 tests green, check exit 0, scan 9.41, MI all-A.
