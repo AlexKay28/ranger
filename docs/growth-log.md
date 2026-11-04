@@ -977,3 +977,17 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   static like models(); flags are adapter-class facts;
   register_backend customs appear immediately. 18 new tests
   (454 -> 472). 472 green, check exit 0, scan 9.41, MI all-A.
+
+- **Cycle 9 — write/edit twins share one spec seam (#30); the
+  review backlog is retired.** The sync/async write/edit bodies were
+  ~25-line near-verbatim copies (the seam deduplicated the
+  transport, not the command bodies). Now each pair shares a pure
+  decision helper — _write_spec/_write_after, _edit_spec/
+  _edit_after — and the four public bodies are 4–5-line shells
+  differing only in the transport line (cc 7–8 -> A(1) each).
+  Zero test adjustments, zero behavior change: all 472 pass
+  unmodified; error bytes, snapshot labels, prompt bytes and
+  ordering subtleties (edit stats the target before rails; dry_run
+  never skipped rails/snapshots) mirrored exactly. With this, every
+  finding and enhancement from the independent model review is
+  shipped. 472 green, check exit 0, scan 9.41, MI all-A.

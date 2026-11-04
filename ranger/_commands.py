@@ -225,10 +225,14 @@ class CommandsMixin:
         )
         return self._run(prompt, label="read", **ov)
 
-    def write(self, task: str, path: str | Path | None = None, **ov) -> str:
-        """Have the agent produce a written document/answer as a file.
+    def _write_spec(self, task: str, path: "str | Path | None", ov: dict) -> dict:
+        """Pure decision helper shared by write() and write_async().
 
-        Returns the path of the file that was written.
+        Resolves EVERYTHING the body needs — target path (generated
+        slug file when `path is None`, cwd-relative otherwise), the
+        frozen prompt, the rails verdicts — and enforces the path rails
+        + pre-write auto-snapshot in exactly the order write() always
+        had. Sync and async twins can never drift past this seam.
         """
         if path is None:
             slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:SLUG_CLIP]
@@ -244,10 +248,28 @@ class CommandsMixin:
         allow, deny, _ = self._resolve_safety(ov)
         self._assert_path_allowed(out, allow, deny)
         self._auto_snapshot("pre-write")
-        self._run(prompt, label="write", **ov)
-        if not out.is_file() and not ov.get("dry_run", False):
-            raise RangerError(f"agent did not write the expected file: {out}")
-        return str(out)
+        return {"prompt": prompt, "out": out,
+                "dry_run": ov.get("dry_run", False)}
+
+    @staticmethod
+    def _write_after(spec: dict) -> None:
+        """Shared post-run check: the expected file must exist on disk.
+
+        dry_run is exempt — a read-only plan run writes nothing.
+        """
+        if not spec["out"].is_file() and not spec["dry_run"]:
+            raise RangerError(
+                f"agent did not write the expected file: {spec['out']}")
+
+    def write(self, task: str, path: str | Path | None = None, **ov) -> str:
+        """Have the agent produce a written document/answer as a file.
+
+        Returns the path of the file that was written.
+        """
+        spec = self._write_spec(task, path, ov)
+        self._run(spec["prompt"], label="write", **ov)
+        self._write_after(spec)
+        return str(spec["out"])
 
     def _transform_spec(self, pattern, instruction, max_files):
         """Validate a transform() spec up front; normalize the pattern.
@@ -324,11 +346,14 @@ class CommandsMixin:
         self._check_do_after(allow, deny, dry, root)
         return report
 
-    def edit(self, file: str | Path, instruction: str, **ov) -> str:
-        """Make one requested change to exactly one existing file.
+    def _edit_spec(self, file: "str | Path", instruction: str, ov: dict) -> dict:
+        """Pure decision helper shared by edit() and edit_async().
 
-        Relative paths resolve against the agent's cwd. Raises RangerError if
-        the target was not modified during the agent run.
+        Resolves the target (cwd-relative then resolved), refuses a
+        missing file BEFORE anything runs, enforces the path rails and
+        takes the pre-edit auto-snapshot — the exact order edit()
+        always had. Returns the prompt, the pre-run mtime and the
+        dry_run flag so the shared postcheck sees one spec.
         """
         target = Path(file)
         if not target.is_absolute():
@@ -341,17 +366,38 @@ class CommandsMixin:
         allow, deny, _ = self._resolve_safety(ov)
         self._assert_path_allowed(target, allow, deny)
         self._auto_snapshot("pre-edit")
-        report = self._run(_edit_prompt(target, instruction),
-                           label="edit", **ov)
-        if ov.get("dry_run", False):
+        return {"prompt": _edit_prompt(target, instruction),
+                "target": target, "before": before,
+                "dry_run": ov.get("dry_run", False)}
+
+    @staticmethod
+    def _edit_after(spec: dict, report: str) -> str:
+        """Shared post-run check: the target must have been modified.
+
+        dry_run is exempt — a read-only plan run mutates nothing, so
+        the report passes through unchanged.
+        """
+        if spec["dry_run"]:
             return report   # read-only plan run: no mutation is expected
         try:
-            after = target.stat().st_mtime_ns
+            after = spec["target"].stat().st_mtime_ns
         except FileNotFoundError:
-            raise RangerError(f"agent removed the edit() target: {target}") from None
-        if after == before:
-            raise RangerError(f"agent did not modify the edit() target: {target}")
+            raise RangerError(
+                f"agent removed the edit() target: {spec['target']}") from None
+        if after == spec["before"]:
+            raise RangerError(
+                f"agent did not modify the edit() target: {spec['target']}")
         return report
+
+    def edit(self, file: str | Path, instruction: str, **ov) -> str:
+        """Make one requested change to exactly one existing file.
+
+        Relative paths resolve against the agent's cwd. Raises RangerError if
+        the target was not modified during the agent run.
+        """
+        spec = self._edit_spec(file, instruction, ov)
+        report = self._run(spec["prompt"], label="edit", **ov)
+        return self._edit_after(spec, report)
 
     def plan(self, goal: str, **ov) -> str:
         """Produce a numbered implementation plan for a goal.
@@ -549,23 +595,10 @@ class CommandsMixin:
         Returns the path of the file that was written, and raises
         RangerError if the agent did not write it — same as write().
         """
-        if path is None:
-            slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:SLUG_CLIP]
-            slug = slug.strip("_-") or "ranger_out"
-            out = Path(self.cwd or Path.cwd()) / (
-                f"ranger_{slug}_{int(time.time())}_{uuid.uuid4().hex[:UUID_HEX_CLIP]}.md"
-            )
-        else:
-            out = Path(path)
-            if not out.is_absolute():
-                out = Path(self.cwd or Path.cwd()) / out
-        allow, deny, _ = self._resolve_safety(ov)
-        self._assert_path_allowed(out, allow, deny)
-        self._auto_snapshot("pre-write")
-        await self._run_async(_write_prompt(task, out), label="write", **ov)
-        if not out.is_file() and not ov.get("dry_run", False):
-            raise RangerError(f"agent did not write the expected file: {out}")
-        return str(out)
+        spec = self._write_spec(task, path, ov)
+        await self._run_async(spec["prompt"], label="write", **ov)
+        self._write_after(spec)
+        return str(spec["out"])
 
     async def edit_async(self, file: str | Path, instruction: str,
                          **ov) -> str:
@@ -574,28 +607,9 @@ class CommandsMixin:
         Raises RangerError if the single target file was not modified
         during the agent run — same mechanical check as edit().
         """
-        target = Path(file)
-        if not target.is_absolute():
-            target = Path(self.cwd or Path.cwd()) / target
-        target = target.resolve()
-        try:
-            before = target.stat().st_mtime_ns
-        except FileNotFoundError:
-            raise RangerError(f"edit() target does not exist: {target}") from None
-        allow, deny, _ = self._resolve_safety(ov)
-        self._assert_path_allowed(target, allow, deny)
-        self._auto_snapshot("pre-edit")
-        report = await self._run_async(_edit_prompt(target, instruction),
-                                       label="edit", **ov)
-        if ov.get("dry_run", False):
-            return report   # read-only plan run: no mutation is expected
-        try:
-            after = target.stat().st_mtime_ns
-        except FileNotFoundError:
-            raise RangerError(f"agent removed the edit() target: {target}") from None
-        if after == before:
-            raise RangerError(f"agent did not modify the edit() target: {target}")
-        return report
+        spec = self._edit_spec(file, instruction, ov)
+        report = await self._run_async(spec["prompt"], label="edit", **ov)
+        return self._edit_after(spec, report)
 
     async def check_async(self, condition: str, **ov):
         """Async twin of check(): same strict YES/NO verdict grammar.
