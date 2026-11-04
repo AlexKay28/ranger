@@ -877,3 +877,25 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   radon MI. scripts/report_imports.py kept as the re-runnable
   dead-import checker. 3 new tests (420 -> 423) — net -50 lines.
   423 green, check exit 0, scan 9.47, MI all-A.
+
+- **Review-driven cycle 4 — sync containment is real (#24).** The
+  model review's heaviest correctness finding: the sync transport used
+  subprocess.run, which kills only the DIRECT child on timeout/
+  interrupt — so the harness's own tool subprocesses survived on
+  exactly the two paths where the "own pg → contained blast" comment
+  promised containment. The sync transport is now _popen_run: Popen +
+  communicate(timeout) under start_new_session, and both TimeoutExpired
+  and KeyboardInterrupt kill the child's whole session via the same
+  _kill_tree gate() uses before re-raising. Happy-path behavior is
+  byte-identical (same argv/capture/results); only failure-path
+  containment changed. Test seam re-pointed repo-wide (~130 sites):
+  agent-run fakes ride the new ranger._engine._Popen seam, git/models
+  plumbing stays on subprocess.run, and tests driving both get a
+  dual-seam helper (harness_and_git in tests/_fakes.py) that records
+  into ONE shared run log so cross-seam ordering assertions keep their
+  meaning. 2 new pins: communicate-timeout kills the tree (killpg with
+  the child's pgid) before RangerTimeout raises; interrupt kills the
+  tree and still propagates KI. A pre-existing silent-weakening found
+  and fixed during conversion: the unknown-run-option test now asserts
+  BOTH seams never spawned. 423 -> 425 tests; suite back under the 60s
+  budget (3.2s). 425 green, check exit 0, scan 9.47, MI all-A.

@@ -41,8 +41,11 @@ prompt byte, or observable behavior** (repo law: zero functional drift).
                      (build_cmd / parse_output / list_models)
                                    │ the ONLY I/O in the library
                                    ▼
-                     subprocess.run / asyncio.create_subprocess_exec
-                     (the seam every test mocks: `ranger.subprocess`)
+                     subprocess.Popen (_popen_run, sync transport:
+                     contained kill-tree on timeout/interrupt) /
+                     asyncio.create_subprocess_exec
+                     (the seams every test mocks: `ranger.subprocess`,
+                      `ranger._engine._Popen`)
 ```
 
 ### Entry points
@@ -102,8 +105,10 @@ prompt byte, or observable behavior** (repo law: zero functional drift).
   on the instance (`self.context`, `self._costs`, `self.snapshot_log`).
   Mixins are stateless-by-convention: all mutation flows through
   EngineMixin helpers.
-- **Tests → library:** two seams only — `ranger.subprocess.run`
-  (commands) and `ranger.subprocess.Popen` (gate). 358 fully mocked
+- **Tests → library:** the mock seams — `ranger._engine._Popen`
+  (sync transport, contained kill-tree), `ranger.subprocess.run`
+  (git plumbing, models listing), `ranger.subprocess.Popen` (gate)
+  and `asyncio.create_subprocess_exec` (async twin). 425 fully mocked
   tests pin prompts and outputs byte-for-byte; suite budget 60s.
 
 ## 4. Module responsibility matrix

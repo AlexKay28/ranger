@@ -16,6 +16,8 @@ import pytest
 
 from ranger import Ranger, RangerError
 
+from _fakes import FakePopen, harness_and_git
+
 RANGER_MOD = "ranger.subprocess"
 
 
@@ -37,7 +39,7 @@ class FakeRunner:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=self.git_replies.get(cmd[1], ""), stderr="")
         reply = self.agent_replies.pop(0) if self.agent_replies else "ok\n"
-        return subprocess.CompletedProcess(cmd, 0, stdout=reply, stderr="")
+        return FakePopen(stdout=reply)
 
 
 # --------------------------------------------------------------------- #
@@ -48,7 +50,7 @@ class TestFix:
         agent = Ranger(cwd=".", timeout=30)
         fake = FakeRunner(
             agent_replies=["YES\n"], git_replies={"status": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.fix("the bug", condition="conv")
         assert result == {"status": "ALREADY_GREEN", "problem": "the bug",
                           "diagnosis": "", "iterations": 0,
@@ -61,7 +63,7 @@ class TestFix:
         replies = ["NO\n", "the root cause is X\n",
                    "fixed it\n", "YES\n"]
         fake = FakeRunner(agent_replies=replies, git_replies={"status": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.fix("the bug", condition="conv")
         assert result["status"] == "FIXED"
         assert result["iterations"] == 1
@@ -76,7 +78,7 @@ class TestFix:
         # pre-check NO, diagnosis, then 2 rounds of (do, verdict-NO)
         replies = ["NO\n", "dx\n", "r1\n", "NO\n", "r2\n", "NO\n"]
         fake = FakeRunner(agent_replies=replies, git_replies={"status": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.fix("the bug", condition="conv", max_iter=2)
         assert result["status"] == "FAILED"
         assert result["iterations"] == 2        # never a sympathy round
@@ -84,7 +86,7 @@ class TestFix:
     def test_refused_environment_rails_gates_the_work(self):
         agent = Ranger(cwd="/somewhere", timeout=30, deny=["**/.env"])
         fake = FakeRunner(agent_replies=["NO\n", "dx\n"], git_fails=True)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="git rev-parse"):
                 agent.fix("the bug", condition="conv", max_iter=2)
 
@@ -112,9 +114,8 @@ class TestTransform:
             (tmp_path / f"{name}.py").write_text(f"x = {i}\n", encoding="utf-8")
         # mocked edits do not touch mtimes: use dry_run to make each
         # edit a read-only plan run (still ONE harness call per file)
-        with mock.patch(f"{RANGER_MOD}.run") as run:
-            run.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="planned", stderr="")
+        with mock.patch("ranger._engine._Popen") as run:
+            run.return_value = FakePopen(stdout="planned")
             results = agent.transform("*.py", "add docstring",
                                       max_files=2, dry_run=True)
         assert [r["file"].split("/")[-1] for r in results] == \
@@ -131,8 +132,7 @@ class TestTransform:
             prompt = cmd[-1]
             # the frozen edit template carries the resolved file path
             if str(broken) in prompt:
-                return subprocess.CompletedProcess(
-                    [], 0, stdout="did nothing", stderr="")
+                return FakePopen(stdout="did nothing")
             # genuinely touch every other target so the mtime post-check
             # sees a real change (explicit utime: FS timestamp granularity
             # can collapse two writes into the same mtime_ns under load)
@@ -142,11 +142,10 @@ class TestTransform:
                     f.write_text(line + "# touched\n", encoding="utf-8")
                     os.utime(f, ns=(time.time_ns() + 10**9,
                                     time.time_ns() + 10**9))
-                    return subprocess.CompletedProcess(
-                        [], 0, stdout="edited it", stderr="")
-            return subprocess.CompletedProcess([], 0, stdout="?", stderr="")
+                    return FakePopen(stdout="edited it")
+            return FakePopen(stdout="?")
 
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=mutate_or_not):
+        with mock.patch("ranger._engine._Popen", side_effect=mutate_or_not):
             results = agent.transform("m/*.py", "double it")
         assert len(results) == 2
         ok = [r for r in results if "report" in r]
@@ -157,16 +156,15 @@ class TestTransform:
 
     def test_no_matches_is_an_honest_refusal(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
-        with mock.patch(f"{RANGER_MOD}.run"):
+        with mock.patch("ranger._engine._Popen"):
             with pytest.raises(RangerError, match="no files match"):
                 agent.transform("**/*.nope", "instr")
 
     def test_deny_rail_records_per_file_refusals(self, tmp_path):
         self._files(tmp_path, "m", 2)
         agent = Ranger(cwd=tmp_path, deny=["**/f0.py"])
-        with mock.patch(f"{RANGER_MOD}.run") as run:
-            run.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="planned", stderr="")
+        with mock.patch("ranger._engine._Popen") as run:
+            run.return_value = FakePopen(stdout="planned")
             results = agent.transform("m/*.py", "x", dry_run=True)
         denied = [r for r in results if r["file"].endswith("f0.py")]
         assert "error" in denied[0] and "denied" in denied[0]["error"]
@@ -179,7 +177,7 @@ class TestTransform:
         # patterns — the trust boundary must re-raise as RangerError,
         # naming the pattern and the root, with zero harness calls
         agent = Ranger(cwd=tmp_path)
-        with mock.patch(f"{RANGER_MOD}.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             with pytest.raises(RangerError, match="RELATIVE"):
                 agent.transform(str(tmp_path / "*.py"), "x")
         run.assert_not_called()
@@ -190,7 +188,7 @@ class TestTransform:
         # (older pathlib simply matches nothing, which is already the
         # honest "no files match" RangerError; either way: RangerError)
         agent = Ranger(cwd=tmp_path)
-        with mock.patch(f"{RANGER_MOD}.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             with pytest.raises(RangerError):
                 agent.transform("**b/*.py", "x")
         run.assert_not_called()
@@ -217,7 +215,7 @@ class TestCommit:
         fake = FakeRunner(git_replies={"rev-parse": "/repo\n",
                                        "status": " M src/a.py\n",
                                        "commit": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             sha = agent.commit("my fix", allow=["src/**"])
         argvs = [c for c in fake.runs]
         assert argvs[0] == ["git", "rev-parse", "--show-toplevel"]
@@ -235,7 +233,7 @@ class TestCommit:
     def test_clean_tree_is_refused(self):
         agent = Ranger(cwd="/repo")
         fake = FakeRunner(git_replies={"status": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="nothing to commit"):
                 agent.commit()
         assert fake.runs[-1] == ["git", "status", "--porcelain"]  # no add
@@ -243,7 +241,7 @@ class TestCommit:
     def test_non_repo_is_refused(self):
         agent = Ranger(cwd="/somewhere")
         fake = FakeRunner(git_fails=True)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="git rev-parse"):
                 agent.commit()
 
@@ -251,7 +249,7 @@ class TestCommit:
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
         fake = FakeRunner(git_replies={
             "status": " M src/ok.py\n?? secrets.key\n"})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="denied"):
                 agent.commit()
         kinds = [c[:2] for c in fake.runs]
@@ -260,7 +258,7 @@ class TestCommit:
     def test_default_message_is_marked(self):
         agent = Ranger(cwd="/repo")
         fake = FakeRunner(git_replies={"status": " M a.py\n"})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             agent.commit()
         commit_argv = next(c for c in fake.runs if c[:2] == ["git", "commit"])
         assert "ranger: agent work" in commit_argv[3]
@@ -269,7 +267,7 @@ class TestCommit:
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
         fake = FakeRunner(git_replies={
             "status": " M secrets.py\n"})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             # replacing deny=[] clears the rail for THIS commit
             agent.commit(deny=[])
         assert ["git", "add", "-A", "--"] in [c for c in fake.runs]
@@ -317,7 +315,7 @@ class TestZeroRoundBudgetSpendsNothing:
         # ONE agent call: the red pre-verdict — no plan(), no rounds
         fake = FakeRunner(agent_replies=["NO\n"],
                           git_replies={"status": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.resolve("g", max_iter=0, condition="c")
         assert result == {"status": "FAILED", "goal": "g", "plan": "",
                           "iterations": 0, "report": "",
@@ -330,7 +328,7 @@ class TestZeroRoundBudgetSpendsNothing:
         agent = Ranger(cwd="/repo", timeout=30)
         fake = FakeRunner(agent_replies=["NO\n"],
                           git_replies={"status": ""})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.until("g", max_iter=0, condition="c")
         assert result["achieved"] is False
         assert result["iterations"] == 0

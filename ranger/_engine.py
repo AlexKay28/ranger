@@ -1,4 +1,4 @@
-"""The transport engine: run-option resolution, prompt composition, spawn/kill/complete pipelines for BOTH seams (sync subprocess.run, asyncio), the costs ledger."""
+"""The transport engine: run-option resolution, prompt composition, spawn/kill/complete pipelines for BOTH seams (sync Popen transport, asyncio), the costs ledger."""
 from __future__ import annotations
 
 import asyncio
@@ -9,12 +9,17 @@ import sys
 import time
 from pathlib import Path
 
-from ._util import (DEFAULT_MODEL, _LOG, _c, _clip,
+from ._util import (DEFAULT_MODEL, _LOG, _c, _clip, _kill_tree,
                     _RUN_KEYS, RangerError, RangerTimeout,
                     RangerHarnessError, UI_NOTE_CLIP, UI_RETRY_CLIP,
                     RECALL_MSG_OVERHEAD, KILL_WAIT_S, SECONDS_PER_MIN,
                     RUN_NOTE_CLIP)
 from ._contracts import _PURE_LABELS
+
+# direct binding, deliberately NOT subprocess.Popen: the sync transport
+# and gate() keep separate patch seams, so a test faking one never
+# swallows calls meant for the other
+from subprocess import Popen as _Popen  # noqa: E402 (seam comment above)
 
 
 def _warn_default_model():
@@ -34,6 +39,41 @@ def _spinner_cls():
     """
     import ranger
     return ranger._Spinner
+
+
+def _popen_run(cmd, cwd, env, timeout):
+    """The sync transport seam: one contained Popen spawn + communicate.
+
+    Spawns ``cmd`` in its own session with pipes and waits up to
+    ``timeout`` seconds, then returns the Popen proc with ``.stdout``/
+    ``.stderr``/``.returncode`` filled in — the same fields callers read
+    off run()'s CompletedProcess. On timeout or KeyboardInterrupt it
+    kills the child's WHOLE session via ``_kill_tree`` (the exact
+    mechanism gate() uses) and re-raises, so the harness's own
+    grandchildren cannot survive a contained blast — plain
+    `subprocess.run` only ever kills the direct child.
+    """
+    proc = _Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,  # own pg → contained blast
+    )
+    try:
+        proc.stdout, proc.stderr = proc.communicate(timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        # kill the whole NEW SESSION (CLI plus every tool it spawned),
+        # then re-raise so the original exit path stays untouched —
+        # the same KeyboardInterrupt semantics as gate()
+        _kill_tree(proc)
+        raise
+    return proc
 
 
 class EngineMixin:
@@ -340,19 +380,13 @@ class EngineMixin:
         """
         backend_name, adapter = prep["backend"], prep["adapter"]
         try:
-            return subprocess.run(
+            return _popen_run(
                 cmd,
                 cwd=self.cwd,
                 # o, not opts: adapters may fold settings into
                 # the env overlay inside build_cmd (e.g. the
                 # openhands backend maps model= to LLM_MODEL)
                 env=self._child_env(o.get("env")),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,  # own pg → contained blast
                 timeout=prep["timeout"],
             )
         except FileNotFoundError:
@@ -531,10 +565,10 @@ class EngineMixin:
             _finish("✓", "green", _clip(first[0], UI_NOTE_CLIP) if first else "")
             return answer
         except KeyboardInterrupt:
-            # Ctrl+C / kernel interrupt: subprocess.run already killed the
-            # child; print an honest ✗ line and propagate — the finally
-            # clause below retires the spinner (a leaked spinner thread
-            # ticks forever, wedging notebooks' stderr)
+            # Ctrl+C / kernel interrupt: the transport seam already killed
+            # the child's whole session; print an honest ✗ line and
+            # propagate — the finally clause below retires the spinner (a
+            # leaked spinner thread ticks forever, wedging notebooks' stderr)
             _finish("✗", "red", "interrupted by user")
             raise
         finally:

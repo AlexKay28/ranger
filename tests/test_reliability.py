@@ -10,6 +10,7 @@ no live harness runs.
 
 import logging
 import os
+import signal
 import subprocess
 from unittest import mock
 
@@ -18,12 +19,14 @@ import pytest
 import ranger
 from ranger import Ranger, RangerError, RangerHarnessError, RangerTimeout
 
+from _fakes import FakePopen
+
 
 def fake_run(stdout: str, stderr: str = "", returncode: int = 0):
-    """Mock subprocess.run result for the ranger.subprocess.run seam."""
-    return subprocess.CompletedProcess(
-        args=["mock"], returncode=returncode, stdout=stdout, stderr=stderr
-    )
+    """Fake finished proc: the fields every spawn seam reads plus a
+    communicate() that replays them (Popen transport)."""
+    return FakePopen(stdout=stdout, stderr=stderr,
+                      returncode=returncode)
 
 
 def fake_popen(returncode=0, pid=4321, communicate=None):
@@ -50,7 +53,7 @@ class TestTaxonomy:
     def test_catching_base_still_works(self):
         """except RangerError must keep catching subclass raises."""
         agent = Ranger(cwd=".")
-        with mock.patch("ranger.subprocess.run", side_effect=FileNotFoundError):
+        with mock.patch("ranger._engine._Popen", side_effect=FileNotFoundError):
             with pytest.raises(RangerError):
                 agent.ask("hello")
 
@@ -75,14 +78,14 @@ class TestRepr:
 class TestHarnessFailures:
     def test_missing_cli_raises_harness_error(self):
         agent = Ranger(cwd=".")
-        with mock.patch("ranger.subprocess.run", side_effect=FileNotFoundError):
+        with mock.patch("ranger._engine._Popen", side_effect=FileNotFoundError):
             with pytest.raises(RangerHarnessError, match="CLI not found"):
                 agent.ask("hello")
 
     def test_nonzero_exit_raises_harness_error(self):
         agent = Ranger(cwd=".")
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             return_value=fake_run("", stderr="boom", returncode=3),
         ):
             with pytest.raises(RangerHarnessError, match="exit 3"):
@@ -90,25 +93,51 @@ class TestHarnessFailures:
 
     def test_spawn_oserror_raises_harness_error(self):
         agent = Ranger(cwd=".")
-        with mock.patch("ranger.subprocess.run", side_effect=OSError("no exec")):
+        with mock.patch("ranger._engine._Popen", side_effect=OSError("no exec")):
             with pytest.raises(RangerHarnessError, match="could not be spawned"):
                 agent.ask("hello")
 
     def test_timeout_raises_ranger_timeout(self):
         agent = Ranger(cwd=".", timeout=5)
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             side_effect=subprocess.TimeoutExpired(cmd="x", timeout=5),
         ):
             with pytest.raises(RangerTimeout, match="timed out after 5"):
                 agent.ask("hello")
+
+    def test_communicate_timeout_kills_the_whole_tree_first(self):
+        """#24: a timeout firing INSIDE communicate must kill the child's
+        whole session (os.killpg) BEFORE the RangerTimeout raises —
+        plain subprocess.run only ever killed the direct child."""
+        agent = Ranger(cwd=".", timeout=5, retries=0)
+        hung = FakePopen(
+            communicate_exc=subprocess.TimeoutExpired(cmd="x", timeout=5))
+        with mock.patch("ranger._engine._Popen",
+                        return_value=hung) as spawn, \
+             mock.patch("ranger._engine.os.killpg") as killpg:
+            with pytest.raises(RangerTimeout, match="timed out after 5"):
+                agent.ask("hello")
+        spawn.assert_called_once()          # the proc WAS spawned, then hung
+        killpg.assert_called_once_with(hung.pid, signal.SIGKILL)
+
+    def test_interrupt_kills_tree_and_propagates_ki(self):
+        """#24: Ctrl+C mid-communicate — the group dies, the interrupt
+        still reaches the caller (never swallowed by containment)."""
+        agent = Ranger(cwd=".", timeout=5, retries=0)
+        hung = FakePopen(communicate_exc=KeyboardInterrupt())
+        with mock.patch("ranger._engine._Popen", return_value=hung), \
+             mock.patch("ranger._engine.os.killpg") as killpg:
+            with pytest.raises(KeyboardInterrupt):
+                agent.ask("hello")
+        killpg.assert_called_once_with(hung.pid, signal.SIGKILL)
 
 
 class TestContractFailuresStayPlain:
     def test_unparseable_check_verdict_is_plain_ranger_error(self):
         agent = Ranger(cwd=".")
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("Probably fine?")
+            "ranger._engine._Popen", return_value=fake_run("Probably fine?")
         ):
             with pytest.raises(RangerError, match="YES/NO") as exc_info:
                 agent.check("all tests pass")
@@ -124,7 +153,7 @@ class TestRetries:
             fake_run("", stderr="boom", returncode=1),
             fake_run("all good"),
         ]
-        with mock.patch("ranger.subprocess.run", side_effect=outcomes):
+        with mock.patch("ranger._engine._Popen", side_effect=outcomes):
             assert agent.ask("hello") == "all good"
         # exactly two transport attempts: one failure, one success
         assert len(outcomes) == 2
@@ -132,7 +161,7 @@ class TestRetries:
     def test_retries_zero_raises_immediately(self):
         agent = Ranger(cwd=".", retries=0)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("", stderr="x", returncode=1)
+            "ranger._engine._Popen", return_value=fake_run("", stderr="x", returncode=1)
         ) as run_mock:
             with pytest.raises(RangerHarnessError):
                 agent.ask("hello")
@@ -141,7 +170,7 @@ class TestRetries:
     def test_retries_exhausted_raises(self):
         agent = Ranger(cwd=".", retries=2)
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             side_effect=[fake_run("", stderr="x", returncode=1)] * 3,
         ) as run_mock:
             with pytest.raises(RangerHarnessError):
@@ -155,7 +184,7 @@ class TestRetries:
             fake_run("", stderr="x", returncode=1),
             fake_run("recovered"),
         ]
-        with mock.patch("ranger.subprocess.run", side_effect=outcomes):
+        with mock.patch("ranger._engine._Popen", side_effect=outcomes):
             assert agent.ask("hello", retries=1) == "recovered"
 
     def test_retry_on_timeout(self):
@@ -164,13 +193,13 @@ class TestRetries:
             subprocess.TimeoutExpired(cmd="x", timeout=5),
             fake_run("made it"),
         ]
-        with mock.patch("ranger.subprocess.run", side_effect=outcomes):
+        with mock.patch("ranger._engine._Popen", side_effect=outcomes):
             assert agent.ask("hello") == "made it"
 
     def test_contract_failure_never_retries(self):
         agent = Ranger(cwd=".", retries=3)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("Probably fine?")
+            "ranger._engine._Popen", return_value=fake_run("Probably fine?")
         ) as run_mock:
             with pytest.raises(RangerError) as exc_info:
                 agent.check("all tests pass")
@@ -196,7 +225,7 @@ class TestLogging:
         agent = Ranger(cwd=".")
         with caplog.at_level(logging.DEBUG, logger="ranger"):
             with mock.patch(
-                "ranger.subprocess.run", return_value=fake_run("hello back")
+                "ranger._engine._Popen", return_value=fake_run("hello back")
             ):
                 assert agent.ask("hi") == "hello back"
         debugs = [r.getMessage() for r in caplog.records
@@ -210,7 +239,7 @@ class TestLogging:
         agent = Ranger(cwd=".")
         with caplog.at_level(logging.DEBUG, logger="ranger"):
             with mock.patch(
-                "ranger.subprocess.run", return_value=fake_run("ok")
+                "ranger._engine._Popen", return_value=fake_run("ok")
             ):
                 agent.do("write a file")
         messages = [r.getMessage() for r in caplog.records
@@ -234,7 +263,7 @@ class TestLogging:
                     fake_run("fixed the parser"),               # do()  iter 1
                     fake_run("step: add a regression test"),     # ask() iter 2
                     fake_run("added the test")]                 # do()  iter 2
-            with mock.patch("ranger.subprocess.run", side_effect=outs), \
+            with mock.patch("ranger._engine._Popen", side_effect=outs), \
                     mock.patch.object(Ranger, "gate",
                                       side_effect=fake_gate) as g:
                 result = agent.until(
@@ -262,7 +291,7 @@ class TestLogging:
         ])
         with caplog.at_level(logging.INFO, logger="ranger"):
             with mock.patch(
-                "ranger.subprocess.run", return_value=fake_run("work done")
+                "ranger._engine._Popen", return_value=fake_run("work done")
             ), mock.patch.object(
                 Ranger, "review", side_effect=lambda *a, **k: next(review_results)
             ):
@@ -289,7 +318,7 @@ class TestEnv:
     def test_env_overlay_extends_not_replaces_run(self):
         agent = Ranger(cwd=".", env={"RANGER_TEST_MARKER": "1"})
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("ok")
+            "ranger._engine._Popen", return_value=fake_run("ok")
         ) as run_mock:
             agent.ask("hi")
         child_env = run_mock.call_args.kwargs["env"]
@@ -304,7 +333,7 @@ class TestEnv:
     def test_env_overlay_overwrites_same_name_key(self):
         agent = Ranger(cwd=".", env={"PATH": "/custom/bin"})
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("ok")
+            "ranger._engine._Popen", return_value=fake_run("ok")
         ) as run_mock:
             agent.do("work")
         child_env = run_mock.call_args.kwargs["env"]
@@ -314,7 +343,7 @@ class TestEnv:
     def test_env_none_inherits_everything_as_today(self):
         agent = Ranger(cwd=".")
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("ok")
+            "ranger._engine._Popen", return_value=fake_run("ok")
         ) as run_mock:
             agent.ask("hi")
         child_env = run_mock.call_args.kwargs["env"]
@@ -323,7 +352,7 @@ class TestEnv:
     def test_env_none_without_cwd_is_full_inherit(self):
         agent = Ranger(env=None)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("ok")
+            "ranger._engine._Popen", return_value=fake_run("ok")
         ) as run_mock:
             agent.ask("hi")
         assert run_mock.call_args.kwargs["env"] is None
@@ -343,7 +372,7 @@ class TestEnv:
     def test_env_per_call_override_beats_instance_setting(self):
         agent = Ranger(cwd=".", env={"RANGER_TEST_MARKER": "instance"})
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("ok")
+            "ranger._engine._Popen", return_value=fake_run("ok")
         ) as run_mock:
             agent.ask("hi", env={"RANGER_TEST_MARKER": "call"})
         child_env = run_mock.call_args.kwargs["env"]
@@ -353,7 +382,7 @@ class TestEnv:
         agent = Ranger(cwd=".")
         clone = agent.with_config(env={"RANGER_TEST_MARKER": "clone"})
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("ok")
+            "ranger._engine._Popen", return_value=fake_run("ok")
         ) as run_mock:
             clone.ask("hi")
         child_env = run_mock.call_args.kwargs["env"]
@@ -371,7 +400,7 @@ class TestVacuousGateDetection:
         """Gate green before iteration 1 -> zero agent work, already_green."""
         agent = Ranger(cwd=".")
         with mock.patch.object(Ranger, "gate", return_value=True) as g, \
-                mock.patch("ranger.subprocess.run") as run_mock:
+                mock.patch("ranger._engine._Popen") as run_mock:
             out = agent.until("make tests pass",
                               gate_cmd="true", max_iter=3)
         assert out["achieved"] is True
@@ -384,7 +413,7 @@ class TestVacuousGateDetection:
     def test_green_condition_precheck_reports_already_green(self):
         agent = Ranger(cwd=".")
         with mock.patch.object(Ranger, "check", return_value=True) as c, \
-                mock.patch("ranger.subprocess.run") as run_mock:
+                mock.patch("ranger._engine._Popen") as run_mock:
             out = agent.until("goal already true",
                               condition="is it true?", max_iter=3)
         assert out["already_green"] is True and out["iterations"] == 0
@@ -401,7 +430,7 @@ class TestVacuousGateDetection:
                 fake_run("fixed it")]            # do()  iteration 1
         with mock.patch.object(Ranger, "gate",
                                side_effect=fake_gate) as g, \
-                mock.patch("ranger.subprocess.run", side_effect=outs):
+                mock.patch("ranger._engine._Popen", side_effect=outs):
             out = agent.until("make tests pass",
                               gate_cmd="pytest", max_iter=2)
         assert out["achieved"] is True and out["iterations"] == 1
@@ -416,7 +445,7 @@ class TestVacuousGateDetection:
             return next(gate_flags)
         outs = [fake_run("step"), fake_run("done")]
         with mock.patch.object(Ranger, "gate", side_effect=fake_gate), \
-                mock.patch("ranger.subprocess.run", side_effect=outs):
+                mock.patch("ranger._engine._Popen", side_effect=outs):
             out = agent.until("goal", gate_cmd="x", max_iter=1)
         assert "already_green" not in out
         assert out["achieved"] is True and out["iterations"] == 1
@@ -462,7 +491,7 @@ class TestGateEvidence:
         outs = [fake_run("step 1"), fake_run("r1"),
                 fake_run("step 2"), fake_run("r2")]
         with mock.patch("ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)), \
-                mock.patch("ranger.subprocess.run", side_effect=outs):
+                mock.patch("ranger._engine._Popen", side_effect=outs):
             res = agent.until("add __repr__", gate_cmd="pytest", max_iter=2)
         assert res["achieved"] is False
         lg = res["last_gate"]
@@ -473,7 +502,7 @@ class TestGateEvidence:
         agent = Ranger(cwd=".")
         popens = iter([fake_popen(0, communicate=[("all good", "")])])
         with mock.patch("ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)), \
-                mock.patch("ranger.subprocess.run") as run_mock:
+                mock.patch("ranger._engine._Popen") as run_mock:
             res = agent.until("goal", gate_cmd="pytest", max_iter=2)
         assert res["already_green"] is True
         assert res["last_gate"] == {"kind": "gate_cmd", "ok": True,

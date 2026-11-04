@@ -14,6 +14,8 @@ import pytest
 import ranger
 from ranger import Ranger, RangerError
 
+from _fakes import FakePopen, harness_and_git
+
 RANGER_MOD = "ranger.subprocess"
 
 
@@ -44,7 +46,7 @@ class FakeRunner:
 
 
 def fake_harness(stdout="done"):
-    return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+    return FakePopen(stdout=stdout)
 
 
 # --------------------------------------------------------------------- #
@@ -66,7 +68,7 @@ class TestSpecValidation:
     def test_per_call_bad_spec_raises_typeerror_before_spawn(self):
         agent = Ranger(cwd=".")
         fake = FakeRunner()
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             for bad in ({"allow": "src/**"}, {"deny": 42},
                         {"dry_run": "yes"}, {"allow": [42]}):
                 with pytest.raises((TypeError, ValueError)):
@@ -77,9 +79,12 @@ class TestSpecValidation:
 
     def test_unknown_keywords_still_raise(self):
         agent = Ranger(cwd=".")
-        with mock.patch(f"{RANGER_MOD}.run"):
+        with mock.patch(f"{RANGER_MOD}.run") as gitrun, \
+             mock.patch("ranger._engine._Popen") as spawn:
             with pytest.raises(TypeError, match="unknown run option"):
                 agent.do("goal", alow=["src/**"])   # typo: loud, not silent
+        gitrun.assert_not_called()      # neither seam ever spawned
+        spawn.assert_not_called()
 
 
 # --------------------------------------------------------------------- #
@@ -91,7 +96,7 @@ class TestTargetRails:
         target.write_text("k=v", encoding="utf-8")
         agent = Ranger(cwd=tmp_path, deny=["**/secrets*"])
         fake = FakeRunner()
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="denied by the safety rails"):
                 agent.edit(target, "add a comment")
         assert fake.runs == []          # law 4: refused BEFORE the spawn
@@ -102,7 +107,7 @@ class TestTargetRails:
         target.write_text("x = 1", encoding="utf-8")
         agent = Ranger(cwd=tmp_path, allow=["src/**"])
         fake = FakeRunner()
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="outside the allow"):
                 agent.edit(target, "bump")
         assert fake.runs == []
@@ -112,7 +117,7 @@ class TestTargetRails:
         target.parent.mkdir()
         target.write_text("x = 1", encoding="utf-8")
         agent = Ranger(cwd=tmp_path, allow=["**/src/**"])
-        with mock.patch(f"{RANGER_MOD}.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             # tmp_path may live outside any git repo: mtime check is the
             # edit() contract — mutation must actually happen; the harness
             # did not touch the file in this mock, so edit() reports THAT
@@ -128,7 +133,7 @@ class TestTargetRails:
         agent = Ranger(cwd=tmp_path,
                        allow=["src/**"], deny=["**/danger.py"])
         fake = FakeRunner()
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="denied"):
                 agent.edit(target, "bump")
         assert fake.runs == []
@@ -136,7 +141,7 @@ class TestTargetRails:
     def test_write_path_respects_rails(self, tmp_path):
         agent = Ranger(cwd=tmp_path, deny=["**/private*"])
         fake = FakeRunner()
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="denied"):
                 agent.write("report", path=tmp_path / "private.md")
         assert fake.runs == []
@@ -147,13 +152,13 @@ class TestTargetRails:
         target.write_text("x = 1", encoding="utf-8")
         agent = Ranger(cwd=tmp_path, allow=["src/**"])
         fake = FakeRunner()
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             # per-call allow REPLACES the ctor allow: this target is out
             with pytest.raises(RangerError, match="outside the allow"):
                 agent.edit(target, "bump", allow=["docs/**"])
             # per-call deny REPLACES the ctor deny (nothing denied now)
             agent2 = Ranger(cwd=tmp_path, deny=["**/mod.py"])
-            with mock.patch(f"{RANGER_MOD}.run") as run:
+            with mock.patch("ranger._engine._Popen") as run:
                 run.return_value = fake_harness()
                 with pytest.raises(RangerError, match="did not modify"):
                     agent2.edit(target, "bump", deny=["**/other.py"])
@@ -167,14 +172,14 @@ class TestDoRails:
     def test_default_rails_add_zero_calls(self):
         agent = Ranger(cwd=".")
         fake = FakeRunner(agent_replies=["did it\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("goal") == "did it"
         assert len(fake.runs) == 1 and fake.runs[0][0] == "opencode"
 
     def test_rails_with_no_git_repo_refuse_up_front(self):
         agent = Ranger(cwd="/somewhere", deny=["**/.env"])
         fake = FakeRunner(git_fails=True)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="git rev-parse"):
                 agent.do("goal")
         # the ONLY subprocess call was the verifiability probe: no
@@ -185,7 +190,7 @@ class TestDoRails:
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
         fake = FakeRunner(agent_replies=["did it\n"],
                           git_replies={"status": " M src/ok.py\n?? secrets.key\n"})
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match=r"secrets\.key"):
                 agent.do("goal")
         kinds = [c[0] for c in fake.runs]
@@ -195,13 +200,13 @@ class TestDoRails:
     def test_do_allowed_paths_pass_quietly(self):
         agent = Ranger(cwd="/repo", allow=["src/**", "README*"])
         fake = FakeRunner(agent_replies=["did it\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("goal") == "did it"
 
     def test_do_dry_run_skips_the_boundary_check(self):
         agent = Ranger(cwd="/somewhere", deny=["**/.env"])
         fake = FakeRunner(agent_replies=["here is the plan\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("goal", dry_run=True) == "here is the plan"
         # dry run cannot mutate: no rev-parse probe, no post-run status
         assert [c[0] for c in fake.runs] == ["opencode"]
@@ -216,7 +221,7 @@ class TestDoRails:
         # every do() inside until()/resolve()/attempt() automatically
         fake = FakeRunner(agent_replies=["NO\n", "a step\n"],
                           git_fails=True)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with pytest.raises(RangerError, match="git rev-parse"):
                 agent.until("goal", max_iter=2, condition="cond")
         kinds = [c[0] for c in fake.runs]
@@ -274,7 +279,7 @@ class TestDryRunArgv:
         target = tmp_path / "t.py"
         target.write_text("x = 1", encoding="utf-8")
         agent = Ranger(cwd=tmp_path)
-        with mock.patch(f"{RANGER_MOD}.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             run.return_value = fake_harness("planned changes: ...")
             report = agent.edit(target, "double it", dry_run=True)
         assert "planned changes" in report     # no "did not modify" error
@@ -284,14 +289,14 @@ class TestDryRunArgv:
     def test_write_dry_run_has_no_file_postcheck(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         out = tmp_path / "never.md"
-        with mock.patch(f"{RANGER_MOD}.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             run.return_value = fake_harness("would write ...")
             assert agent.write("report", path=out, dry_run=True) == str(out)
         assert not out.is_file()               # nothing was applied
 
     def test_dry_run_costs_still_record(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
-        with mock.patch(f"{RANGER_MOD}.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             run.return_value = fake_harness("plan")
             agent.do("goal", dry_run=True)
         assert agent.costs["calls"] == 1

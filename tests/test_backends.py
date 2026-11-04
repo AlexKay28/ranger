@@ -13,6 +13,8 @@ import pytest
 import ranger
 from ranger import Ranger, RangerError, RangerHarnessError
 
+from _fakes import FakePopen
+
 RANGER_MOD = "ranger.subprocess"
 
 
@@ -252,9 +254,9 @@ class TestClaudeBuildCmd:
         obj = '{"result": "done", "session_id": "sid-1", '
         obj += '"total_cost_usd": 0.01, "usage": {"input_tokens": 5, '
         obj += '"output_tokens": 2}}'
-        proc = subprocess.CompletedProcess(args=[], returncode=0,
-                                           stdout=obj, stderr="")
-        with mock.patch(f"{RANGER_MOD}.run", return_value=proc) as run_mock:
+        proc = FakePopen(stdout=obj)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=proc) as run_mock:
             assert agent.ask("hello") == "done"
         argv = run_mock.call_args.args[0]
         assert argv[0] == "claude"
@@ -325,9 +327,9 @@ class TestOpenHandsBuildCmd:
     def test_model_env_fold_reaches_child_process(self):
         """The _run seam reads the adapter-mutated dict (o, not opts)."""
         agent = Ranger(backend="openhands", model="gpt-5.5", cwd=".")
-        proc = subprocess.CompletedProcess(args=[], returncode=0,
-                                           stdout="done", stderr="")
-        with mock.patch(f"{RANGER_MOD}.run", return_value=proc) as run_mock:
+        proc = FakePopen(stdout="done")
+        with mock.patch("ranger._engine._Popen",
+                        return_value=proc) as run_mock:
             assert agent.ask("hello") == "done"
         argv = run_mock.call_args.args[0]
         assert "--override-with-envs" in argv

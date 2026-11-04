@@ -13,12 +13,14 @@ from unittest import mock
 
 from ranger import Ranger
 
+from _fakes import FakePopen
+
 
 def fake_run(stdout: str, stderr: str = "", returncode: int = 0):
-    """Mock subprocess.run result for the ranger.subprocess.run seam."""
-    return subprocess.CompletedProcess(
-        args=["mock"], returncode=returncode, stdout=stdout, stderr=stderr
-    )
+    """Fake finished proc: the fields every spawn seam reads plus a
+    communicate() that replays them (Popen transport)."""
+    return FakePopen(stdout=stdout, stderr=stderr,
+                      returncode=returncode)
 
 
 def fake_popen(returncode=0, pid=4321, communicate=None):
@@ -43,7 +45,7 @@ class TestPlan:
             prompts.append(cmd[-1])
             return fake_run("1. step")
 
-        with mock.patch("ranger.subprocess.run", side_effect=capture):
+        with mock.patch("ranger._engine._Popen", side_effect=capture):
             agent.plan("add a config validator")
 
         p = prompts[0]
@@ -57,14 +59,14 @@ class TestPlan:
     def test_plan_returns_the_harness_answer(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("1. inspect x\n2. fix x")
+            "ranger._engine._Popen", return_value=fake_run("1. inspect x\n2. fix x")
         ):
             assert agent.plan("fix the parser") == "1. inspect x\n2. fix x"
 
     def test_plan_is_one_single_headless_run(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("1. step")
+            "ranger._engine._Popen", return_value=fake_run("1. step")
         ) as run_mock:
             agent.plan("whatever")
         run_mock.assert_called_once()
@@ -74,7 +76,7 @@ class TestPlan:
         (and is therefore not in the history-free _PURE_LABELS set)."""
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("1. step one")
+            "ranger._engine._Popen", return_value=fake_run("1. step one")
         ):
             agent.plan("goal under test")
         roles = [m["role"] for m in agent.context]
@@ -85,7 +87,7 @@ class TestPlan:
     def test_plan_memory_false_skips_recording(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("1. step")
+            "ranger._engine._Popen", return_value=fake_run("1. step")
         ):
             agent.plan("quiet goal", memory=False)
         assert agent.context == []
@@ -99,7 +101,7 @@ class TestAttemptGateCmd:
         popens = iter([fake_popen(0, communicate=[("all good", "")])])
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run") as run_mock:
+        ), mock.patch("ranger._engine._Popen") as run_mock:
             res = agent.attempt("the goal", gate_cmd="pytest")
         assert res == {"passed": True, "already_green": True,
                        "goal": "the goal", "report": "",
@@ -116,7 +118,7 @@ class TestAttemptGateCmd:
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
         ), mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("made the change")
+            "ranger._engine._Popen", return_value=fake_run("made the change")
         ) as run_mock:
             res = agent.attempt("add __repr__", gate_cmd="pytest")
         run_mock.assert_called_once()      # exactly ONE agent run (the do)
@@ -136,7 +138,7 @@ class TestAttemptGateCmd:
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
         ), mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("i fixed it, i swear")
+            "ranger._engine._Popen", return_value=fake_run("i fixed it, i swear")
         ):
             res = agent.attempt("add __repr__", gate_cmd="pytest")
         assert res["passed"] is False
@@ -153,7 +155,7 @@ class TestAttemptCondition:
         agent = Ranger(cwd=tmp_path)
         answers = iter([fake_run("NO"), fake_run("made it"), fake_run("YES")])
         with mock.patch(
-            "ranger.subprocess.run", side_effect=lambda *a, **k: next(answers)
+            "ranger._engine._Popen", side_effect=lambda *a, **k: next(answers)
         ) as run_mock:
             res = agent.attempt("add tests", condition="the tests exist")
         assert run_mock.call_count == 3       # pre-check + do() + verdict
@@ -167,7 +169,7 @@ class TestAttemptCondition:
         answers = iter([fake_run("NO"), fake_run("tried my best"),
                         fake_run("NO")])
         with mock.patch(
-            "ranger.subprocess.run", side_effect=lambda *a, **k: next(answers)
+            "ranger._engine._Popen", side_effect=lambda *a, **k: next(answers)
         ):
             res = agent.attempt("the goal")
         assert res == {"passed": False, "already_green": False,
@@ -190,7 +192,7 @@ class TestVerifyClaims:
     def test_claims_extraction_ignores_noise_lines(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             side_effect=[fake_run(self.EXTRACTION),
                          fake_run("YES"), fake_run("YES")],
         ) as run_mock:
@@ -203,7 +205,7 @@ class TestVerifyClaims:
     def test_claims_get_per_claim_check_verdicts(self, tmp_path):
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             side_effect=[fake_run("CLAIM: a\nCLAIM: b"),
                          fake_run("YES"), fake_run("NO")],
         ):
@@ -215,7 +217,7 @@ class TestVerifyClaims:
         """A check() with an unparseable answer → UNCERTAIN, ok=None."""
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             side_effect=[fake_run("CLAIM: maybe"),
                          fake_run("I could not determine that")],
         ):
@@ -228,7 +230,7 @@ class TestVerifyClaims:
         extraction = "\n".join(f"CLAIM: claim number {i}" for i in range(6))
         checks = [fake_run("YES")] * 2
         with mock.patch(
-            "ranger.subprocess.run",
+            "ranger._engine._Popen",
             side_effect=[fake_run(extraction)] + checks,
         ) as run_mock:
             results = agent.verify_claims("t", max_claims=2)
@@ -241,7 +243,7 @@ class TestVerifyClaims:
         from ranger import RangerError
         agent = Ranger(cwd=tmp_path)
         with mock.patch(
-            "ranger.subprocess.run", return_value=fake_run("no claims here")
+            "ranger._engine._Popen", return_value=fake_run("no claims here")
         ):
             with pytest.raises(RangerError, match="CLAIM"):
                 agent.verify_claims("t")
@@ -261,7 +263,7 @@ class TestResolve:
         popens = popen_seq((0, "already good"))
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run") as run_mock:
+        ), mock.patch("ranger._engine._Popen") as run_mock:
             res = agent.resolve("the goal", gate_cmd="pytest")
         assert res["status"] == "ALREADY_GREEN"
         assert res["iterations"] == 0 and res["plan"] == ""
@@ -273,7 +275,7 @@ class TestResolve:
         answers = iter([fake_run("1. make it so"), fake_run("did step 1")])
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run",
+        ), mock.patch("ranger._engine._Popen",
                       side_effect=lambda *a, **k: next(answers)):
             res = agent.resolve("the goal", gate_cmd="pytest")
         assert res["status"] == "PASS"
@@ -288,7 +290,7 @@ class TestResolve:
                        fake_run("tried once"), fake_run("tried twice")])
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run",
+        ), mock.patch("ranger._engine._Popen",
                       side_effect=lambda *a, **k: next(answers)):
             res = agent.resolve("the goal", max_iter=2, gate_cmd="pytest")
         assert res["status"] == "FAILED"        # budget ends the loop
@@ -313,7 +315,7 @@ class TestGateSequence:
         popens = popen_seq((0, "suite green"), (0, "chmod green"))
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run", return_value=fake_run("did")):
+        ), mock.patch("ranger._engine._Popen", return_value=fake_run("did")):
             res = agent.attempt("the goal",
                                 gate_cmd=["pytest -q", "test -f x"])
         assert res["passed"] is True
@@ -331,7 +333,7 @@ class TestGateSequence:
                            (1, "boom no xfile"))   # post: part 2 red — stop
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run", return_value=fake_run("tried")):
+        ), mock.patch("ranger._engine._Popen", return_value=fake_run("tried")):
             res = agent.attempt("make x", gate_cmd=["pytest -q", "test -f x"])
         assert res["passed"] is False
         parts = res["last_gate"]["parts"]
@@ -345,7 +347,7 @@ class TestGateSequence:
         popens = popen_seq((1, "red"), (0, "ok"))
         with mock.patch(
             "ranger.subprocess.Popen", side_effect=lambda *a, **k: next(popens)
-        ), mock.patch("ranger.subprocess.run", return_value=fake_run("did")):
+        ), mock.patch("ranger._engine._Popen", return_value=fake_run("did")):
             res = agent.attempt("the goal", gate_cmd="pytest")
         assert set(res["last_gate"]) == {"kind", "ok", "output"}
 
@@ -353,7 +355,7 @@ class TestGateSequence:
         import pytest
         from ranger import RangerError
         agent = Ranger(cwd=tmp_path)
-        with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+        with mock.patch("ranger._engine._Popen", return_value=fake_run("x")):
             with pytest.raises(RangerError):
                 agent.attempt("the goal", gate_cmd=[])
 

@@ -19,8 +19,12 @@ import pytest
 import ranger
 from ranger import Ranger, RangerError, RangerHarnessError, RangerTimeout
 
+from _fakes import FakePopen
+
 RANGER_MOD = "ranger.subprocess"
 SPAWN = "asyncio.create_subprocess_exec"
+# the SYNC twin seam: the engine Popen transport (#24)
+SYNC_SPAWN = "ranger._engine._Popen"
 
 
 class FakeProc:
@@ -59,8 +63,8 @@ def make_exec_factory(stdout=b"done\n", stderr=b"", returncode=0,
 
 
 def make_sync_run(stdout="done\n", stderr="", returncode=0):
-    return subprocess.CompletedProcess(args=[], returncode=returncode,
-                                       stdout=stdout, stderr=stderr)
+    """Fake finished proc for the sync _Popen seam (communicate-based)."""
+    return FakePopen(stdout=stdout, stderr=stderr, returncode=returncode)
 
 
 def run(coro):
@@ -83,7 +87,7 @@ TWIN_CASES = [
 class TestSharedSeam:
     def _sync_argv(self, agent, fn, *args, prompt_out):
         """Capture the argv the SYNC command produces."""
-        with mock.patch(f"{RANGER_MOD}.run",
+        with mock.patch(SYNC_SPAWN,
                         return_value=make_sync_run(stdout=prompt_out)):
             try:
                 fn(*args)
@@ -102,7 +106,7 @@ class TestSharedSeam:
             sync_argv.append(list(cmd))
             return make_sync_run()
 
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=spy):
+        with mock.patch(SYNC_SPAWN, side_effect=spy):
             sync_agent.ask("What is in setup.py?")
             sync_agent.do("fix the build")
             sync_agent.search("where is DEFAULT_MODEL")
@@ -135,7 +139,7 @@ class TestSharedSeam:
             sync_prompts[sync_prompts["_n"]] = cmd[-1]
             return make_sync_run()
 
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=spy):
+        with mock.patch(SYNC_SPAWN, side_effect=spy):
             try:
                 sync_agent.write("a task", tmp_path / "a.md")
             except RangerError:

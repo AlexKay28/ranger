@@ -19,14 +19,14 @@ import ranger
 from ranger import Ranger, RangerError
 from ranger import DEFAULT_MODEL
 
+from _fakes import FakePopen
+
 
 def fake_run(stdout="", stderr="", returncode=0):
-    """Build a mock subprocess.run return value with the given results."""
-    ret = mock.Mock()
-    ret.stdout = stdout
-    ret.stderr = stderr
-    ret.returncode = returncode
-    return ret
+    """Build a fake finished harness proc: the fields every spawn seam
+    reads (.stdout/.stderr/.returncode) plus a communicate() that
+    replays them — one helper, both run() and Popen() call sites."""
+    return FakePopen(stdout=stdout, stderr=stderr, returncode=returncode)
 
 
 def fake_popen(returncode=0, pid=4321, communicate=None):
@@ -57,8 +57,10 @@ class _TTYStderr:
 
 
 def test_interrupt_stops_the_spinner():
-    with mock.patch("ranger.subprocess.run",
-                    side_effect=KeyboardInterrupt), \
+    # mid-run interrupt: communicate() raises, the seam kills the
+    # child's whole group and re-raises — and the spinner never leaks
+    with mock.patch("ranger._engine._Popen",
+                    return_value=FakePopen(communicate_exc=KeyboardInterrupt())), \
          mock.patch("sys.stderr", _TTYStderr()), \
          mock.patch("ranger._Spinner") as spinner_cls:
         agent = Ranger()
@@ -68,7 +70,7 @@ def test_interrupt_stops_the_spinner():
 
 
 def test_error_path_stops_the_spinner():
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run("", stderr="boom",
                                           returncode=3)), \
          mock.patch("sys.stderr", _TTYStderr()), \
@@ -80,7 +82,7 @@ def test_error_path_stops_the_spinner():
 
 
 def test_success_path_stops_the_spinner():
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run("done")), \
          mock.patch("sys.stderr", _TTYStderr()), \
          mock.patch("ranger._Spinner") as spinner_cls:
@@ -93,7 +95,7 @@ def test_success_path_stops_the_spinner():
 
 def test_run_default_flags_and_pwd_env():
     agent = Ranger(cwd="/tmp/demo")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("hi")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("hi")) as m:
         assert agent.ask("hello") == "hi"
     cmd = m.call_args.args[0]
     assert cmd[0] == "opencode"
@@ -109,14 +111,14 @@ def test_run_default_flags_and_pwd_env():
 def test_ranger_model_env_override():
     import os
     with mock.patch.dict(os.environ, {"RANGER_MODEL": "custom/m"}), mock.patch(
-        "ranger.subprocess.run", return_value=fake_run("ok")
+        "ranger._engine._Popen", return_value=fake_run("ok")
     ) as m:
         Ranger().ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--model") + 1] == "custom/m"
     # explicit argument still beats the environment
     with mock.patch.dict(os.environ, {"RANGER_MODEL": "custom/m"}), mock.patch(
-        "ranger.subprocess.run", return_value=fake_run("ok")
+        "ranger._engine._Popen", return_value=fake_run("ok")
     ) as m:
         Ranger(model="arg/m").ask("hi")
     cmd = m.call_args.args[0]
@@ -125,7 +127,7 @@ def test_ranger_model_env_override():
 
 def test_run_no_pwd_env_without_cwd():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     # env=None means "inherit": no PWD override is injected without a cwd
     assert m.call_args.kwargs.get("env") is None
@@ -133,12 +135,12 @@ def test_run_no_pwd_env_without_cwd():
 
 def test_run_optional_flags_off_or_on():
     agent = Ranger(auto=False)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     assert "--auto" not in m.call_args.args[0]
 
     agent2 = Ranger(session="s1", agent="build", title="t", thinking=True)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent2.ask("hi")
     cmd = m.call_args.args[0]
     for flag in ("--session", "--agent", "--title", "--thinking"):
@@ -148,27 +150,27 @@ def test_run_optional_flags_off_or_on():
 
 def test_per_call_override_beats_default():
     agent = Ranger(model="base/model", timeout=100)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi", model="other/model")
     cmd = m.call_args.args[0]
     i = cmd.index("--model") + 1
     assert cmd[i] == "other/model"
-    assert m.call_args.kwargs["timeout"] == 100  # default survives where not overridden
+    assert m.return_value.communicate_calls == [100] # per-call timeout reached the spawned proc  # default survives where not overridden
 
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi", timeout=42)
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
 
     # and default switches over with_config too
     fast = agent.with_config(model="fast/model")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         fast.ask("hi")
     assert m.call_args.args[0][m.call_args.args[0].index("--model") + 1] == "fast/model"
 
 
 def test_unknown_run_option_raises():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")):
         with pytest.raises(TypeError):
             agent.ask("hi", bogus="x")
         with pytest.raises(TypeError):
@@ -180,7 +182,7 @@ def test_unknown_run_option_raises():
 
 def test_nonzero_exit_raises_with_stderr():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("", stderr="boom", returncode=1)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("", stderr="boom", returncode=1)):
         with pytest.raises(RangerError, match="boom"):
             agent.ask("hi")
 
@@ -188,7 +190,9 @@ def test_nonzero_exit_raises_with_stderr():
 def test_timeout_raises_ranger_error():
     agent = Ranger(timeout=5)
     with mock.patch(
-        "ranger.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="x", timeout=5)
+        # the transport's own wait gives out: communicate() raises
+        "ranger._engine._Popen",
+        return_value=FakePopen(communicate_exc=subprocess.TimeoutExpired(cmd="x", timeout=5)),
     ):
         with pytest.raises(RangerError, match="timed out"):
             agent.ask("hi")
@@ -196,7 +200,7 @@ def test_timeout_raises_ranger_error():
 
 def test_missing_opencode_binary():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", side_effect=FileNotFoundError):
+    with mock.patch("ranger._engine._Popen", side_effect=FileNotFoundError):
         with pytest.raises(RangerError, match="opencode CLI not found"):
             agent.ask("hi")
 
@@ -206,6 +210,7 @@ def test_missing_opencode_binary():
 
 def test_models_parses_and_filters():
     out = "openrouter/anthropic/claude-sonnet-4.5\nopenrouter/google/gemini-2.5-flash\n\n"
+    # models() still rides the list_models subprocess.run seam
     with mock.patch("ranger.subprocess.run", return_value=fake_run(out)) as m:
         assert Ranger.models() == [
             "openrouter/anthropic/claude-sonnet-4.5",
@@ -253,12 +258,12 @@ def test_write_returns_path_and_requires_file(tmp_path):
         Path(made["path"]).write_text("report")
         return fake_run(str(made["path"]))
 
-    with mock.patch("ranger.subprocess.run", side_effect=side_effect):
+    with mock.patch("ranger._engine._Popen", side_effect=side_effect):
         assert agent.write("make a report") == made["path"]
         assert Path(made["path"]).exists()
 
     # agent claims it wrote but no file -> RangerError, not a silent pass
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("claimed.md")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("claimed.md")):
         with pytest.raises(RangerError, match="did not write the expected file"):
             agent.write("make a report", path=tmp_path / "claimed.md")
 
@@ -279,7 +284,7 @@ def test_command_prompt_contents(tmp_path):
             os.utime(target, ns=(stamp, stamp + 1))
         return fake_run("ok")
 
-    with mock.patch("ranger.subprocess.run", side_effect=capture):
+    with mock.patch("ranger._engine._Popen", side_effect=capture):
         agent.summarize(target)
         assert agent.read("notes.md", "What is the heading?", timeout=42) == "ok"
         agent.do("rename the files")
@@ -325,14 +330,14 @@ def test_command_prompt_contents(tmp_path):
 
 def test_test_returns_harness_diagnosis_and_forwards_overrides():
     agent = Ranger(stats=True)
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run(
                         '{"sessionID":"ses_test","part":{"type":"text",'
                         '"text":"parser test fails: bad token"}}')) as m:
         assert agent.test(model="fast/model", timeout=42) == "parser test fails: bad token"
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--model") + 1] == "fast/model"
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
     assert agent.last["label"] == "test"
 
 
@@ -341,7 +346,7 @@ def test_lint_is_pure_and_forwards_overrides():
     agent.context = [{"role": "user", "content": "previous answer"}]
     payload = ('{"sessionID":"ses_lint","part":{"type":"text",'
                '"text":"ruff reports an unused import."}}')
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(payload)) as m:
         assert agent.lint(model="fast/model", timeout=42) == "ruff reports an unused import."
     cmd = m.call_args.args[0]
     prompt = cmd[-1]
@@ -350,7 +355,7 @@ def test_lint_is_pure_and_forwards_overrides():
     assert "Previous interaction" not in prompt
     assert "ses_hist" not in cmd
     assert cmd[cmd.index("--model") + 1] == "fast/model"
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
     assert agent.last["label"] == "lint"
 
 
@@ -359,7 +364,7 @@ def test_trace_is_pure_and_forwards_overrides():
     agent.context = [{"role": "user", "content": "previous answer"}]
     payload = ('{"sessionID":"ses_trace","part":{"type":"text",'
                '"text":"src/parser.py:12 defines parse_config."}}')
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(payload)) as m:
         assert agent.trace("parse_config", model="fast/model", timeout=42) == (
             "src/parser.py:12 defines parse_config."
         )
@@ -373,7 +378,7 @@ def test_trace_is_pure_and_forwards_overrides():
     assert "Previous interaction" not in prompt
     assert "ses_hist" not in cmd
     assert cmd[cmd.index("--model") + 1] == "fast/model"
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
     assert agent.last["label"] == "trace"
 
 
@@ -383,7 +388,7 @@ def test_diagnose_is_pure_and_forwards_overrides():
     payload = ('{"sessionID":"ses_diagnose","part":{"type":"text",'
                '"text":"The parser rejects an empty token."}}')
     error = "Traceback (most recent call last):\nValueError: bad token"
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(payload)) as m:
         assert agent.diagnose(error, model="fast/model", timeout=42) == (
             "The parser rejects an empty token."
         )
@@ -396,7 +401,7 @@ def test_diagnose_is_pure_and_forwards_overrides():
     assert "Previous interaction" not in prompt
     assert "ses_hist" not in cmd
     assert cmd[cmd.index("--model") + 1] == "fast/model"
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
     assert agent.last["label"] == "diagnose"
 
 
@@ -405,7 +410,7 @@ def test_critique_is_pure_and_forwards_overrides():
     agent.context = [{"role": "user", "content": "previous answer"}]
     payload = ('{"sessionID":"ses_critique","part":{"type":"text",'
                '"text":"Missing a boundary test."}}')
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(payload)) as m:
         assert agent.critique("src/parser.py", model="fast/model", timeout=42) == (
             "Missing a boundary test."
         )
@@ -417,7 +422,7 @@ def test_critique_is_pure_and_forwards_overrides():
     assert "Previous interaction" not in prompt
     assert "ses_hist" not in cmd
     assert cmd[cmd.index("--model") + 1] == "fast/model"
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
     assert agent.last["label"] == "critique"
 
 
@@ -426,7 +431,7 @@ def test_read_answers_one_file_question_and_forwards_overrides(tmp_path):
     agent.context = [{"role": "user", "content": "previous answer"}]
     payload = ('{"sessionID":"ses_read","part":{"type":"text",'
                '"text":"It accepts strings."}}')
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(payload)) as m:
         assert agent.read("parser.py", "What inputs does it accept?",
                           model="fast/model", timeout=42) == "It accepts strings."
     cmd = m.call_args.args[0]
@@ -437,7 +442,7 @@ def test_read_answers_one_file_question_and_forwards_overrides(tmp_path):
     assert "Previous interaction" not in prompt
     assert "ses_hist" not in cmd
     assert cmd[cmd.index("--model") + 1] == "fast/model"
-    assert m.call_args.kwargs["timeout"] == 42
+    assert m.return_value.communicate_calls == [42] # per-call timeout reached the spawned proc
     assert agent.last["label"] == "read"
 
 
@@ -445,19 +450,23 @@ def test_edit_requires_a_changed_target_and_forwards_overrides(tmp_path):
     target = tmp_path / "notes.md"
     target.write_text("before")
     agent = Ranger(cwd=tmp_path)
+    made = {}
 
     def edit_target(cmd, **kw):
         assert "Edit exactly this existing file" in cmd[-1]
         target.write_text("after")
         stamp = target.stat().st_mtime_ns
         os.utime(target, ns=(stamp, stamp + 1))
-        return fake_run("changed it")
+        proc = fake_run("changed it")
+        made["proc"] = proc
+        return proc
 
-    with mock.patch("ranger.subprocess.run", side_effect=edit_target) as m:
+    with mock.patch("ranger._engine._Popen", side_effect=edit_target) as m:
         assert agent.edit("notes.md", "replace the text", timeout=42) == "changed it"
-    assert m.call_args.kwargs["timeout"] == 42
+    # side_effect style: the fake proc itself records the wait it got
+    assert made["proc"].communicate_calls == [42]  # per-call timeout reached the proc
     assert agent.last == {}
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("claimed")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("claimed")):
         with pytest.raises(RangerError, match="did not modify"):
             agent.edit(target, "do nothing")
     with pytest.raises(RangerError, match="does not exist"):
@@ -472,7 +481,7 @@ def test_write_slug_fallback_for_empty_task(tmp_path):
         seen.append(cmd[-1])
         return fake_run("p")
 
-    with mock.patch("ranger.subprocess.run", side_effect=capture):
+    with mock.patch("ranger._engine._Popen", side_effect=capture):
         with pytest.raises(RangerError):  # no file appears -> error, as contracted
             agent.write("")
     # the prompt still got a concrete target path with the slug fallback
@@ -510,7 +519,7 @@ def test_skill_file_attached_via_file_flag(tmp_path):
     skill = tmp_path / "haiku.md"
     skill.write_text("Always answer in haiku form.")
     agent = Ranger(skills=str(skill))
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("x")) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--file") + 1] == str(skill)
@@ -524,7 +533,7 @@ def test_skill_directory_attaches_markdown(tmp_path):
     (sdir / "extra.md").write_text("# extra")
     (sdir / "ignore.txt").write_text("not markdown")
     agent = Ranger(skills=sdir)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("x")) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     attached = {cmd[i + 1] for i, x in enumerate(cmd) if x == "--file"}
@@ -535,14 +544,14 @@ def test_skill_empty_directory_raises(tmp_path):
     sdir = tmp_path / "empty"
     sdir.mkdir()
     agent = Ranger(skills=sdir)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("x")):
         with pytest.raises(RangerError, match="no markdown"):
             agent.ask("hi")
 
 
 def test_prose_grant_injected_into_prompt():
     agent = Ranger(skills=["always answer in haiku form", "use british spelling"])
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("tell me about tests")
     sent = m.call_args.args[0][-1]
     assert sent.startswith("## Allowed skills")
@@ -554,10 +563,10 @@ def test_skills_per_call_override_beats_default(tmp_path):
     skill = tmp_path / "s.md"
     skill.write_text("x")
     agent = Ranger(skills=str(skill))
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     assert "--file" in m.call_args.args[0]
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi", skills=["prose only grant"])  # overrides, no file
     assert "--file" not in m.call_args.args[0]
     assert "prose only grant" in m.call_args.args[0][-1]
@@ -565,7 +574,7 @@ def test_skills_per_call_override_beats_default(tmp_path):
 
 def test_no_skills_no_flags_by_default():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     assert "--file" not in m.call_args.args[0]
     assert m.call_args.args[0][-1] == "hi"
@@ -576,7 +585,7 @@ def test_no_skills_no_flags_by_default():
 
 def test_context_records_openai_format_after_each_run():
     agent = Ranger(memory=True)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("answer here")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("answer here")):
         agent.ask("hi")
     assert agent.context == [
         {"role": "user", "content": "hi"},
@@ -586,9 +595,9 @@ def test_context_records_openai_format_after_each_run():
 
 def test_context_recall_prepends_history():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", side_effect=[fake_run("first answer")]) as m:
+    with mock.patch("ranger._engine._Popen", side_effect=[fake_run("first answer")]) as m:
         agent.ask("first question")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("second answer")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("second answer")) as m:
         agent.ask("second question")
     sent = m.call_args.args[0][-1]
     assert "first question" in sent and "first answer" in sent
@@ -599,19 +608,19 @@ def test_context_recall_prepends_history():
 
 def test_context_memory_off_stops_recording_and_recall():
     agent = Ranger(memory=False)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("who")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("who")):
         agent.ask("knock")
     assert agent.context == []
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("who")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("who")) as m:
         agent.ask("knock again")
     assert m.call_args.args[0][-1] == "knock again"  # no context block
 
 
 def test_context_per_call_override():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("a")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("a")):
         agent.ask("one")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("b")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("b")) as m:
         agent.ask("two", memory=False)  # isolated run
     assert m.call_args.args[0][-1] == "two"
     assert len(agent.context) == 2  # and nothing recorded for it
@@ -619,9 +628,9 @@ def test_context_per_call_override():
 
 def test_context_budget_bounds_recall():
     agent = Ranger(memory_budget=10)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("x" * 500)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("x" * 500)):
         agent.ask("big exchange")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("y")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("y")) as m:
         agent.ask("next")
     # nothing fits in the budget -> the run is sent raw
     assert m.call_args.args[0][-1] == "next"
@@ -629,7 +638,7 @@ def test_context_budget_bounds_recall():
 
 def test_context_clear_returns_old_and_resets():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("a")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("a")):
         agent.ask("one")
     removed = agent.context_clear()
     assert agent.context == []
@@ -638,7 +647,7 @@ def test_context_clear_returns_old_and_resets():
 
 def test_context_compact_replaces_history_with_system_digest():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", side_effect=[
+    with mock.patch("ranger._engine._Popen", side_effect=[
         fake_run("step one happened"), fake_run("- did step one\n- learned X"),
     ]):
         agent.ask("do step one")
@@ -646,7 +655,7 @@ def test_context_compact_replaces_history_with_system_digest():
     assert digest == "- did step one\n- learned X"
     assert agent.context == [{"role": "system", "content": digest}]
     # the compacted summary is recalled in the next run
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("next step")
     sent = m.call_args.args[0][-1]
     assert "[system] - did step one" in sent and "Prompt contracts" not in sent
@@ -654,7 +663,7 @@ def test_context_compact_replaces_history_with_system_digest():
 
 def test_context_summarize_keeps_history():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", side_effect=[
+    with mock.patch("ranger._engine._Popen", side_effect=[
         fake_run("note"), fake_run("digest"),
     ]):
         agent.ask("question")
@@ -665,7 +674,7 @@ def test_context_summarize_keeps_history():
     assert len(agent.context) == 2
     assert all(m["role"] in ("user", "assistant") for m in agent.context)
     # and repeated summarization cannot recursively duplicate history
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("digest2")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("digest2")):
         agent.context_summarize()
     assert len(agent.context) == 2
 
@@ -689,13 +698,13 @@ def test_gate_never_records_context():
 ])
 def test_check_parses_verdicts(reply, expected):
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(reply)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(reply)):
         assert agent.check("all tests pass") is expected
 
 
 def test_check_rejects_unparseable_verdicts():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("Probably fine?")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("Probably fine?")):
         with pytest.raises(RangerError, match="YES/NO"):
             agent.check("all tests pass")
 
@@ -717,12 +726,12 @@ def test_gate_exit_code_booleans():
 
 def test_mode_selects_opencode_agent():
     agent = Ranger(mode="build")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--agent") + 1] == "build"
     # legacy agent= alias still works; mode wins on conflict
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi", agent="plan")
     assert m.call_args.args[0][m.call_args.args[0].index("--agent") + 1] == "plan"
 
@@ -731,18 +740,18 @@ def test_effort_validation_and_directives():
     with pytest.raises(ValueError):
         Ranger(effort="turbo")
     agent = Ranger(effort="high")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert "--thinking" in cmd  # high effort forces thinking
     assert "verify" in cmd[-1].lower()
     agent2 = Ranger(effort="low")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent2.ask("hi")
     assert "--thinking" not in m.call_args.args[0]
     assert "be brief" in m.call_args.args[0][-1]
     # explicit per-call override
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent2.ask("hi", effort="medium")
     assert "be brief" not in m.call_args.args[0][-1]
 
@@ -754,7 +763,7 @@ def test_stats_json_mode_and_telemetry():
         '{"type":"text","sessionID":"ses_abc","part":{"type":"text","text":"second","time":{"start":2500,"end":4000}}}\n'
         'not json noise\n'
     )
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(payload)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(payload)) as m:
         out = agent.ask("hi")
     assert out == "first \nsecond"
     cmd = m.call_args.args[0]
@@ -768,7 +777,7 @@ def test_stats_json_mode_and_telemetry():
 
 def test_stats_off_by_default():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("plain text")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("plain text")):
         assert agent.ask("hi") == "plain text"
     assert agent.last == {}
 
@@ -863,7 +872,7 @@ def test_summarize_resolves_relative_paths_against_agent_cwd(tmp_path):
         seen.append(cmd[-1])
         return fake_run("ok")
 
-    with mock.patch("ranger.subprocess.run", side_effect=capture):
+    with mock.patch("ranger._engine._Popen", side_effect=capture):
         agent.summarize("notes.md")
     assert str(tmp_path / "notes.md") in seen[0]  # agent cwd, not python cwd
 
@@ -871,14 +880,14 @@ def test_summarize_resolves_relative_paths_against_agent_cwd(tmp_path):
 def test_pretty_default_and_per_call_override():
     assert Ranger().pretty is True
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")):
         agent.ask("hi", pretty=False)  # accepted, no TypeError
 
 
 def test_ui_silent_when_not_a_tty():
     """Piped/captured stderr must stay byte-identical: UI never fires."""
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("done")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("done")):
         agent.ask("hi")
     import sys as _sys
     assert not _sys.stderr.isatty()  # precondition of the test env
@@ -889,7 +898,7 @@ def test_ui_draws_progress_on_tty(capsys):
     agent = Ranger()
     fake_tty = _FakeTty()
     with mock.patch.object(_sys, "stderr", fake_tty), mock.patch(
-        "ranger.subprocess.run", return_value=fake_run("the answer\nline two")
+        "ranger._engine._Popen", return_value=fake_run("the answer\nline two")
     ):
         out = agent.ask("hello world")
     assert out == "the answer\nline two"
@@ -903,7 +912,7 @@ def test_ui_draws_error_mark_on_failure():
     agent = Ranger()
     fake_tty = _FakeTty()
     with mock.patch.object(_sys, "stderr", fake_tty), mock.patch(
-        "ranger.subprocess.run", return_value=fake_run("", stderr="boom", returncode=1)
+        "ranger._engine._Popen", return_value=fake_run("", stderr="boom", returncode=1)
     ):
         with pytest.raises(RangerError):
             agent.do("break things", timeout=5)
@@ -926,7 +935,7 @@ CODEX_JSONL = (
 
 def test_codex_command_construction():
     agent = Ranger(backend="codex", model="gpt-5.1-codex", cwd="/tmp/demo")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         assert agent.ask("hi") == "ok"
     cmd = m.call_args.args[0]
     assert cmd[0] == "codex" and cmd[1] == "exec"
@@ -942,13 +951,13 @@ def test_codex_command_construction():
 def test_codex_no_model_means_config_default(monkeypatch):
     monkeypatch.delenv("RANGER_MODEL", raising=False)
     agent = Ranger(backend="codex")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert "-m" not in cmd  # codex picks its config.toml default
     # auto=False pins a read-only sandbox (exec cannot be interactive)
     agent_ro = Ranger(backend="codex", auto=False)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent_ro.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("-s") + 1] == "read-only"
@@ -956,7 +965,7 @@ def test_codex_no_model_means_config_default(monkeypatch):
 
 def test_codex_session_resume_shape():
     agent = Ranger(backend="codex", session="th_123")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[2] == "resume" and cmd[4] == "th_123"  # exec resume <id>
@@ -964,26 +973,26 @@ def test_codex_session_resume_shape():
 
 def test_codex_rejects_opencode_only_options():
     for kw in ({"mode": "build"}, {"agent": "build"}, {"title": "t"}):
-        with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)):
+        with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)):
             with pytest.raises(RangerError, match="codex.*does not support"):
                 Ranger(backend="codex").ask("hi", **kw)
 
 
 def test_codex_effort_and_thinking_map_to_reasoning():
     agent = Ranger(backend="codex", effort="high")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent.ask("x")
     cmd = m.call_args.args[0]
     assert 'model_reasoning_effort="high"' in cmd  # effort -> reasoning config
     agent_lo = Ranger(backend="codex", effort="low")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent_lo.ask("x")
     assert 'model_reasoning_effort="low"' in m.call_args.args[0]
 
 
 def test_codex_stats_reports_real_tokens():
     agent = Ranger(backend="codex", stats=True)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)):
         agent.ask("hi")
     assert agent.last["session"] == "th_123"
     assert agent.last["parts"] == 1 and agent.last["chars"] == 2
@@ -995,7 +1004,7 @@ def test_codex_skills_are_inlined_not_flagged(tmp_path):
     skill = tmp_path / "style.md"
     skill.write_text("Answer only in haiku.")
     agent = Ranger(backend="codex", skills=[tmp_path])
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert "--file" not in cmd                      # no native attachment flag
@@ -1006,7 +1015,7 @@ def test_backend_validation_everywhere():
     with pytest.raises(ValueError):
         Ranger(backend="nope")
     with pytest.raises(TypeError):  # per-call too
-        with mock.patch("ranger.subprocess.run", return_value=fake_run("x")):
+        with mock.patch("ranger._engine._Popen", return_value=fake_run("x")):
             Ranger().ask("hi", backend="wat")
     with pytest.raises(ValueError):
         Ranger.models(backend="wat")
@@ -1030,7 +1039,7 @@ def test_register_custom_backend_and_run_it():
 
     ranger.register_backend("mine", _Mine)
     agent = Ranger(backend="mine")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("done")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("done")) as m:
         assert agent.ask("hi") == "done"
     assert m.call_args.args[0] == ["mycli", "go", "hi"]
     assert agent.with_config(backend="mine").backend == "mine"
@@ -1042,11 +1051,11 @@ def test_same_commands_work_across_backends():
     yes_jsonl = CODEX_JSONL.replace('"text":"ok"', f'"text":"{yes_plain}"')
     for backend, stdout in (("opencode", yes_plain), ("codex", yes_jsonl)):
         agent = Ranger(backend=backend, cwd="/tmp/demo")
-        with mock.patch("ranger.subprocess.run", return_value=fake_run(stdout)):
+        with mock.patch("ranger._engine._Popen", return_value=fake_run(stdout)):
             assert agent.check("the file exists") is True
         agent.context_clear()
     # and the YES/NO contract stays strict on both: unparseable raises
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)):
         with pytest.raises(RangerError):
             Ranger(backend="codex").check("file exists")
 
@@ -1055,13 +1064,13 @@ def test_check_accepts_verdict_line_after_chatter():
     """Some harnesses chat before the verdict; a YES/NO-only line still parses."""
     agent = Ranger()
     chatty = ("I'll verify the file directly.\nYES  \nEvidence: it exists.")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(chatty)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(chatty)):
         assert agent.check("file exists") is True
     chatty_no = ("Let me look.\nno.\nnothing found")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(chatty_no)):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(chatty_no)):
         assert agent.check("file exists") is False
     # prose that merely mentions the words never parses
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(
             "The question of yes or no is subtle; I found no verdict.")):
         with pytest.raises(RangerError):
             agent.check("file exists")
@@ -1084,13 +1093,13 @@ def test_recall_is_skipped_for_pure_commands():
                            ("search", lambda: agent.search("PORT usage")),
                            ("summarize", lambda: agent.summarize("x.py")),
                            ("trace", lambda: agent.trace("serve"))):
-        with mock.patch("ranger.subprocess.run",
+        with mock.patch("ranger._engine._Popen",
                         return_value=fake_run("YES")) as m:
             method()
         assert "Previous interaction" not in m.call_args.args[0][-1], (
             f"{label} must not see conversation history"
         )
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("what port did we agree on?")
     assert "Previous interaction" in m.call_args.args[0][-1]  # dialogue recalls
 
@@ -1103,7 +1112,7 @@ def test_prompts_travel_after_option_terminator():
     for backend in ("opencode", "codex"):
         stdout = CODEX_JSONL if backend == "codex" else "ok"
         agent = Ranger(backend=backend, cwd="/tmp/demo")
-        with mock.patch("ranger.subprocess.run", return_value=fake_run(stdout)) as m:
+        with mock.patch("ranger._engine._Popen", return_value=fake_run(stdout)) as m:
             agent.ask("--help")
         cmd = m.call_args.args[0]
         assert cmd[-1] == "--help"
@@ -1113,10 +1122,10 @@ def test_prompts_travel_after_option_terminator():
 def test_pure_commands_drop_harness_session(monkeypatch):
     monkeypatch.delenv("RANGER_MODEL", raising=False)
     agent = Ranger(cwd="/tmp/demo", session="ses_hist")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("flow")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("flow")) as m:
         agent.ask("hi")  # dialogue keeps the session
     assert "ses_hist" in m.call_args.args[0]
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("YES")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("YES")) as m:
         agent.check("x exists")  # fact commands drop it
     assert "ses_hist" not in m.call_args.args[0]
 
@@ -1125,7 +1134,7 @@ def test_codex_resume_applies_model_and_readonly(monkeypatch):
     monkeypatch.delenv("RANGER_MODEL", raising=False)
     agent = Ranger(backend="codex", session="th_1", model="gpt-5.1-codex",
                    auto=False, cwd="/tmp/demo")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[2] == "resume" and "th_1" in cmd
@@ -1137,17 +1146,17 @@ def test_codex_resume_applies_model_and_readonly(monkeypatch):
 def test_backend_switch_does_not_inherit_wrong_default(monkeypatch):
     monkeypatch.delenv("RANGER_MODEL", raising=False)
     # opencode-default agent, per-call switch to codex: no -m foisted
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         Ranger().ask("hi", backend="codex")
     assert "-m" not in m.call_args.args[0]
     assert DEFAULT_MODEL not in m.call_args.args[0]
     # codex-default agent, per-call switch to opencode: package default fills in
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         Ranger(backend="codex").ask("hi", backend="opencode")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
     # explicit ctor model still wins after a backend switch
-    with mock.patch("ranger.subprocess.run", return_value=fake_run(CODEX_JSONL)) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run(CODEX_JSONL)) as m:
         Ranger(model="custom/m").ask("hi", backend="codex")
     assert m.call_args.args[0][m.call_args.args[0].index("-m") + 1] == "custom/m"
 
@@ -1162,7 +1171,7 @@ def test_with_config_copies_mutable_state():
     # with_config(model=...) is the copy's EXPLICIT choice — per-run
     # resolution must not resurrect the base agent's model
     copy = base.with_config(model="fast/model")
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         copy.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--model") + 1] == "fast/model"
@@ -1217,14 +1226,14 @@ def test_model_assignment_is_the_explicit_choice(monkeypatch):
     agent = Ranger(model="a/m", cwd="/tmp/demo")
     assert agent.model == "a/m"
     agent.model = "b/m"
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--model") + 1] == "b/m"
     # assignment behaves like Ranger(model=...): explicit beats RANGER_MODEL
     with mock.patch.dict(os.environ, {"RANGER_MODEL": "env/m"}):
         agent.model = "c/m"
-        with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
             agent.ask("hi")
     cmd = m.call_args.args[0]
     assert cmd[cmd.index("--model") + 1] == "c/m"
@@ -1241,11 +1250,11 @@ def test_model_attribute_shows_the_fallback(monkeypatch):
 
 def test_check_rejects_contradictory_and_unconfident():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                    return_value=fake_run("I checked:\nYES\nNO")):
         with pytest.raises(RangerError, match="contradictory"):
             agent.check("x")
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                    return_value=fake_run("NO verification was performed; I cannot answer.")):
         with pytest.raises(RangerError):
             agent.check("x")
@@ -1263,7 +1272,7 @@ def test_write_slug_is_sanitized_and_collision_proof(tmp_path):
             Path(found[-1]).write_text("x")   # agent honors the contract
         return fake_run("claimed")
 
-    with mock.patch("ranger.subprocess.run", side_effect=fake_exec):
+    with mock.patch("ranger._engine._Popen", side_effect=fake_exec):
         agent.write("describe src/parser.py")
         agent.write("describe src/parser.py")
         agent.write("two  tasks!!! with /slashes/")
@@ -1275,14 +1284,14 @@ def test_write_slug_is_sanitized_and_collision_proof(tmp_path):
 
 def test_write_rejects_directory_as_output(tmp_path):
     agent = Ranger(cwd=tmp_path)
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("claimed")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("claimed")):
         with pytest.raises(RangerError, match="did not write"):
             agent.write("report", path=".")  # a directory is not a document
 
 
 def test_until_validates_max_iter():
     agent = Ranger()
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")):
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")):
         for bad in (-1, "three", 2.5):
             with pytest.raises(ValueError):
                 agent.until("goal", max_iter=bad, gate_cmd="true")
@@ -1307,7 +1316,7 @@ def test_relative_skill_paths_resolve_against_agent_cwd(tmp_path):
     target.mkdir()
     (target / "style.md").write_text("Use haikus.")
     agent = Ranger(cwd=str(target), skills=["style.md"])
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")
     cmd = m.call_args.args[0]
     i = cmd.index("--file")
@@ -1321,11 +1330,11 @@ def test_memory_budget_per_call_override():
         {"role": "user", "content": "u" * 9000},
         {"role": "assistant", "content": "a" * 9000},
     ]
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi")  # default 20k budget: both messages recalled
     joined = m.call_args.args[0][-1]
     assert "u" * 9000 in joined and "a" * 9000 in joined
-    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         agent.ask("hi", memory_budget=100)  # tiny budget: almost nothing fits
     joined = m.call_args.args[0][-1]
     assert "u" * 9000 not in joined and "a" * 9000 not in joined
@@ -1345,12 +1354,12 @@ def test_review_parses_verdicts_mechanically():
     builder.context.append({"role": "assistant", "content": "I added tests."})
     for verdict, passed in (("APPROVE", True), ("REJECT", False),
                             ("REQUEST_CHANGES", False)):
-        with mock.patch("ranger.subprocess.run",
+        with mock.patch("ranger._engine._Popen",
                         return_value=fake_run(_review_answer(verdict))):
             rev = critic.review("the tests exist", author=builder)
         assert rev == {"passed": passed, "verdict": verdict,
                        "findings": "all verified", "changes": "none"}
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run("looks good to me!")):
         with pytest.raises(RangerError, match="VERDICT"):
             critic.review("x", author=builder)
@@ -1360,7 +1369,7 @@ def test_review_is_memory_and_session_free():
     critic = Ranger(session="ses_bias")
     critic.context = [{"role": "user", "content": "we agreed it's fine"},
                       {"role": "assistant", "content": "sure, fine"}]
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run(_review_answer())) as m:
         critic.review("the thing")
     cmd = m.call_args.args[0]
@@ -1374,13 +1383,13 @@ def test_review_injects_author_claims_as_unverified():
     builder = Ranger()
     builder.context.append({"role": "assistant", "content": "all tests pass"})
     critic = Ranger()
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run(_review_answer())) as m:
         critic.review("suite health", author=builder)
     prompt = m.call_args.args[0][-1]
     assert "all tests pass" in prompt
     assert "NOT verified" in prompt  # claims labeled, trust nothing
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     return_value=fake_run(_review_answer())):
         critic.review("x", author="plain string claims")  # bare string ok
         with pytest.raises(RangerError, match="no recorded claim"):
@@ -1399,7 +1408,7 @@ def test_challenge_attacks_defends_and_rules():
         "Here are the numbers\nDEFENDED",              # defense
         "RULING: SUSTAINED",                           # sustained -> survives no
     ])
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     side_effect=lambda *a, **k: fake_run(next(replies))):
         duel = attacker.challenge(defender, rounds=2)
     assert duel["survived"] is False
@@ -1407,13 +1416,13 @@ def test_challenge_attacks_defends_and_rules():
     assert len(duel["rounds"]) == 2  # immediate stop after SUSTAINED? no: last
     # budgets: all withdrawn -> survived True
     replies2 = iter(["ATTACK: a", "DEFENDED", "RULING: WITHDRAWN"] * 3)
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     side_effect=lambda *a, **k: fake_run(next(replies2))):
         ok = attacker.challenge(defender, rounds=2)
     assert ok["survived"] is True and len(ok["rounds"]) == 2
     # concession ends it immediately
     replies3 = iter(["ATTACK: a", "you got me.\nCONCEDED"])
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     side_effect=lambda *a, **k: fake_run(next(replies3))):
         lost = attacker.challenge(defender, rounds=2)
     assert lost["survived"] is False and len(lost["rounds"]) == 1
@@ -1423,12 +1432,12 @@ def test_challenge_attacks_defends_and_rules():
 
 def test_second_opinion_compares_normatively():
     a, b = Ranger(), Ranger()
-    with mock.patch("ranger.subprocess.run", side_effect=[
+    with mock.patch("ranger._engine._Popen", side_effect=[
         fake_run("The\nanswer  is 42"), fake_run("the answer is 42"),
     ]):
         same = a.second_opinion(b, "the question")
     assert same["differs"] is False  # whitespace/case differences don't count
-    with mock.patch("ranger.subprocess.run", side_effect=[
+    with mock.patch("ranger._engine._Popen", side_effect=[
         fake_run("42"), fake_run("43"),
     ]):
         diff = a.second_opinion(b, "the question")
@@ -1444,13 +1453,13 @@ def test_refine_with_gates_on_mechanical_approve():
         fake_run("worked again"),                 # do #2
         fake_run(_review_answer("APPROVE")),      # approved
     ])
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     side_effect=lambda *a, **k: next(replies)):
         out = builder.refine_with(critic, "add input tests", max_iter=3)
     assert out["approved"] is True and out["iterations"] == 2
     assert out["reviews"][0]["changes"] == "add empty-input test"
     # budget exhaustion is honest: never approved without APPROVE
-    with mock.patch("ranger.subprocess.run", side_effect=[
+    with mock.patch("ranger._engine._Popen", side_effect=[
         fake_run("w"), fake_run(_review_answer("REQUEST_CHANGES", changes="c")),
         fake_run("w"), fake_run(_review_answer("REQUEST_CHANGES", changes="c")),
     ]):
@@ -1466,13 +1475,13 @@ def test_debate_exchanges_and_judges():
     a, b, judge = Ranger(), Ranger(), Ranger()
     replies = iter([fake_run("pos-A"), fake_run("pos-B"), fake_run("pos-A2"),
                     fake_run("pos-B2"), fake_run("digest here")])
-    with mock.patch("ranger.subprocess.run",
+    with mock.patch("ranger._engine._Popen",
                     side_effect=lambda *a2, **k: next(replies)):
         talk = ranger.debate(a, b, "the topic", rounds=2, judge=judge)
     assert [t["round"] for t in talk["transcript"]] == [1, 2]
     assert talk["digest"] == "digest here" and judge.context == []
     # each side sees the opponent's labeled position
-    with mock.patch("ranger.subprocess.run", side_effect=[
+    with mock.patch("ranger._engine._Popen", side_effect=[
         fake_run("standing firm"), fake_run("opposing"),
     ]) as m:
         ranger.debate(a, b, "topic", rounds=1)

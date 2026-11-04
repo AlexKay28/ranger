@@ -68,7 +68,7 @@ class TestBudgetFlowsThroughTheRunSeam:
         skill = _skill_file(tmp_path, "x" * 400)
         agent = Ranger(backend="codex", cwd=tmp_path,
                        skills=[skill], memory=False)
-        with mock.patch("ranger.subprocess.run",
+        with mock.patch("ranger._engine._Popen",
                        return_value=_fake()) as m:
             agent.ask("hi", skills_budget=100)
         sent = m.call_args.kwargs.get("args") or m.call_args.args[0]
@@ -80,7 +80,7 @@ class TestBudgetValidation:
     @pytest.mark.parametrize("bad", [0, -5, True, "100", 2.5])
     def test_refuses_bad_budgets_before_any_spawn(self, bad):
         agent = Ranger(backend="codex")
-        with mock.patch("ranger.subprocess.run") as run:
+        with mock.patch("ranger._engine._Popen") as run:
             with pytest.raises(ValueError, match="skills_budget"):
                 agent.ask("hi", skills_budget=bad)
         run.assert_not_called()          # not even the spawn happened
@@ -92,7 +92,7 @@ class TestBudgetValidation:
                      memory=False)
         assert base.skills_budget is None            # class-level default
         agent = base.with_config(skills_budget=64)
-        with mock.patch("ranger.subprocess.run",
+        with mock.patch("ranger._engine._Popen",
                        return_value=_fake()) as m:
             agent.ask("hi")
         sent = m.call_args.kwargs.get("args") or m.call_args.args[0]
@@ -112,4 +112,9 @@ def _fake():
     ret.stdout = '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}'
     ret.stderr = ""
     ret.returncode = 0
+    # the Popen transport reads the output pair from communicate()
+    ret.communicate.return_value = (
+        '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+        "",
+    )
     return ret

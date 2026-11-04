@@ -7,6 +7,8 @@ honestly, rollback_on_fail restores only when a snapshot exists.
 """
 
 import subprocess
+from contextlib import contextmanager
+from functools import partial
 from unittest import mock
 
 import pytest
@@ -57,6 +59,38 @@ class FakeGit:
 
 def git_calls(fake):
     return [c for c in fake.runs if c[0] == "git"]
+
+
+class _AgentPopenFake:
+    """Popen stand-in for the sync harness seam (ranger._engine._Popen).
+
+    Scripts the agent replies in call order and records every spawn in
+    the SAME fake.runs log the git seam uses — one log, so cross-seam
+    ordering assertions (a snapshot predating round 1, a git-only run…)
+    keep their meaning.
+    """
+
+    def __init__(self, fake, cmd, **kw):
+        self.args = list(cmd)
+        self.pid = 777
+        self.returncode = 0
+        reply = fake.agent_replies.pop(0) if fake.agent_replies else "ok\n"
+        self._pair = (reply, "")
+        fake.runs.append(list(cmd))       # same log: ordering survives
+        fake.kws.append(kw)
+
+    def communicate(self, timeout=None):
+        return self._pair
+
+
+@contextmanager
+def harness_and_git(fake):
+    """Patch both spawn seams for one test: git plumbing still rides
+    subprocess.run; agent spawns ride the engine's Popen seam."""
+    with mock.patch(f"{RANGER_MOD}.run", side_effect=fake), \
+         mock.patch("ranger._engine._Popen", side_effect=partial(
+             _AgentPopenFake, fake)):
+        yield
 
 
 # --------------------------------------------------------------------- #
@@ -181,7 +215,7 @@ class TestAutoSnapshotAndLoops:
     def test_snapshots_off_means_no_git_calls(self):
         agent = Ranger(cwd=".", snapshots=False)
         fake = FakeGit(agent_replies=["did it\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("fix things") == "did it"
         assert git_calls(fake) == []
         assert len(fake.runs) == 1 and fake.runs[0][0] == "opencode"
@@ -189,7 +223,7 @@ class TestAutoSnapshotAndLoops:
     def test_do_snapshots_best_effort(self):
         agent = Ranger(cwd="/repo", snapshots=True)
         fake = FakeGit(agent_replies=["did it\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("fix things") == "did it"
         assert argv_of(fake, "git", "update-ref")
         assert [s["tag"] for s in agent.snapshot_log] == ["pre-do-1"]
@@ -197,7 +231,7 @@ class TestAutoSnapshotAndLoops:
     def test_do_survives_non_git_cwd(self):
         agent = Ranger(cwd=".", snapshots=True)
         fake = FakeGit(agent_replies=["did it\n"], git_fails=True)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("fix things") == "did it"   # never claimed
         assert agent.snapshot_log == []
 
@@ -206,7 +240,7 @@ class TestAutoSnapshotAndLoops:
         # agent answers in order: pre-check NO, ask step, do report, NO
         fake = FakeGit(agent_replies=["NO\n", "one more step\n",
                                       "changed stuff\n", "NO\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.until("goal", max_iter=1, condition="c",
                                  rollback_on_fail=True)
         assert result["achieved"] is False
@@ -221,7 +255,7 @@ class TestAutoSnapshotAndLoops:
         agent = Ranger(cwd="/somewhere", timeout=30, retries=0)
         fake = FakeGit(agent_replies=["NO\n", "step\n", "report\n", "NO\n"],
                        git_fails=True)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.until("goal", max_iter=1, condition="c",
                                  rollback_on_fail=True)
         assert result["achieved"] is False
@@ -231,7 +265,7 @@ class TestAutoSnapshotAndLoops:
     def test_until_green_never_rolls_back(self):
         agent = Ranger(cwd="/repo", timeout=30, retries=0)
         fake = FakeGit(agent_replies=["NO\n", "step\n", "report\n", "YES\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             result = agent.until("goal", max_iter=1, condition="c",
                                  rollback_on_fail=True)
         assert result["achieved"] is True
@@ -254,7 +288,7 @@ class TestAutoSnapshotAndLoops:
         # the exact #23 crash: two rollback_on_fail loops started fast
         agent = Ranger(cwd="/repo", timeout=30, retries=0)
         fake = FakeGit(agent_replies=["NO\n"] * 8)
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             r1 = agent.until("goal", max_iter=1, condition="c",
                              rollback_on_fail=True)
             r2 = agent.until("goal", max_iter=1, condition="c",
@@ -269,7 +303,7 @@ class TestAutoSnapshotAndLoops:
         # invalid tag) degrades to the honest no-snapshot result
         agent = Ranger(cwd="/repo", timeout=30, retries=0)
         fake = FakeGit(agent_replies=["NO\n", "step\n", "report\n", "NO\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             with mock.patch.object(agent, "snapshot",
                                    side_effect=ValueError(
                                        "snapshot tag already used: x")):
@@ -286,7 +320,7 @@ class TestAutoSnapshotAndLoops:
         agent.snapshot_log.append({"tag": "pre-do-1", "sha": "S",
                                    "tree": "T", "time": 0.0})
         fake = FakeGit(agent_replies=["did it\n"])
-        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+        with harness_and_git(fake):
             assert agent.do("fix things") == "did it"   # skipped, logged
         assert [s["tag"] for s in agent.snapshot_log] == ["pre-do-1"]
 
