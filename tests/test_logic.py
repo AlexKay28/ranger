@@ -103,7 +103,11 @@ def test_model_precedence_matrix(monkeypatch):
         Ranger(backend="codex").ask("x")
     assert "-m" not in m.call_args.args[0]
     # backend switch in either direction gets the RIGHT default
-    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
+    # (codex answers arrive as recognizable events — issue #32 guard)
+    codex_ok = ('{"type":"item.completed","item":{"type":"agent_message",'
+                '"text":"ok"}}')
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(codex_ok)) as m:
         Ranger().ask("x", backend="codex")          # openrouter id NOT passed
     assert "-m" not in m.call_args.args[0] and DEFAULT_MODEL not in m.call_args.args[0]
     with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
@@ -113,7 +117,8 @@ def test_model_precedence_matrix(monkeypatch):
     with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
         Ranger(model="a/m").with_config(model="b/m").ask("x")
     assert _model_of(m.call_args.args[0]) == "b/m"
-    with mock.patch("ranger._engine._Popen", return_value=fake_run("ok")) as m:
+    with mock.patch("ranger._engine._Popen",
+                    return_value=fake_run(codex_ok)) as m:
         Ranger(model="a/m").with_config(backend="codex").ask("x")
     assert _model_of(m.call_args.args[0]) == "a/m"   # explicit survives switch
 

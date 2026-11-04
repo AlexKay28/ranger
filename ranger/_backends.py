@@ -395,6 +395,28 @@ class _CodexBackend(_Backend):
             })
         return answer, info
 
+    def check_output_schema(self, stdout, want_stats):
+        """Raise on silent JSONL drift (issue #32, extended to codex).
+
+        codex ALWAYS runs --json (stats or not), so its stdout is an
+        event stream, never the answer itself: non-empty stdout where
+        the scan recognized NOTHING — no text, no thread id, no usage,
+        anywhere — means the event format drifted and the answer would
+        silently be "". This does NOT contradict codex's documented
+        "non-JSON noise is never fatal" line: noise AROUND a recognized
+        event (a thread id, a usage line, an agent message) stays
+        legal, as does empty stdout; only total non-recognition fires.
+        """
+        if not stdout.strip():
+            return None
+        texts, thread, usage = self._collect_events(stdout)
+        if not texts and thread is None and usage is None:
+            raise RangerHarnessError(
+                f"{self.name} returned no parseable output events "
+                f"(schema drift?) — raw stdout tail:\n"
+                f"{_clip(stdout.strip(), UI_NOTE_CLIP)}"
+            )
+
 
 class _PiBackend(_Backend):
     """pi CLI adapter: `--print` output, effort maps to --thinking levels."""

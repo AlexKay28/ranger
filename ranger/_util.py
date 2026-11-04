@@ -133,6 +133,38 @@ def _path_matches(path: "Path | str", patterns, root=None) -> bool:
     )
 
 
+def _porcelain_changed_z(out: str) -> "dict[str, str]":
+    """Map every changed path -> its XY status pair from `-z` records.
+
+    Same parsing rules as `_porcelain_paths_z` (which is built on this):
+    -z records are NUL-terminated and never quoted, so paths with
+    spaces, non-ASCII names and uppercase rename/copy records survive
+    intact. A rename/copy record (X or Y is R/C) carries BOTH paths —
+    `git status --porcelain -z` emits the NEW path first, then the old
+    one (`"R  new\\0old\\0"`) — and both sides inherit the record's XY
+    pair, so a change AWAY from a rail path looks like its own change.
+    """
+    changed: "dict[str, str]" = {}
+    fields = out.split("\0")
+    i = 0
+    while i < len(fields):
+        rec = fields[i]
+        i += 1
+        if len(rec) < PORCELAIN_MIN:
+            continue
+        xy = rec[:PORCELAIN_PATH_AT - 1]
+        p = rec[PORCELAIN_PATH_AT:].rstrip("/")
+        if p:
+            changed[p] = xy
+        # rename/copy: the record owns the NEXT field too (the old path)
+        if ("R" in rec[:2] or "C" in rec[:2]) and i < len(fields):
+            old = fields[i].rstrip("/")
+            i += 1
+            if old:
+                changed[old] = xy
+    return changed
+
+
 def _porcelain_paths_z(out: str) -> "list[str]":
     """Every changed path from `git status --porcelain -z` (issue #25).
 
@@ -144,24 +176,7 @@ def _porcelain_paths_z(out: str) -> "list[str]":
     both sides: moving a file AWAY from a denied path or INTO one is
     equally outside the rails. Every other record is one path.
     """
-    fields = out.split("\0")
-    paths = []
-    i = 0
-    while i < len(fields):
-        rec = fields[i]
-        i += 1
-        if len(rec) < PORCELAIN_MIN:
-            continue
-        p = rec[PORCELAIN_PATH_AT:].rstrip("/")
-        if p:
-            paths.append(p)
-        # rename/copy: the record owns the NEXT field too (the old path)
-        if ("R" in rec[:2] or "C" in rec[:2]) and i < len(fields):
-            old = fields[i].rstrip("/")
-            i += 1
-            if old:
-                paths.append(old)
-    return paths
+    return list(_porcelain_changed_z(out))
 
 
 class RangerError(RuntimeError):

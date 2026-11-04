@@ -246,7 +246,12 @@ class CommandsMixin:
                 out = Path(self.cwd or Path.cwd()) / out
         prompt = _write_prompt(task, out)
         allow, deny, dry = self._resolve_safety(ov)
-        self._assert_path_allowed(out, allow, deny)
+        # root enables the cwd-relative glob form — the same rails that
+        # protect do() must hold for the named targets too (audit fix:
+        # without root, a relative deny like "secrets/**" never matched
+        # this now-absolute target and edit() bypassed the rail)
+        self._assert_path_allowed(out, allow, deny,
+                                  root=Path(self.cwd or Path.cwd()))
         self._auto_snapshot("pre-write")
         # instance-blind dry_run was the divergence: the postcheck saw
         # False while with_config(dry_run=True) made the run read-only —
@@ -342,10 +347,10 @@ class CommandsMixin:
         `Ranger(snapshots=True)` a best-effort git snapshot is taken
         first, making the round recoverable via `rollback()`.
         """
-        allow, deny, dry, root = self._guard_do(ov)
+        allow, deny, dry, root, baseline = self._guard_do(ov)
         self._auto_snapshot("pre-do")
         report = self._run(_do_prompt(goal), label="do", **ov)
-        self._check_do_after(allow, deny, dry, root)
+        self._check_do_after(allow, deny, dry, root, baseline)
         return report
 
     def _edit_spec(self, file: "str | Path", instruction: str, ov: dict) -> dict:
@@ -366,7 +371,9 @@ class CommandsMixin:
         except FileNotFoundError:
             raise RangerError(f"edit() target does not exist: {target}") from None
         allow, deny, dry = self._resolve_safety(ov)
-        self._assert_path_allowed(target, allow, deny)
+        # root enables the cwd-relative glob form — see _write_spec
+        self._assert_path_allowed(target, allow, deny,
+                                  root=Path(self.cwd or Path.cwd()))
         self._auto_snapshot("pre-edit")
         # same fix as write(): dry_run resolves instance-first via
         # _resolve_safety — per-call still wins, the postcheck agrees
@@ -580,10 +587,10 @@ class CommandsMixin:
 
     async def do_async(self, goal: str, **ov) -> str:
         """Async twin of do(): same contract, same frozen prompt."""
-        allow, deny, dry, root = self._guard_do(ov)
+        allow, deny, dry, root, baseline = self._guard_do(ov)
         self._auto_snapshot("pre-do")
         report = await self._run_async(_do_prompt(goal), label="do", **ov)
-        self._check_do_after(allow, deny, dry, root)
+        self._check_do_after(allow, deny, dry, root, baseline)
         return report
 
     async def search_async(self, goal: str, **ov) -> str:

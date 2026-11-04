@@ -41,8 +41,14 @@ class FakeRunner:
             if sub == "rev-parse" and self.git_fails:
                 return subprocess.CompletedProcess(
                     cmd, 128, stdout="", stderr="fatal: not a git repository")
+            reply = self.git_replies.get(sub, "")
+            if isinstance(reply, list):
+                # a SEQUENCE of answers, in call order (pre-run baseline
+                # snapshot -> post-run delta check consume two statuses;
+                # the last one repeats for any further call)
+                reply = reply.pop(0) if len(reply) > 1 else reply[0]
             return subprocess.CompletedProcess(
-                cmd, 0, stdout=self.git_replies.get(sub, ""), stderr="")
+                cmd, 0, stdout=reply, stderr="")
         reply = self.agent_replies.pop(0) if self.agent_replies else "ok\n"
         return subprocess.CompletedProcess(cmd, 0, stdout=reply, stderr="")
 
@@ -148,6 +154,52 @@ class TestTargetRails:
                 agent.write("report", path=tmp_path / "private.md")
         assert fake.runs == []
 
+    def test_edit_cwd_relative_deny_form_is_enforced(self, tmp_path):
+        """audit fix: `deny=["secrets/**"]` must refuse edit() on the
+        matching cwd-RELATIVE target — without root in the assert the
+        absolute target only matched absolute glob forms (a bypass)."""
+        target = tmp_path / "secrets" / "x.py"
+        target.parent.mkdir()
+        target.write_text("k=v", encoding="utf-8")
+        agent = Ranger(cwd=tmp_path, deny=["secrets/**"])
+        fake = FakeRunner()
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match="denied"):
+                agent.edit("secrets/x.py", "bump")
+        assert fake.runs == []          # refused BEFORE the spawn
+
+    def test_edit_cwd_relative_allow_form_permits(self, tmp_path):
+        target = tmp_path / "src" / "x.py"
+        target.parent.mkdir()
+        target.write_text("x = 1", encoding="utf-8")
+        agent = Ranger(cwd=tmp_path, allow=["src/**"])
+        with mock.patch("ranger._engine._Popen") as run:
+            run.return_value = fake_harness()
+            # the run happens; the mtime postcheck then reports the mock
+            # never touched the file — allowed, exactly one spawn
+            with pytest.raises(RangerError, match="did not modify"):
+                agent.edit("src/x.py", "bump")
+        assert run.call_count == 1
+
+    def test_write_cwd_relative_deny_form_is_enforced(self, tmp_path):
+        agent = Ranger(cwd=tmp_path, deny=["secrets/**"])
+        fake = FakeRunner()
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match="denied"):
+                agent.write("report", path="secrets/out.md")
+        assert fake.runs == []
+
+    def test_write_cwd_relative_allow_form_permits(self, tmp_path):
+        agent = Ranger(cwd=tmp_path, allow=["src/**"])
+        out = tmp_path / "src" / "report.md"
+        with mock.patch("ranger._engine._Popen") as run:
+            run.return_value = fake_harness()
+            # allowed run; the file postcheck then reports the mock
+            # write never landed — one spawn, the rail did not refuse
+            with pytest.raises(RangerError, match="did not write"):
+                agent.write("report", path=out)
+        assert run.call_count == 1
+
     def test_per_call_override_wins_over_ctor(self, tmp_path):
         target = tmp_path / "src" / "mod.py"
         target.parent.mkdir()
@@ -190,16 +242,19 @@ class TestDoRails:
 
     def test_do_post_run_violation_raises_naming_paths(self):
         agent = Ranger(cwd="/repo", deny=["**/secrets*"])
-        # issue #25: status answers are -z records (NUL-terminated)
+        # issue #25: status answers are -z records (NUL-terminated);
+        # pre-run baseline CLEAN, the run itself leaves the violation
         fake = FakeRunner(agent_replies=["did it\n"],
                           git_replies={"status":
-                                       " M src/ok.py\x00?? secrets.key\x00"})
+                                       ["",
+                                        " M src/ok.py\x00?? secrets.key\x00"]})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match=r"secrets\.key"):
                 agent.do("goal")
         kinds = [c[0] for c in fake.runs]
-        # rev-parse probe -> harness round -> post-run status check
-        assert kinds == ["git", "opencode", "git"]
+        # rev-parse probe -> pre-run baseline status -> harness round
+        # -> post-run delta status check
+        assert kinds == ["git", "git", "opencode", "git"]
 
     def test_do_allowed_paths_pass_quietly(self):
         agent = Ranger(cwd="/repo", allow=["src/**", "README*"])
@@ -232,6 +287,87 @@ class TestDoRails:
         # pre-check verdict + step ask ran; the do round died at its
         # verifiability probe — never spawned the harness
         assert kinds == ["opencode", "opencode", "git"]
+
+
+# --------------------------------------------------------------------- #
+# audit fix: do() rails judge the DELTA vs a pre-run baseline — never
+# the repo's full current status
+
+class TestDoBaselineDelta:
+    """The post-run check captures a pre-run `{path: XY}` snapshot and
+    flags only entries NEW to it or whose XY pair CHANGED. Pre-existing
+    dirt outside the rails is no longer blamed on the agent."""
+
+    def test_predirty_out_of_rails_files_are_not_blamed(self):
+        # the repo was dirty BEFORE the run; the agent changed nothing
+        # (identical status pre and post) — no false accusation
+        agent = Ranger(cwd="/repo", deny=["**/secrets*"])
+        dirt = " M notes/old_dirt.py\x00?? legacy/scratch.txt\x00"
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": dirt})
+        with harness_and_git(fake):
+            assert agent.do("goal") == "did it"
+
+    def test_agent_touching_a_denied_path_in_the_delta_still_raises(self):
+        # same pre-existing dirt, PLUS a new denied entry the agent made
+        agent = Ranger(cwd="/repo", deny=["**/secrets*"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status":
+                                       [" M notes/old_dirt.py\x00",
+                                        " M notes/old_dirt.py\x00"
+                                        "?? secrets.key\x00"]})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match=r"secrets\.key"):
+                agent.do("goal")
+
+    def test_agent_creating_a_new_out_of_allow_path_raises(self):
+        agent = Ranger(cwd="/repo", allow=["src/**"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status":
+                                       [" M src/ok.py\x00",
+                                        " M src/ok.py\x00?? stray.txt\x00"]})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match=r"stray\.txt"):
+                agent.do("goal")
+
+    def test_status_change_in_the_delta_is_flagged(self):
+        # a path present pre-run whose XY pair CHANGED (worktree edit
+        # became a staged edit) counts as touched by the run — the
+        # delta rule is path + XY, not path alone. The path is outside
+        # allow both times, but only the CHANGED entry is judged.
+        agent = Ranger(cwd="/repo", allow=["docs/**"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status":
+                                       [" M src/ok.py\x00",
+                                        "M  src/ok.py\x00"]})
+        with harness_and_git(fake):
+            with pytest.raises(RangerError, match=r"src/ok\.py"):
+                agent.do("goal")
+
+    def test_subdir_cwd_with_root_dirt_is_not_falsely_accused(self):
+        # status is repo-wide from a subdirectory cwd; root-level dirt
+        # outside the rails existed before the run and stays unblamed
+        agent = Ranger(cwd="/repo/sub", deny=["**/secrets*"])
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={
+                              "rev-parse": "/repo\n",
+                              "status": " M top_dirt.py\x00?? notes/x\x00"})
+        with harness_and_git(fake):
+            assert agent.do("goal") == "did it"
+
+    def test_same_status_predirty_retouch_is_the_stated_blind_spot(self):
+        # honest limit of the delta rule: a file dirty pre-run (" M")
+        # that the agent modifies AGAIN without changing its XY pair
+        # is indistinguishable in porcelain status from pre-existing
+        # dirt — documented, not silently claimed as checked
+        agent = Ranger(cwd="/repo", deny=["**/secrets*"])
+        dirty_denied = " M secrets/key.py\x00"
+        fake = FakeRunner(agent_replies=["did it\n"],
+                          git_replies={"status": dirty_denied})
+        with harness_and_git(fake):
+            # no raise: the (path, XY) delta is empty even though the
+            # agent may have re-touched the pre-dirty denied file
+            assert agent.do("goal") == "did it"
 
 
 # --------------------------------------------------------------------- #
@@ -349,7 +485,8 @@ class TestPorcelainZRecords:
     def test_rename_record_checks_the_new_path(self):
         agent = Ranger(cwd="/repo", deny=["**/deny_target.py"])
         fake = FakeRunner(agent_replies=["did it\n"],
-                          git_replies={"status": RENAMED_STATUS_Z})
+                          git_replies={"status":
+                                       ["", RENAMED_STATUS_Z]})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match=r"deny_target\.py"):
                 agent.do("goal")
@@ -359,7 +496,8 @@ class TestPorcelainZRecords:
         # old side of the `new\0old` pair must be checked too
         agent = Ranger(cwd="/repo", deny=["**/deny_me.py"])
         fake = FakeRunner(agent_replies=["did it\n"],
-                          git_replies={"status": RENAMED_STATUS_Z})
+                          git_replies={"status":
+                                       ["", RENAMED_STATUS_Z]})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match=r"deny_me\.py"):
                 agent.do("goal")
@@ -369,7 +507,8 @@ class TestPorcelainZRecords:
         # the space: an allow=src/** rail flags the exact whole path
         agent = Ranger(cwd="/repo", allow=["src/**"])
         fake = FakeRunner(agent_replies=["did it\n"],
-                          git_replies={"status": RENAMED_STATUS_Z})
+                          git_replies={"status":
+                                       ["", RENAMED_STATUS_Z]})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match=r"another file\.py"):
                 agent.do("goal")
@@ -379,7 +518,8 @@ class TestPorcelainZRecords:
         # phantom `old -> new` path, no false positive, quiet pass
         agent = Ranger(cwd="/repo", allow=["**"], deny=["**/secrets*"])
         fake = FakeRunner(agent_replies=["did it\n"],
-                          git_replies={"status": RENAMED_STATUS_Z})
+                          git_replies={"status":
+                                       ["", RENAMED_STATUS_Z]})
         with harness_and_git(fake):
             assert agent.do("goal") == "did it"
 
@@ -388,7 +528,8 @@ class TestPorcelainZRecords:
         # matches a plain glob byte-for-byte, not a "\303\274" escape
         agent = Ranger(cwd="/repo", deny=["**/ünïcode.py"])
         fake = FakeRunner(agent_replies=["did it\n"],
-                          git_replies={"status": UNICODE_STATUS_Z})
+                          git_replies={"status":
+                                       ["", UNICODE_STATUS_Z]})
         with harness_and_git(fake):
             with pytest.raises(RangerError, match="ünïcode.py"):
                 agent.do("goal")

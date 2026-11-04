@@ -277,6 +277,29 @@ class TestRunAsyncBehavior:
             assert run(agent.ask_async("hi")) == "done"
         assert len(calls) == 2                # 1 drift attempt + 1 retry
 
+    def test_codex_schema_drift_is_refused_and_retried_async(self):
+        """Audit fix async twin: codex always emits --json events; a
+        drifted stream with ZERO recognition raises RangerHarnessError
+        inside the async retry loop, then a valid stream recovers."""
+        agent = Ranger(model="m", backend="codex", cwd=".", retries=1,
+                       memory=False)
+        drift = ('{"kind":"session.begin","sid":"c"}\n').encode()
+        good = ('{"type":"thread.started","thread_id":"th-1"}\n'
+                '{"type":"item.completed","item":{"type":"agent_message",'
+                '"text":"done"}}\n').encode()
+        calls = []
+        good2, _ = make_exec_factory(stdout=good)
+
+        async def drift_then_good(*cmd, **kw):
+            calls.append(1)
+            if len(calls) == 1:
+                return FakeProc(stdout=drift)
+            return await good2(*cmd, **kw)
+
+        with mock.patch(SPAWN, side_effect=drift_then_good):
+            assert run(agent.ask_async("hi")) == "done"
+        assert len(calls) == 2                # 1 drift attempt + 1 retry
+
     def test_missing_cli_is_harness_error_with_install_hint(self):
         agent = Ranger(model="m", cwd=".", backend="claude")
 
@@ -355,6 +378,22 @@ class TestRunAsyncBehavior:
         with mock.patch(SPAWN, side_effect=factory):
             with pytest.raises(RangerError, match="did not modify"):
                 run(agent.edit_async(target, "double it"))
+
+    def test_async_twins_enforce_the_cwd_relative_rail_forms(self, tmp_path):
+        """Audit fix twins: a cwd-relative deny glob refused edit_async
+        and write_async before any spawn — the shared _edit_spec/
+        _write_spec seam passes root, so the twins cannot bypass it."""
+        secret = tmp_path / "secrets" / "x.py"
+        secret.parent.mkdir()
+        secret.write_text("k=v\n", encoding="utf-8")
+        agent = Ranger(cwd=tmp_path, deny=["secrets/**"])
+        factory, calls = make_exec_factory()
+        with mock.patch(SPAWN, side_effect=factory):
+            with pytest.raises(RangerError, match="denied"):
+                run(agent.edit_async("secrets/x.py", "bump"))
+            with pytest.raises(RangerError, match="denied"):
+                run(agent.write_async("report", path="secrets/out.md"))
+        assert calls == []               # neither twin ever spawned
 
     def test_no_spinner_side_effects_on_stderr(self, capsys):
         agent = Ranger(model="m", cwd=".")

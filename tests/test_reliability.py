@@ -243,6 +243,102 @@ class TestSchemaDriftGuard:
             assert agent.ask("hello") == self.DRIFT.strip()
 
 
+class TestCodexSchemaDriftGuard:
+    """Issue #32 extended (audit fix): codex ALWAYS answers from an
+    event stream (--json even without stats), so a format drift would
+    silently answer "" everywhere. The guard fires on non-empty stdout
+    where the scan recognized NO text, NO thread id and NO usage —
+    noise around any recognized event stays legal, matching codex's
+    documented "non-JSON noise is never fatal" line."""
+
+    # event kinds the codex scanner does not know
+    DRIFT = ('{"kind":"session.begin","sid":"c_123"}\n'
+             '{"event":"assistant_chunk","delta":"hello world"}\n')
+
+    # the frozen known codex event shapes (byte-identical happy path)
+    VALID = ('{"type":"thread.started","thread_id":"th_9"}\n'
+             '{"type":"item.completed","item":{"type":"agent_message",'
+             '"text":"all fine"}}\n'
+             '{"type":"turn.completed","usage":{"input_tokens":1,'
+             '"output_tokens":2}}\n')
+
+    # non-JSON noise AROUND a recognized event: never fatal
+    NOISY = ('some banner line\n'
+             '{"type":"thread.started","thread_id":"th_7"}\n'
+             'progress: 50%\n'
+             '{"type":"item.completed","item":{"type":"agent_message",'
+             '"text":"noisy but answered"}}\n')
+
+    def test_drifted_events_raise_with_clipped_tail(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.DRIFT)):
+            with pytest.raises(RangerHarnessError,
+                               match="no parseable output") as exc:
+                agent.ask("hello")
+        msg = str(exc.value)
+        assert "codex returned no parseable output events" in msg
+        assert "schema drift" in msg
+        assert '"kind":"session.begin"' in msg      # clipped tail rides
+
+    def test_drift_raises_even_without_stats(self):
+        # codex runs --json regardless of stats: stdout is never the
+        # answer, so the guard must hold in plain mode too
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False,
+                       stats=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.DRIFT)):
+            with pytest.raises(RangerHarnessError, match="schema drift"):
+                agent.ask("hello")
+
+    def test_noisy_but_recognized_output_is_never_fatal(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.NOISY)):
+            assert agent.ask("hello") == "noisy but answered"
+
+    def test_valid_events_stay_byte_identical(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False,
+                       stats=True)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.VALID)):
+            assert agent.ask("hello") == "all fine"
+        assert agent.last["session"] == "th_9"
+        assert agent.last["input_tokens"] == 1
+
+    def test_empty_stdout_success_stays_legal(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("")):
+            assert agent.ask("hello") == ""
+
+    def test_nonzero_exit_keeps_its_own_error_shape(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False,
+                       retries=0)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.DRIFT, stderr="boom",
+                                              returncode=3)):
+            with pytest.raises(RangerHarnessError,
+                               match=r"run failed \(exit 3\)"):
+                agent.ask("hello")
+
+    def test_drift_retries_like_other_harness_failures_then_recovers(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False,
+                       retries=1)
+        outcomes = [fake_run(self.DRIFT), fake_run(self.VALID)]
+        with mock.patch("ranger._engine._Popen", side_effect=outcomes):
+            assert agent.ask("hello") == "all fine"
+
+    def test_drift_exhausting_retries_still_raises(self):
+        agent = Ranger(model="m", backend="codex", cwd=".", memory=False,
+                       retries=1)
+        with mock.patch("ranger._engine._Popen",
+                        side_effect=[fake_run(self.DRIFT)] * 2) as spawn:
+            with pytest.raises(RangerHarnessError, match="no parseable"):
+                agent.ask("hello")
+        assert spawn.call_count == 2          # 1 attempt + 1 retry
+
+
 class TestRetries:
     def test_retries_survives_failing_then_succeeding_transport(self):
         agent = Ranger(cwd=".", retries=2)

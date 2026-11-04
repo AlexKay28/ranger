@@ -40,7 +40,7 @@ pointed the agent.
 | `ranger.Ranger` | class | The agent class (below). |
 | `ranger.RangerError` | exception | Subclass of `RuntimeError`; the base of ranger's exception taxonomy. |
 | `ranger.RangerTimeout` | exception | Subclass of `RangerError`; a run exceeded its `timeout`. |
-| `ranger.RangerHarnessError` | exception | Subclass of `RangerError`; the harness CLI is missing, could not be spawned, exited with an unexpected failure, or (opencode stats mode) produced output whose event schema matched nothing (schema drift). |
+| `ranger.RangerHarnessError` | exception | Subclass of `RangerError`; the harness CLI is missing, could not be spawned, exited with an unexpected failure, or (opencode stats mode; codex always) produced output whose event schema matched nothing (schema drift). |
 | `ranger.DEFAULT_MODEL` | str | Package-default model ID (opencode backend). |
 | `ranger.backends()` | function | Sorted names of all registered harness backends. |
 | `ranger.register_backend(name, cls)` | function | Register a custom harness adapter — see Backends below. |
@@ -909,11 +909,18 @@ Mechanics, pinned by mocked tests:
 2. **Target-less mutation** (`do`) cannot know its paths up front, so
    with rails active ranger REQUIRES a verifiable working tree: cwd
    must be a git repo (probed before the spawn — an unverifiable
-   mutation is refused before any harness runs), and after the round
-   `git status --porcelain` is checked against the rails — a violation
-   raises `RangerError` naming the paths honestly. The tree is LEFT
-   MUTATED (a raise is not a rollback): pair rails with
-   `snapshots=True`/`rollback()` for recovery.
+   mutation is refused before any harness runs). Ranger then snapshots
+   `git status --porcelain` **before** the round and checks the
+   **delta** after it: only paths that are NEW to that pre-run baseline
+   — or whose XY status pair CHANGED versus it — are judged against
+   the rails. Pre-existing dirt outside the rails is never blamed on
+   the agent; a violation raises `RangerError` naming the paths
+   honestly. Stated limit: a file already modified before the run that
+   the agent modifies AGAIN without changing its status pair (both
+   snapshots say ` M`) is indistinguishable in porcelain status from
+   the old dirt and passes — judging by `git status` alone cannot see
+   more. The tree is LEFT MUTATED (a raise is not a rollback): pair
+   rails with `snapshots=True`/`rollback()` for recovery.
 3. **Per-call overrides fully replace** the constructor lists
    (`do(goal, allow=[...])`), and malformed specs (`TypeError`) are
    rejected before any spawn — on every command, since validation
@@ -1048,7 +1055,9 @@ Capability map:
 | `gate()` | harness-free — plain subprocess on every backend | same | same | same | same |
 
 codex runs always capture in JSON (its stream is JSONL; ranger parses
-`agent_message` items). opencode captures plain text unless `stats=True`.
+`agent_message` items — and refuses a non-empty stream that matches no
+known event shape anywhere, see the schema-drift guard under
+[Errors](#errors)). opencode captures plain text unless `stats=True`.
 Pi runs one-shot via `--print` (final assistant text on stdout);
 Claude Code runs one non-interactive turn via `claude -p` with
 `--output-format json` (ranger parses the `result`, `session_id`,
@@ -1167,8 +1176,9 @@ keep working:
 
 - `RangerTimeout` — a run exceeded its `timeout`.
 - `RangerHarnessError` — the harness CLI is missing (not on PATH),
-  could not be spawned, exited with an unexpected failure, or — opencode
-  JSON mode only — produced **no parseable output events** (schema
+  could not be spawned, exited with an unexpected failure, or — in a
+  structured-output mode (opencode JSON mode, and codex, which always
+  runs `--json`) — produced **no parseable output events** (schema
   drift; see below).
 
 Schema-drift guard (issue #32): in opencode's JSON mode (`stats=True`,
@@ -1176,6 +1186,13 @@ Schema-drift guard (issue #32): in opencode's JSON mode (`stats=True`,
 zero recognized text parts AND no session id raises
 `RangerHarnessError` with the clipped raw tail — a harness update that
 changes the event shape is refused honestly instead of answering `""`.
+The same guard covers **codex**, which always answers from an event
+stream (`--json` even without stats): non-empty stdout where the scan
+recognizes NO text, NO thread id and NO usage, anywhere, is refused
+with the clipped raw tail. This does not contradict codex's "non-JSON
+noise is never fatal" line: noise AROUND a recognized event (a thread
+id, a usage record, an agent message) stays legal, as does empty
+stdout — only total non-recognition fires.
 The line is drawn at *recognition*, not answer length: empty stdout
 with exit 0, and a recognized session with zero text parts (a model
 that legitimately answered nothing), both stay legal `""` answers.
@@ -1194,6 +1211,7 @@ any later run.
 | harness process could not be spawned (permissions, ENOEXEC, ...) | `RangerHarnessError` with cause |
 | run exits non-zero (bad model, harness error) | `RangerHarnessError` with stderr |
 | opencode stats run exits 0, output non-empty but no JSONL event shape matches (schema drift) | `RangerHarnessError` with the clipped raw stdout tail |
+| codex run exits 0, output non-empty but no event shape matches anywhere (no text, no thread id, no usage — schema drift) | `RangerHarnessError` with the clipped raw stdout tail |
 | run exceeds `timeout` | `RangerTimeout("… timed out …")` |
 | `write()` target is missing **or not a regular file** after the run | `RangerError` |
 | `check()` unparseable, unconfident or contradictory verdict | `RangerError` |

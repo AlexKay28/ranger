@@ -1016,3 +1016,17 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   commit() contract honestly says repo-wide staging (pinned argv).
   14 new tests (472 -> 486). 486 green, check exit 0, scan 9.40,
   MI all-A.
+
+- **Cycle 12 — safety seams honest (audit cycle C).** do() rails
+  gained a pre-run baseline: violations are judged on the DELTA vs
+  the pre-run porcelain status, so a pre-dirty repo no longer gets
+  its unrelated files blamed on the agent (live-verified against
+  real git: pre-dirty ignored, in-run out-of-rails write caught).
+  The XY-pair re-modification blind spot is stated in the docstring
+  and pinned, not hidden. write/edit rails now pass root= so the
+  cwd-relative glob form matches like do() — deny=["secrets/**"]
+  bites edit() (was a silent bypass). Codex joined the #32
+  schema-drift guard: total non-recognition raises with the clipped
+  tail; noise around a recognized event stays non-fatal (pinned).
+  20 new tests (486 -> 506). 506 green, check exit 0, scan 9.40,
+  MI all-A.

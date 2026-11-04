@@ -39,8 +39,10 @@ spawned harness child after the `env=` overlay (an explicit `env={...}`
 cannot bypass it; `env_deny=None` keeps today's byte-identical
 inheritance; keep a policy with `with_config(env_deny=[...])`).
 Targeted edits are checked before any subprocess spawns; `do()` probes
-git-verifiability up front and audits `git status` against the rails after.
-See the Safety rails section of docs/API.md.
+git-verifiability up front, snapshots the pre-run `git status`, and
+audits only the DELTA of that snapshot (paths new to it, or whose XY
+status pair changed) against the rails after — pre-existing dirt is
+never blamed on the agent. See the Safety rails section of docs/API.md.
 
 
 ### `agent.context_summarize() -> str`
