@@ -1,6 +1,8 @@
 # Ranger command catalog
 
-Every Ranger method is **one headless `opencode run`** wrapped in a prompt
+Every Ranger method is **one headless harness CLI run** (`opencode run`
+by default; `codex`, `pi`, `claude` and `openhands` via `backend=`),
+wrapped in a prompt
 template. Methods only differ in (a) the prompt contract with the agent and
 (b) the post-check Python performs on the result (e.g. "file must exist").
 
@@ -24,8 +26,13 @@ immediately. Read it instead of hardcoding backend names.
 
 ### `agent.with_config(**overrides) -> Ranger`
 Immutable-configured copy of the agent — keep a fast one and a smart one side
-by side. Accepts any of `model`, `timeout`, `auto`, `session`, `agent`, `title`,
-`thinking`, `cwd`.
+by side. Accepts any of `model`, `timeout`, `auto`, `session`, `agent`,
+`mode`, `title`, `thinking`, `pretty`, `memory`, `memory_budget`, `skills`,
+`effort`, `stats`, `backend`, `retries`, `env`, `allow`, `deny`, `dry_run`,
+`skills_budget`, `evidence`, `env_deny` — every per-call run option — plus
+`cwd` (agent identity). Unknown keys raise `TypeError`; the policy-only trio
+`skills_budget`/`evidence`/`env_deny` has no constructor keyword, so
+`with_config` is its only policy path.
 
 ### Per-call overrides
 Every command method takes the same run settings as keywords for that single

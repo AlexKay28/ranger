@@ -426,7 +426,7 @@ class LoopsMixin:
         return report, ok, last_gate
 
     def _resolve_loop(self, goal, plan_text, gate_cmd, condition, ov,
-                      max_iter, progress, pre_gate, snap_tag,
+                      max_iter, progress, snap_tag,
                       rollback_on_fail, may_continue):
         """Closures + bounded rounds for resolve(); composes FAILED.
 
@@ -534,7 +534,7 @@ class LoopsMixin:
                     "iterations": 0}
         may_continue = self._budget_guard(token_budget)
         return self._resolve_loop(goal, plan_text, gate_cmd, condition,
-                                  ov, max_iter, progress, pre_gate,
+                                  ov, max_iter, progress,
                                   snap_tag, rollback_on_fail, may_continue)
 
     def _fix_loop(self, problem, diagnosis, gate_cmd, condition, ov,

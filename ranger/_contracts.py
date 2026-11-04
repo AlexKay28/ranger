@@ -8,6 +8,9 @@ from pathlib import Path
 
 from ._util import RangerError, ANSWER_EXCERPT, ROW_EXCERPT
 
+# Commands whose answers must be pure facts about the world, never colored
+# by conversation history (paradigm law: context memory colors dialogues,
+# never facts). Recall is skipped for these; recording still happens.
 _PURE_LABELS = frozenset({"check", "critique", "diagnose", "extract", "lint",
                           "read", "search", "summarize", "test", "trace"})
 

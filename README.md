@@ -32,8 +32,9 @@ The distribution is named **`rangers`** on PyPI; the Python import remains
 Maintainers: see the [publishing checklist](docs/PUBLISHING.md) before any
 release.
 
-Requires a harness CLI on PATH: [opencode](https://opencode.ai) (default
-backend) and/or [codex](https://github.com/openai/codex). On a distro-pegged
+Requires a harness CLI on PATH — one is enough: [opencode](https://opencode.ai)
+(default backend), [codex](https://github.com/openai/codex), `pi`, `claude` or
+`openhands` (see the Backends section). On a distro-pegged
 pip (e.g. 22.x) an editable install can fail with "build backend is missing
 the build_editable hook" — fix the tool, not the package:
 `pip install -U pip`, then retry.

@@ -26,7 +26,7 @@ it returns. Python, not an agent runtime, owns the control flow.
 | Make a filesystem change | `do(goal)` | A claim that a change happened |
 | Change one existing file only | `edit(file, instruction)` | `do()` free rein |
 | Deterministic acceptance | `gate(shell_command)` | An agent's opinion |
-| Bound or preview a mutation | `allow=[globs]` / `deny=[globs]` / `dry_run=True` (per call or ctor; deny wins; pure-Python path predicates) | prompt instructions as "safety" (law-4 laundering) |
+| Bound or preview a mutation | `allow=[globs]` / `deny=[globs]` / `dry_run=True` (per call or `with_config(dry_run=True)` policy; deny wins; pure-Python path predicates) | prompt instructions as "safety" (law-4 laundering) |
 | Recoverable mutation | `snapshot(tag=...)` before, `rollback(tag)` after — or `until(..., rollback_on_fail=True)` / `fix(..., rollback_on_fail=True)` | `git checkout` hand-rolled; hoping nothing breaks |
 | Produce one document | `write(task, path=...)` | Parsing prose for a filename |
 | Read-only codebase findings | `search(goal)` / `summarize(file)` / `read(file, question)` / `trace(symbol)` / `test()` / `lint()` / `diagnose(error)` / `critique(file_or_diff)` / `extract(goal, keys=[...])` (typed JSON rows) | `do()` |
@@ -145,7 +145,8 @@ plain `asyncio`, not a hidden runtime: `asyncio.run(agent.ask_async(...))`
 or `agent.par_map(calls, max_concurrency=8)` (one aligned slot per call,
 honest per-item exception instances, bounded subprocess concurrency,
 frozen prompts byte-identical to the sync commands). Cancelling kills the
-CLI subtree. The sync methods stay the primary API — no streaming, no chat.
+CLI subtree (POSIX: the whole process group; on Windows only the direct
+child). The sync methods stay the primary API — no streaming, no chat.
 
 ## Contributing to this repository
 

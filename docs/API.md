@@ -14,8 +14,9 @@ Version 0.9.0 · Module: `ranger` · Single class: `ranger.Ranger`
 pip install -e .          # or: pip install .
 ```
 
-Requires a harness CLI on PATH: [opencode](https://opencode.ai) (the
-default backend) and/or [codex](https://github.com/openai/codex) — opencode
+Requires a harness CLI on PATH — one is enough: [opencode](https://opencode.ai)
+(the default backend), [codex](https://github.com/openai/codex), `pi`, `claude`
+or `openhands` (see the Backends section below); opencode
 is only needed if you actually use the default backend. On a distro-pegged
 pip (e.g. 22.x) an editable install can fail with "build backend is missing
 the build_editable hook" — fix the tool, not the package:
@@ -178,8 +179,10 @@ immediately — typos fail loudly, never silently. Priority rules:
 
 Returns a **copy** of the agent with settings overridden (the original is
 untouched). Accepts every constructor run-setting plus `cwd` (normalized to
-an absolute path; `cwd=None` restores the process-cwd default) and
-`memory_budget`. Unknown keys raise `TypeError`. The copy takes a
+an absolute path; `cwd=None` restores the process-cwd default) and the
+per-call run options (`memory_budget`, `skills_budget`, `dry_run`,
+`evidence`, `env_deny`) — everything in `_RUN_KEYS`. Unknown keys raise
+`TypeError`. The copy takes a
 **snapshot** of `context` and `last` — the two agents' histories diverge
 from the copy point on. Per-agent mutable state is never shared either:
 the copy gets its own `costs` ledger, `snapshot_log`, and
@@ -1142,6 +1145,9 @@ raises `RangerError`. Honesty about the boundary:
 - `gate()` commands run in their **own process group**: a timeout (returns
   `False`) or an interrupt (re-raises) kills the whole group — no orphaned
   pipeline keeps running.
+- On Windows, containment degrades honestly (no `os.killpg`): only the
+  direct child process is killed and grandchild processes may survive —
+  POSIX platforms get the full process-group kill.
 - The harness CLIs run in their own process group too, but they are not
   always the whole story: opencode executes through a background
   **service**, codex through local subprocesses. A stop cancels the CLI

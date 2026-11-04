@@ -43,6 +43,7 @@ class FakePopen:
         self.stderr = stderr
         self.communicate_exc = communicate_exc
         self.communicate_calls = []        # timeouts seen, in call order
+        self.kills = 0        # direct-child kill() calls (no-killpg path)
 
     def communicate(self, timeout=None):
         """Replay the recorded pair — or raise, faking timeout/interrupt."""
@@ -50,6 +51,10 @@ class FakePopen:
         if self.communicate_exc is not None:
             raise self.communicate_exc
         return self.stdout, self.stderr
+
+    def kill(self):
+        """The Windows degrade path: no killpg → kill the direct child."""
+        self.kills += 1
 
 
 class AgentPopenFake:

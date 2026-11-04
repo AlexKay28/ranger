@@ -616,7 +616,3 @@ register_backend("codex", _CodexBackend)
 register_backend("pi", _PiBackend)
 register_backend("openhands", _OpenHandsBackend)
 register_backend("claude", _ClaudeBackend)
-
-# Commands whose answers must be pure facts about the world, never colored
-# by conversation history (paradigm law: context memory colors dialogues,
-# never facts). Recall is skipped for these; recording still happens.

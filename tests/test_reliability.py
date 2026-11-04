@@ -8,6 +8,7 @@ files) keep raising plain RangerError. All subprocess calls are mocked —
 no live harness runs.
 """
 
+import asyncio
 import logging
 import os
 import signal
@@ -18,6 +19,7 @@ import pytest
 
 import ranger
 from ranger import Ranger, RangerError, RangerHarnessError, RangerTimeout
+from ranger._util import _kill_tree
 
 from _fakes import FakePopen
 
@@ -131,6 +133,54 @@ class TestHarnessFailures:
             with pytest.raises(KeyboardInterrupt):
                 agent.ask("hello")
         killpg.assert_called_once_with(hung.pid, signal.SIGKILL)
+
+
+class TestNoKillpgDegradesToDirectChildKill:
+    """Second-pass audit: os.killpg does not exist on Windows — the
+    kill-tree paths must degrade honestly to killing the direct child,
+    never raise AttributeError and mask the original RangerTimeout /
+    KeyboardInterrupt."""
+
+    def test_sync_kill_tree_without_killpg_kills_direct_child(self,
+                                                              monkeypatch):
+        monkeypatch.delattr(os, "killpg", raising=False)
+        hung = FakePopen()
+        _kill_tree(hung)          # must not raise AttributeError
+        assert hung.kills == 1    # the direct child died instead
+
+    def test_sync_timeout_without_killpg_still_raises_timeout(self,
+                                                              monkeypatch):
+        # the REAL sync exit path with no killpg: containment degrades,
+        # the timeout still surfaces as RangerTimeout
+        agent = Ranger(cwd=".", timeout=5, retries=0)
+        hung = FakePopen(
+            communicate_exc=subprocess.TimeoutExpired(cmd="x", timeout=5))
+        monkeypatch.delattr(os, "killpg", raising=False)
+        with mock.patch("ranger._engine._Popen", return_value=hung):
+            with pytest.raises(RangerTimeout, match="timed out after 5"):
+                agent.ask("hello")
+        assert hung.kills == 1        # degraded blast hit the direct child
+        assert hung.communicate_calls  # the child was reaped too
+
+    def test_async_kill_without_killpg_kills_direct_child(self, monkeypatch):
+        monkeypatch.delattr(os, "killpg", raising=False)
+        agent = Ranger(cwd=".")
+
+        class FakeAsyncProc:
+            pid = 4242
+
+            def __init__(self):
+                self.kills = 0
+
+            def kill(self):
+                self.kills += 1
+
+            async def wait(self):
+                return 0
+
+        proc = FakeAsyncProc()
+        asyncio.run(agent._kill_async(proc))   # must not raise AttributeError
+        assert proc.kills == 1
 
 
 class TestContractFailuresStayPlain:

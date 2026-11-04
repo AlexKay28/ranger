@@ -201,6 +201,19 @@ class EngineMixin:
             raise ValueError(
                 f"evidence must be a bool, got {evidence!r}")
 
+    @staticmethod
+    def _validate_ov_keys(ov: dict) -> None:
+        """Refuse unknown per-call keywords — pure, no world touched.
+
+        The exact check `_resolve_run_options` runs at its seam, lifted
+        out so the mutating commands can call it BEFORE any git probe
+        or auto-snapshot: the seam's own law says all validation comes
+        BEFORE any outside world is touched.
+        """
+        unknown = set(ov) - set(_RUN_KEYS)
+        if unknown:
+            raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
+
     def _resolve_run_options(self, label: str, ov: dict) -> tuple:
         """Merge ctor + per-call run options into `o`; validate everything.
 
@@ -210,9 +223,7 @@ class EngineMixin:
         """
         opts = self._merged_run_options(
             {k: getattr(self, k) for k in _RUN_KEYS}, ov)
-        unknown = set(ov) - set(_RUN_KEYS)
-        if unknown:
-            raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
+        self._validate_ov_keys(ov)
         self._validate_skills_budget(opts.get("skills_budget"))
         self._validate_evidence(opts.get("evidence"))
         # the env_deny rail validates on the shared seam too, so even a
@@ -435,10 +446,17 @@ class EngineMixin:
 
     async def _kill_async(self, proc) -> None:
         """Kill one async CLI subprocess's whole process group, wait."""
-        # mirrors _kill_tree: start_new_session made the child its own
-        # process-group leader, so one killpg reaches its whole tree
+        # mirrors _kill_tree, including its honest platform limit: where
+        # os.killpg is absent (Windows) containment degrades to killing
+        # the direct child — grandchildren may survive; POSIX platforms
+        # keep the full process-group kill (start_new_session made the
+        # child its own process-group leader)
+        killpg = getattr(os, "killpg", None)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            if killpg is None:
+                proc.kill()       # Windows degradation — see docstring
+            else:
+                killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             pass
         try:

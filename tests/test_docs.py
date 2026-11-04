@@ -21,6 +21,7 @@ import pytest
 
 import ranger
 from ranger import Ranger
+from ranger._util import _RUN_KEYS
 
 REPO = Path(__file__).resolve().parent.parent
 API_TEXT = (REPO / "docs" / "API.md").read_text()
@@ -28,6 +29,10 @@ README_TEXT = (REPO / "README.md").read_text()
 COMMANDS_TEXT = (REPO / "docs" / "commands.md").read_text()
 CHEATSHEET_SOURCE = (REPO / "scripts" / "cheatsheet.py").read_text()
 SKILL_TEXT = (REPO / "SKILL.md").read_text()
+
+# Backends the PACKAGE itself ships, snapshotted at import time (a test
+# registering a custom backend must not turn this pin order-dependent).
+BUILTIN_BACKENDS = frozenset(ranger._BACKEND_CLASSES)
 
 PUBLIC_METHODS = [
     name for name, _ in inspect.getmembers(Ranger, predicate=inspect.isfunction)
@@ -183,6 +188,31 @@ def test_commands_catalog_planned_tier_only_lists_unshipped():
     shipped = set(PUBLIC_METHODS) | {"debate"}
     assert not (listed & shipped), (
         f"commands.md lists shipped methods as planned: {listed & shipped}"
+    )
+
+
+def test_commands_with_config_list_pins_every_run_key():
+    """The with_config paragraph must enumerate the REAL key set.
+
+    The policy-only trio `skills_budget`/`evidence`/`env_deny` has no
+    constructor keyword, so with_config docs are its ONLY policy path —
+    a drift here hides those keys entirely.
+    """
+    with_config_para = COMMANDS_TEXT.split("`agent.with_config")[1].split("###")[0]
+    missing = [k for k in _RUN_KEYS if f"`{k}`" not in with_config_para]
+    assert not missing, (
+        f"commands.md with_config list misses keys: {missing} — regenerate "
+        f"the list from ranger._util._RUN_KEYS (plus cwd)"
+    )
+
+
+def test_commands_backend_enumeration_covers_every_shipped_backend():
+    """Doc enumerations must not silently drop a registered backend —
+    the catalog once omitted `claude` while the package shipped it."""
+    missing = [b for b in sorted(BUILTIN_BACKENDS) if b not in COMMANDS_TEXT]
+    assert not missing, (
+        f"docs/commands.md backend enumeration misses registered "
+        f"backends: {missing} — sync it with ranger._backends"
     )
 
 

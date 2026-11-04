@@ -96,16 +96,21 @@ def _warn_default_model() -> None:
 
 class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
              CommandsMixin, EngineMixin):
-    """A runnable coding agent backed by the opencode harness.
+    """A runnable coding agent backed by a headless harness CLI.
 
-    Each method call spawns one headless `opencode run` in the working
-    directory and returns the agent's final answer as a string.
+    Each method call spawns ONE headless harness run (`opencode run`
+    by default; codex/pi/claude/openhands via `backend=`) in the
+    working directory and returns the agent's final answer as a string.
 
     Args:
         model: opencode model ID in "provider/model" form; defaults to
             the RANGER_MODEL environment variable, then the package
             default (see `Ranger.models()`).
-        cwd: working directory for the agent (defaults to os.getcwd()).
+        cwd: working directory for the agent. `None` (default) inherits:
+            the harness child runs in the Python process's CURRENT
+            working directory (wherever it is at call time, with no
+            `PWD` overlay); passing a path pins the agent to that
+            directory for the instance's lifetime.
         timeout: seconds to wait for each run (default 10 min).
         auto: auto-approve tool permissions so the agent can actually
             read/write files without an interactive prompt.
@@ -135,7 +140,7 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
             `agent.last` (wall/model time, part count, answer size,
             opencode session id).
         backend: which harness to drive — "opencode" (default), "codex",
-            "pi" or "openhands".
+            "pi", "claude" or "openhands".
             The public API is identical; harness differences (CLI flags,
             sessions, stats schemas) are absorbed internally. See the
             Backends section of docs/API.md for the exact behavior map.
@@ -169,8 +174,12 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
             `snapshot()`/`rollback()` calls). Default off so the per-call
             subprocess accounting stays exact.
 
-    Every command method also accepts any of these as a keyword override for
-    that single call, e.g. `agent.do(goal, model=..., timeout=...)`.
+    Every command method also accepts any of the per-run settings above
+    as a keyword override for that single call, e.g.
+    `agent.do(goal, model=..., timeout=...)` — except `cwd` and
+    `snapshots`: `cwd` is agent identity (constructor/`with_config`
+    only), `snapshots` is constructor-level policy (no per-call
+    override, no `with_config` key).
     """
 
     #: per-run default for the opt-in skill-file excerpt cap (chars):

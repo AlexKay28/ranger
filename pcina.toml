@@ -19,7 +19,7 @@
 # first — never bump a budget to silence an unreviewed regression.
 
 [budgets]
-max_cc = 14              # max today: par_map + _OpenCodeBackend.parse_output
+max_cc = 14              # max today: CommandsMixin.with_config (cc=13)
 max_fn_loc = 86          # max today: until() (39 of them docstring)
 max_params = 22          # max today: Ranger.__init__ (public ctor)
 max_nesting = 3          # default, no violations

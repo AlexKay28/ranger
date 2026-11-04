@@ -94,6 +94,17 @@ class TestSpecValidation:
         gitrun.assert_not_called()      # neither seam ever spawned
         spawn.assert_not_called()
 
+    def test_unknown_keyword_beats_the_rails_git_probe(self):
+        # second-pass audit: with rails ACTIVE, do() used to run the
+        # rev-parse verifiability probe BEFORE the seam's TypeError —
+        # validation must precede any outside-world touch
+        agent = Ranger(cwd=".", allow=["src/**"])
+        fake = FakeRunner()
+        with harness_and_git(fake):
+            with pytest.raises(TypeError, match="unknown run option"):
+                agent.do("goal", badkey=1)
+        assert fake.runs == []     # no git probe, no snapshot, no spawn
+
 
 # --------------------------------------------------------------------- #
 # edit()/write(): known targets — pre-spawn path predicates

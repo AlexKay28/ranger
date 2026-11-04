@@ -558,6 +558,18 @@ class TestAutoSnapshotAndLoops:
             assert agent.do("fix things") == "did it"   # skipped, logged
         assert [s["tag"] for s in agent.snapshot_log] == ["pre-do-1"]
 
+    def test_unknown_option_fails_before_the_snapshot(self):
+        # second-pass audit: _write_spec used to run the pre-write
+        # auto-snapshot (a REAL ref write) before the run seam rejected
+        # the typo — a refused call must never leave a phantom ref
+        agent = Ranger(cwd="/repo", snapshots=True)
+        fake = FakeGit()
+        with harness_and_git(fake):
+            with pytest.raises(TypeError, match="unknown run option"):
+                agent.write("x", tiemout=5)   # typo'd timeout
+        assert agent.snapshot_log == []   # no phantom snapshot recorded
+        assert git_calls(fake) == []      # and no git ran at all
+
 
 # --------------------------------------------------------------------- #
 # commit() — the honest REPO-WIDE staging contract (audit C)

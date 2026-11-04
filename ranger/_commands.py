@@ -234,6 +234,7 @@ class CommandsMixin:
         + pre-write auto-snapshot in exactly the order write() always
         had. Sync and async twins can never drift past this seam.
         """
+        self._validate_ov_keys(ov)  # unknown keys fail BEFORE the snapshot
         if path is None:
             slug = re.sub(r"[^a-z0-9_-]+", "_", task.strip().lower())[:SLUG_CLIP]
             slug = slug.strip("_-") or "ranger_out"
@@ -347,6 +348,7 @@ class CommandsMixin:
         `Ranger(snapshots=True)` a best-effort git snapshot is taken
         first, making the round recoverable via `rollback()`.
         """
+        self._validate_ov_keys(ov)  # unknown keys fail BEFORE probe/snapshot
         allow, deny, dry, root, baseline = self._guard_do(ov)
         self._auto_snapshot("pre-do")
         report = self._run(_do_prompt(goal), label="do", **ov)
@@ -362,6 +364,7 @@ class CommandsMixin:
         always had. Returns the prompt, the pre-run mtime and the
         dry_run flag so the shared postcheck sees one spec.
         """
+        self._validate_ov_keys(ov)  # unknown keys fail BEFORE the snapshot
         target = Path(file)
         if not target.is_absolute():
             target = Path(self.cwd or Path.cwd()) / target
@@ -587,6 +590,7 @@ class CommandsMixin:
 
     async def do_async(self, goal: str, **ov) -> str:
         """Async twin of do(): same contract, same frozen prompt."""
+        self._validate_ov_keys(ov)  # unknown keys fail BEFORE probe/snapshot
         allow, deny, dry, root, baseline = self._guard_do(ov)
         self._auto_snapshot("pre-do")
         report = await self._run_async(_do_prompt(goal), label="do", **ov)

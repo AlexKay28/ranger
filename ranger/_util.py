@@ -226,11 +226,22 @@ def _kill_tree(proc: "subprocess.Popen") -> None:
     Best-effort by design: a dead or already-reaped process must not
     turn cleanup into a new failure. Reap afterwards so the child never
     lingers as a zombie.
+
+    Honest platform limit: without ``os.killpg`` (Windows) containment
+    degrades to killing the DIRECT child only — grandchildren the CLI
+    spawned may escape the blast; POSIX platforms keep the full
+    process-group kill.
     """
+    killpg = getattr(os, "killpg", None)
     try:
-        # start_new_session=True made proc.pid the process-group leader,
-        # so one killpg reaches the shell AND its entire pipeline
-        os.killpg(proc.pid, signal.SIGKILL)
+        if killpg is None:
+            # Windows degradation: no process groups to signal — the
+            # direct child dies, grandchildren may survive
+            proc.kill()
+        else:
+            # start_new_session=True made proc.pid the process-group
+            # leader, so one killpg reaches the shell AND its pipeline
+            killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
         pass
     try:

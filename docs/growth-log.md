@@ -1030,3 +1030,19 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   tail; noise around a recognized event stays non-fatal (pinned).
   20 new tests (486 -> 506). 506 green, check exit 0, scan 9.40,
   MI all-A.
+
+- **Cycle 13 — the converge sweep (audit cycle D).** Unknown-option
+  validation moved to where the seam law says it lives: _validate_
+  ov_keys at the top of do/write/edit (before any git probe or
+  snapshot) — a refused call can no longer leave a phantom snapshot
+  ref (pinned). Kill paths degrade honestly on Windows: without
+  os.killpg the direct child is killed and reaped (grandchildren
+  may survive — stated in docstrings/API/SKILL, pinned via
+  monkeypatched killpg); no AttributeError can mask RangerTimeout.
+  Doc drift batch: backend list complete (claude), with_config key
+  list regenerated from _RUN_KEYS + pinned by a docs gate, cwd
+  docstring matches the real inherit semantics, dry_run policy
+  wording true, pre-multi-backend lines fixed. Leftovers: PURE_
+  LABELS comment moved to its set, dead pre_gate parameter dropped,
+  pcina budget comment measured fresh. 7 new tests (506 -> 513).
+  513 green, check exit 0, scan 9.41, MI all-A.
