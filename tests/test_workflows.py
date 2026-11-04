@@ -7,6 +7,7 @@ refusing non-repos, clean trees and rail violations.
 """
 
 import os
+import re
 import subprocess
 import time
 from unittest import mock
@@ -251,3 +252,66 @@ class TestCommit:
             # replacing deny=[] clears the rail for THIS commit
             agent.commit(deny=[])
         assert ["git", "add", "-A", "--"] in [c for c in fake.runs]
+
+
+# --------------------------------------------------------------------- #
+# max_iter validator parity (issue #26) — one guard, one message,
+# per-loop minimums honestly pinned
+
+# (name, call, minimum) — every bounded loop in the library
+BOUNDED_LOOPS = [
+    ("until", lambda a, v: a.until("g", max_iter=v, gate_cmd="true"), 0),
+    ("resolve", lambda a, v: a.resolve("g", max_iter=v, gate_cmd="true"), 0),
+    ("fix", lambda a, v: a.fix("g", max_iter=v, gate_cmd="true"), 1),
+    ("refine_with", lambda a, v: a.refine_with(a, "g", max_iter=v), 0),
+]
+
+
+@pytest.mark.parametrize("bad", [-1, True, False, 1.5, "3"])
+@pytest.mark.parametrize("name,call,minimum", BOUNDED_LOOPS)
+def test_all_bounded_loops_reject_the_same_bad_max_iter(
+        name, call, bad, minimum):
+    # the SAME bad value raises the SAME ValueError shape on every
+    # loop — bools are universally refused (True is not a 1-budget)
+    agent = Ranger()
+    with pytest.raises(ValueError, match=re.escape(
+            f"max_iter must be an int >= {minimum}, got {bad!r}")):
+        call(agent, bad)
+
+
+def test_zero_round_budget_split_is_honest():
+    # until/resolve/refine_with document minimum 0 (pinned by their
+    # tests); fix demands >= 1 (pinned by test_bad_budget_raises_up_front)
+    agent = Ranger()
+    out = agent.refine_with(agent, "g", max_iter=0)  # zero rounds, no run
+    assert out == {"approved": False, "iterations": 0,
+                   "report": "", "reviews": []}
+    with pytest.raises(ValueError, match=r"max_iter must be an int >= 1"):
+        agent.fix("g", max_iter=0, gate_cmd="true")
+
+
+class TestZeroRoundBudgetSpendsNothing:
+    def test_resolve_zero_max_iter_fails_without_a_plan_call(self):
+        agent = Ranger(cwd="/repo", timeout=30)
+        # ONE agent call: the red pre-verdict — no plan(), no rounds
+        fake = FakeRunner(agent_replies=["NO\n"],
+                          git_replies={"status": ""})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            result = agent.resolve("g", max_iter=0, condition="c")
+        assert result == {"status": "FAILED", "goal": "g", "plan": "",
+                          "iterations": 0, "report": "",
+                          "last_gate": {"kind": "condition", "ok": False,
+                                        "output": ""}}
+        agent_calls = [c for c in fake.runs if c[0] != "git"]
+        assert len(agent_calls) == 1   # nothing spent past the pre-check
+
+    def test_until_zero_max_iter_spends_no_loop_calls(self):
+        agent = Ranger(cwd="/repo", timeout=30)
+        fake = FakeRunner(agent_replies=["NO\n"],
+                          git_replies={"status": ""})
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            result = agent.until("g", max_iter=0, condition="c")
+        assert result["achieved"] is False
+        assert result["iterations"] == 0
+        agent_calls = [c for c in fake.runs if c[0] != "git"]
+        assert len(agent_calls) == 1

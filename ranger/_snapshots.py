@@ -237,11 +237,14 @@ class SnapshotMixin:
         """Best-effort pre-round snapshot when `snapshots=True`.
 
         Never raises — a skipped snapshot is logged, never claimed.
+        RangerError (no git repo, git failure) and ValueError (e.g. a
+        duplicate auto tag colliding with a user tag) both degrade to
+        the honest no-snapshot result.
         """
         if not self.snapshots:
             return None
         try:
             return self.snapshot(f"{label}-{self._snap_seq + 1}")
-        except RangerError as exc:
+        except (RangerError, ValueError) as exc:
             _LOG.info("snapshot skipped (%s): %s", label, exc)
             return None

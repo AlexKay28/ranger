@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import itertools
 import json
 import logging
 import os
@@ -26,6 +27,10 @@ from ._contracts import (_PURE_LABELS, _ASYNC_TWIN_METHODS,
                          _search_prompt, _check_prompt, _extract_keys_clause,
                          _extract_prompt, _parse_extract_json, _extract_rows,
                          _parse_extract_answer, _parse_check_verdict)
+
+# process-wide pre-loop tag counter: two rollback loops started inside
+# the same second (or two agents in one process) can never collide (#23)
+_PRELOOP_TAG_SEQ = itertools.count(1)
 
 
 class LoopsMixin:
@@ -128,11 +133,19 @@ class LoopsMixin:
         return ok, {"kind": "check", "ok": ok, "output": ""}
 
     def _pre_loop_snapshot(self, who: str):
-        """Best-effort pre-loop snapshot for rollback_on_fail (None=absent)."""
+        """Best-effort pre-loop snapshot for rollback_on_fail (None=absent).
+
+        Tags append pid + a process-wide monotonic counter after the
+        timestamp (issue #23): same-second loop starts used to collide
+        on the bare-second tag and crash through this guard. ValueError
+        is caught alongside RangerError — the only honest outcomes are
+        a tag or None, never an exception.
+        """
+        tag = (f"pre-{who}-{time.strftime('%Y%m%d%H%M%S')}"
+               f"-{os.getpid()}-{next(_PRELOOP_TAG_SEQ)}")
         try:
-            return self.snapshot(
-                f"pre-{who}-{time.strftime('%Y%m%d%H%M%S')}")["tag"]
-        except RangerError as exc:
+            return self.snapshot(tag)["tag"]
+        except (RangerError, ValueError) as exc:
             # best-effort and logged — never claimed when absent
             _LOG.info("%s rollback_on_fail: no snapshot (%s)", who, exc)
             return None
@@ -169,6 +182,20 @@ class LoopsMixin:
         ).strip()
         report = self.do(step, **ov)
         return step, report, *self._verdict(goal, gate_cmd, condition, **ov)
+
+    @staticmethod
+    def _validate_max_iter(value, minimum: int = 0) -> None:
+        """max_iter: a real int >= minimum — bools refused everywhere.
+
+        One guard for every bounded loop (issue #26): until/resolve/
+        refine_with document minimum=0 (a valid zero-round budget),
+        fix demands minimum=1 — whichever loop, the SAME bad value
+        raises the SAME ValueError shape.
+        """
+        if (not isinstance(value, int) or isinstance(value, bool)
+                or value < minimum):
+            raise ValueError(
+                f"max_iter must be an int >= {minimum}, got {value!r}")
 
     @staticmethod
     def _validate_token_budget(token_budget) -> None:
@@ -310,7 +337,9 @@ class LoopsMixin:
 
         Honesty rule 2 (unchanged): max_iter exhausted -> achieved=False,
         never a sympathy iteration because the agent says it's "almost
-        done".
+        done". max_iter must be a real int >= 0 — bools are refused
+        (`True` is not a 1-iteration budget); 0 is a valid zero-round
+        budget that spends nothing beyond the pre-verdict.
 
         `token_budget=N` bounds the loop by SPEND as well: the
         cumulative `agent.costs` ledger is charged per round — real
@@ -332,8 +361,7 @@ class LoopsMixin:
                         gate_cmd="python -m pytest -q",
                         rollback_on_fail=True)
         """
-        if not isinstance(max_iter, int) or max_iter < 0:
-            raise ValueError(f"max_iter must be a non-negative int, got {max_iter!r}")
+        self._validate_max_iter(max_iter)
         self._validate_token_budget(token_budget)
         # -- gate sanity pre-check: vacuous-green detection ------------ #
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
@@ -474,6 +502,11 @@ class LoopsMixin:
            sympathy pass — the loop ends at the budget, not at the
            agent's word
 
+        `max_iter=0` is a valid zero-round budget: a red gate returns
+        status "FAILED" up front, without the plan() call — nothing is
+        spent beyond the pre-verdict. max_iter must be a real int >= 0
+        (bools are refused — `True` is not a 1-iteration budget).
+
         status is exactly one of "ALREADY_GREEN" | "PASS" | "FAILED".
         The result carries the plan, the iteration count, the last do()
         report and last_gate evidence ({"kind", "ok", "output"}, plus a
@@ -491,15 +524,19 @@ class LoopsMixin:
                           gate_cmd=["python -m pytest -q",
                                     "python -m pytest -q -k parse"])
         """
-        if not isinstance(max_iter, int) or max_iter < 0:
-            raise ValueError(
-                f"max_iter must be a non-negative int, got {max_iter!r}")
+        self._validate_max_iter(max_iter)
         self._validate_token_budget(token_budget)
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("resolve pre-check · gate(%s) already green — no work needed",
                       pre_gate["kind"])
             return {"status": "ALREADY_GREEN", "goal": goal, "plan": "",
+                    "iterations": 0, "report": "", "last_gate": pre_gate}
+        if max_iter == 0:
+            # zero-round budget: FAILED up front — no plan() call, no
+            # snapshot, nothing spent beyond the pre-verdict (#26)
+            _LOG.info("resolve zero-round budget · FAILED before any plan() call")
+            return {"status": "FAILED", "goal": goal, "plan": "",
                     "iterations": 0, "report": "", "last_gate": pre_gate}
         snap_tag: str | None = None
         if rollback_on_fail:
@@ -575,6 +612,9 @@ class LoopsMixin:
         work: never invent work); (2) ONE read-only `diagnose()` pass;
         (3) at most `max_iter` `do()` repair rounds, each ending in a
         mechanical verdict — no sympathy pass when the budget ends.
+        max_iter must be a real int >= 1 (bools refused — `True` is not
+        a 1-round budget; 0 refused: zero repair rounds have nothing to
+        gate).
 
         status is exactly "ALREADY_GREEN" | "FIXED" | "FAILED"; the
         result carries the diagnosis and last_gate evidence.
@@ -591,10 +631,7 @@ class LoopsMixin:
             agent.fix("tests/test_parser.py::test_tokens fails",
                       gate_cmd="python -m pytest -q -k tokens")
         """
-        if (not isinstance(max_iter, int) or isinstance(max_iter, bool)
-                or max_iter < 1):
-            raise ValueError(
-                f"max_iter must be a positive int, got {max_iter!r}")
+        self._validate_max_iter(max_iter, minimum=1)
         self._validate_token_budget(token_budget)
         pre_ok, pre_gate = self._verdict(problem, gate_cmd, condition, **ov)
         if pre_ok:

@@ -775,7 +775,10 @@ factually disagree and what evidence would settle it — it never crowns
 a winner. Returns
 `{"transcript": [{"round", "a", "b"}...], "digest": str | None}`.
 
-Validation: `rounds`/`max_iter` must be non-negative ints (`ValueError`);
+Validation: `rounds`/`max_iter` must be real ints — bools refused
+(`True` is not a 1-round budget); `until`/`resolve`/`refine_with` accept
+`max_iter >= 0` (a zero-round budget returns honestly, spending nothing),
+`fix` demands `>= 1`. All four raise the same `ValueError` shape;
 wrong-typed `author`/`critic`/agents/judge raise `TypeError` — up front,
 never after work has already run.
 
@@ -1103,7 +1106,7 @@ keep working:
 | invalid `effort` | `ValueError` (constructor), `TypeError` (per-call) |
 | invalid `backend` | `ValueError` |
 | explicit `session=` passed to `review()` / `debate(judge=...)` | `TypeError` (verdicts run session-free) |
-| `until(max_iter=...)` not a non-negative int | `ValueError` |
+| `until`/`resolve`/`fix`/`refine_with` `max_iter` not a real int ≥ the loop's minimum (bools refused) | `ValueError` |
 | skills directory with no markdown | `RangerError` |
 
 ## Prompt contracts, for the curious

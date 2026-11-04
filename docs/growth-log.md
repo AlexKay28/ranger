@@ -845,3 +845,18 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   choice (Ranger(model="x") semantics; wins over env/default). 5 new
   pinning tests (388 -> 393). 393 green, check exit 0, scan 9.52,
   MI all-A.
+
+- **Review-driven cycle 2 — snapshot-tag collisions (#23) and loop-
+  validator drift (#26).** (1) _pre_loop_snapshot tags are now unique
+  per process (timestamp-pid-counter), so two rollback_on_fail loops
+  in one second can no longer crash on the duplicate-tag ValueError;
+  the loop and _auto_snapshot best-effort guards also catch ValueError
+  now — best-effort means best-effort. (2) One shared
+  _validate_max_iter(value, minimum) drives until/resolve/fix/
+  refine_with: bool universally rejected, identical error shape
+  everywhere, and the zero-policy is honestly split (until/resolve/
+  refine_with accept 0 as the immediately-honest no-iteration result
+  — pinned; fix demands >= 1 — pinned), with resolve(0) no longer
+  spending a plan() call before returning FAILED. 27 new tests via a
+  4x5 parametrized reject-matrix plus collision pins (393 -> 420).
+  420 green, check exit 0, scan 9.52, MI all-A.

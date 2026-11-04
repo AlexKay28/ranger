@@ -238,6 +238,58 @@ class TestAutoSnapshotAndLoops:
         assert "rolled_back" not in result
         assert not any("read-tree" in c for c in git_calls(fake))
 
+    def test_pre_loop_tags_stay_unique_within_the_same_second(self):
+        # issue #23: bare second-resolution tags collided — two
+        # snapshots in one second raised and crashed the loop
+        agent = Ranger(cwd="/repo")
+        fake = FakeGit()
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            t1 = agent._pre_loop_snapshot("until")
+            t2 = agent._pre_loop_snapshot("until")
+        assert t1 != t2
+        assert t1.startswith("pre-until-") and t2.startswith("pre-until-")
+        assert [s["tag"] for s in agent.snapshot_log] == [t1, t2]
+
+    def test_two_rollback_loops_in_one_second_both_restore(self):
+        # the exact #23 crash: two rollback_on_fail loops started fast
+        agent = Ranger(cwd="/repo", timeout=30, retries=0)
+        fake = FakeGit(agent_replies=["NO\n"] * 8)
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            r1 = agent.until("goal", max_iter=1, condition="c",
+                             rollback_on_fail=True)
+            r2 = agent.until("goal", max_iter=1, condition="c",
+                             rollback_on_fail=True)
+        assert r1["achieved"] is False and r2["achieved"] is False
+        assert r1["rolled_back"] is True and r2["rolled_back"] is True
+        assert r1["rollback"]["tag"] != r2["rollback"]["tag"]
+        assert len(agent.snapshot_log) == 2
+
+    def test_until_survives_a_valueerror_snapshot_failure(self):
+        # belt-and-braces: even a non-RangerError failure (duplicate or
+        # invalid tag) degrades to the honest no-snapshot result
+        agent = Ranger(cwd="/repo", timeout=30, retries=0)
+        fake = FakeGit(agent_replies=["NO\n", "step\n", "report\n", "NO\n"])
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            with mock.patch.object(agent, "snapshot",
+                                   side_effect=ValueError(
+                                       "snapshot tag already used: x")):
+                result = agent.until("goal", max_iter=1, condition="c",
+                                     rollback_on_fail=True)
+        assert result["achieved"] is False
+        assert "rolled_back" not in result   # nothing was claimed
+        assert "rollback" not in result
+
+    def test_auto_snapshot_survives_a_duplicate_auto_tag(self):
+        # _auto_snapshot's "never raises" contract vs a ValueError the
+        # pre-registered user tag "pre-do-1" provokes
+        agent = Ranger(cwd="/repo", snapshots=True)
+        agent.snapshot_log.append({"tag": "pre-do-1", "sha": "S",
+                                   "tree": "T", "time": 0.0})
+        fake = FakeGit(agent_replies=["did it\n"])
+        with mock.patch(f"{RANGER_MOD}.run", side_effect=fake):
+            assert agent.do("fix things") == "did it"   # skipped, logged
+        assert [s["tag"] for s in agent.snapshot_log] == ["pre-do-1"]
+
 
 def argv_of(fake, *prefix):
     for c in fake.runs:

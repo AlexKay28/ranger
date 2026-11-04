@@ -352,7 +352,9 @@ absent keys mean no snapshot existed — never a claimed restore.
 `token_budget=N` additionally bounds the loop by spend (`agent.costs`:
 real tokens when reported, else the chars/4 quote() estimate, checked
 before each round); a `FAILED` the budget — not `max_iter` — stopped
-carries `budget_exhausted: True`.
+carries `budget_exhausted: True`. `max_iter` must be a real int ≥ 0
+(bools refused); a zero-round budget returns `FAILED` up front — no
+`plan()` call, nothing spent beyond the pre-verdict.
 
 ```python
 agent.resolve("add coverage for parse()",
@@ -404,7 +406,9 @@ no destructive git verbs anywhere.
 
 ### `fix(problem, gate_cmd=None, condition=None, max_iter=3, rollback_on_fail=False, token_budget=None) -> dict`
 Diagnose once (read-only), repair in bounded `do()` rounds with a
-mechanical verdict each — no sympathy pass. Returns
+mechanical verdict each — no sympathy pass. `max_iter` must be a real
+int ≥ 1 (bools and 0 refused — unlike `until()`/`resolve()`, a repair
+loop has nothing honest to do with zero rounds). Returns
 `{"status": "ALREADY_GREEN"|"FIXED"|"FAILED", "problem", "diagnosis",
 "iterations", "last_gate"}`; a green pre-verdict means zero work, and
 the diagnosis travels inside every repair prompt.

@@ -447,10 +447,7 @@ class MultiMixin:
             builder.refine_with(critic, "add retry tests for parse()",
                                  max_iter=4)
         """
-        if not isinstance(max_iter, int) or isinstance(max_iter, bool) \
-                or max_iter < 0:
-            raise ValueError(
-                f"max_iter must be a non-negative int, got {max_iter!r}")
+        self._validate_max_iter(max_iter)  # same guard as until/resolve/fix (#26)
         if not isinstance(critic, _ranger_cls()):
             raise TypeError("critic must be a Ranger (it gates via .review)")
         if "session" in ov:
