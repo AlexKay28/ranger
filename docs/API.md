@@ -40,7 +40,7 @@ pointed the agent.
 | `ranger.Ranger` | class | The agent class (below). |
 | `ranger.RangerError` | exception | Subclass of `RuntimeError`; the base of ranger's exception taxonomy. |
 | `ranger.RangerTimeout` | exception | Subclass of `RangerError`; a run exceeded its `timeout`. |
-| `ranger.RangerHarnessError` | exception | Subclass of `RangerError`; the harness CLI is missing or exits with an unexpected failure. |
+| `ranger.RangerHarnessError` | exception | Subclass of `RangerError`; the harness CLI is missing, could not be spawned, exited with an unexpected failure, or (opencode stats mode) produced output whose event schema matched nothing (schema drift). |
 | `ranger.DEFAULT_MODEL` | str | Package-default model ID (opencode backend). |
 | `ranger.backends()` | function | Sorted names of all registered harness backends. |
 | `ranger.register_backend(name, cls)` | function | Register a custom harness adapter — see Backends below. |
@@ -1114,7 +1114,23 @@ keep working:
 
 - `RangerTimeout` — a run exceeded its `timeout`.
 - `RangerHarnessError` — the harness CLI is missing (not on PATH),
-  could not be spawned, or exited with an unexpected failure.
+  could not be spawned, exited with an unexpected failure, or — opencode
+  JSON mode only — produced **no parseable output events** (schema
+  drift; see below).
+
+Schema-drift guard (issue #32): in opencode's JSON mode (`stats=True`,
+`--format json`) a run that exits 0 but whose non-empty stdout yields
+zero recognized text parts AND no session id raises
+`RangerHarnessError` with the clipped raw tail — a harness update that
+changes the event shape is refused honestly instead of answering `""`.
+The line is drawn at *recognition*, not answer length: empty stdout
+with exit 0, and a recognized session with zero text parts (a model
+that legitimately answered nothing), both stay legal `""` answers.
+Text-passthrough backends (`pi`, `openhands`, `claude`, and `opencode`
+without `stats`) are unaffected — their stdout **is** the answer, so
+there is nothing to recognize. The error is a transport-class failure:
+it re-attempts under `retries=` like a nonzero exit, and parses fine on
+any later run.
 - plain `RangerError` — parse/prompt-contract failures (e.g. an
   unparseable `check()` verdict) and configuration mistakes.
 
@@ -1124,6 +1140,7 @@ keep working:
 | agent `cwd` does not exist | `RangerError` |
 | harness process could not be spawned (permissions, ENOEXEC, ...) | `RangerHarnessError` with cause |
 | run exits non-zero (bad model, harness error) | `RangerHarnessError` with stderr |
+| opencode stats run exits 0, output non-empty but no JSONL event shape matches (schema drift) | `RangerHarnessError` with the clipped raw stdout tail |
 | run exceeds `timeout` | `RangerTimeout("… timed out …")` |
 | `write()` target is missing **or not a regular file** after the run | `RangerError` |
 | `check()` unparseable, unconfident or contradictory verdict | `RangerError` |

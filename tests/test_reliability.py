@@ -146,6 +146,103 @@ class TestContractFailuresStayPlain:
         assert not isinstance(exc_info.value, RangerHarnessError)
 
 
+class TestSchemaDriftGuard:
+    """Issue #32: a harness whose event schema drifted must be refused
+    loudly, never silently answered with "". The guard fires ONLY for
+    opencode JSON mode (stats=True → --format json): non-empty stdout,
+    exit 0, and a parser that recognized zero text parts AND no session
+    id. Everything else is untouched."""
+
+    # real-looking event lines, but a schema the parser does not know
+    DRIFT = ('{"kind":"session.begin","sid":"s_123"}\n'
+             '{"event":"assistant_chunk","delta":"hello world"}\n')
+
+    # the frozen known shape (byte-identical happy path)
+    VALID = ('{"sessionID":"ses_x","part":{"type":"text",'
+             '"text":"all fine"}}\n')
+
+    def test_drifted_jsonl_raises_with_clipped_tail(self):
+        agent = Ranger(cwd=".", stats=True)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.DRIFT)):
+            with pytest.raises(RangerHarnessError,
+                               match="no parseable output") as exc:
+                agent.ask("hello")
+        msg = str(exc.value)
+        assert "schema drift" in msg
+        assert '"kind":"session.begin"' in msg      # clipped raw tail rides
+
+    def test_valid_events_stay_byte_identical(self):
+        agent = Ranger(cwd=".", stats=True)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.VALID)):
+            assert agent.ask("hello") == "all fine"
+        assert agent.last["session"] == "ses_x"
+
+    def test_session_without_text_parts_is_a_legal_empty_answer(self):
+        """Recognized session + zero parts = the model chose to answer
+        nothing — NOT drift; the line the fix draws is recognition
+        (session id seen), not answer length."""
+        recognized = ('{"sessionID":"ses_y",'
+                      '"part":{"type":"file","path":"x.py"}}\n')
+        agent = Ranger(cwd=".", stats=True, memory=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(recognized)):
+            assert agent.ask("hello") == ""
+
+    def test_empty_stdout_success_stays_legal(self):
+        agent = Ranger(cwd=".", stats=True, memory=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run("")):
+            assert agent.ask("hello") == ""
+
+    def test_text_passthrough_backends_never_raise(self):
+        """pi/claude stdout IS the answer — weird text is returned as-is
+        even in stats mode; the guard knows nothing of them."""
+        for backend in ("pi", "claude"):
+            agent = Ranger(backend=backend, cwd=".", stats=True)
+            noise = "spurious € nonsense :: 42\n"
+            with mock.patch("ranger._engine._Popen",
+                            return_value=fake_run(noise)):
+                assert agent.ask("hello") == noise.strip()
+
+    def test_nonzero_exit_keeps_its_own_error_shape(self):
+        agent = Ranger(cwd=".", stats=True, retries=0)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.DRIFT, stderr="boom",
+                                              returncode=3)):
+            with pytest.raises(RangerHarnessError,
+                               match=r"run failed \(exit 3\)"):
+                agent.ask("hello")
+
+    def test_drift_retries_like_other_harness_failures_then_recovers(self):
+        """Same transport classification as a nonzero exit: a drift is
+        a retryable harness failure, and a later valid stream recovers."""
+        agent = Ranger(cwd=".", stats=True, retries=1, memory=False)
+        outcomes = [
+            fake_run(self.DRIFT),
+            fake_run(self.VALID),
+        ]
+        with mock.patch("ranger._engine._Popen", side_effect=outcomes):
+            assert agent.ask("hello") == "all fine"
+
+    def test_drift_exhausting_retries_still_raises(self):
+        agent = Ranger(cwd=".", stats=True, retries=1)
+        with mock.patch("ranger._engine._Popen",
+                        side_effect=[fake_run(self.DRIFT)] * 2) as spawn:
+            with pytest.raises(RangerHarnessError, match="no parseable"):
+                agent.ask("hello")
+        assert spawn.call_count == 2          # 1 attempt + 1 retry
+
+    def test_stats_off_is_passthrough_and_never_raises(self):
+        """Without stats there is no --format json: stdout is the
+        answer, drift-shaped or not."""
+        agent = Ranger(cwd=".", stats=False)
+        with mock.patch("ranger._engine._Popen",
+                        return_value=fake_run(self.DRIFT)):
+            assert agent.ask("hello") == self.DRIFT.strip()
+
+
 class TestRetries:
     def test_retries_survives_failing_then_succeeding_transport(self):
         agent = Ranger(cwd=".", retries=2)

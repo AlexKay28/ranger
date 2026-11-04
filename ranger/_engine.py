@@ -531,6 +531,12 @@ class EngineMixin:
                     raise RangerHarnessError(
                         f"{prep['backend']} run failed (exit {proc.returncode}):\n{proc.stderr.strip()}"
                     )
+                # issue #32: a structured parser that recognized NOTHING
+                # from non-empty output is honest-refused inside the
+                # retry loop — silent schema drift retries like any
+                # other malformed-output harness failure
+                prep["adapter"].check_output_schema(proc.stdout,
+                                                   prep["use_stats"])
                 return proc
             except (RangerTimeout, RangerHarnessError) as exc:
                 if attempt < retries:
@@ -608,6 +614,9 @@ class EngineMixin:
                     raise RangerHarnessError(
                         f"{prep['backend']} run failed (exit {proc.returncode}):\n{stderr.strip()}"
                     )
+                # issue #32 twin of the sync seam: refuse silent schema
+                # drift inside the retry loop, exactly like _sync_transport
+                prep["adapter"].check_output_schema(stdout, prep["use_stats"])
                 return stdout, stderr
             except (RangerTimeout, RangerHarnessError) as exc:
                 if attempt < retries:

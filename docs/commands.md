@@ -93,7 +93,12 @@ naming where the excerpt ends; prompt spend stays yours to bound.
 - `effort="low|medium|high"` — depth directive on every run: low = brevity
   bias, high = forces thinking blocks + verify-before-answering.
 - `stats=True` — JSON-mode runs; after each command `agent.last` holds
-  `wall_s`, `model_s`, `parts`, `chars`, `session`.
+  `wall_s`, `model_s`, `parts`, `chars`, `session`. JSON mode is also
+  the guarded mode: if the run exits 0 with non-empty output that
+  matches none of opencode's JSONL event shapes (a harness schema
+  drift), the call raises `RangerHarnessError` instead of silently
+  answering `""` (see Errors in docs/API.md). Text output with
+  `stats=False` is never checked — it is the answer.
 
 ## ✅ Shipped — core commands
 

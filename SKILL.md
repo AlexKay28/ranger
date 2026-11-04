@@ -132,6 +132,9 @@ frozen grammars and raise `RangerError` on malformed or conflicting replies.
   internal provider/model names to code, docs, examples, tests, or commits.
 - For a new harness, register a small adapter with
   `ranger.register_backend(name, adapter_cls)`; do not fork command logic.
+- Never silently swallow unrecognized harness output: a structured-mode
+  run that parses to zero recognized events raises `RangerHarnessError`
+  (schema drift), it never masquerades as an empty answer.
 - Resolve a model only when needed: explicit per-call model beats constructor,
   then `RANGER_MODEL`, then the effective backend's default.
 

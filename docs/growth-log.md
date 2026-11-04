@@ -940,3 +940,19 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   RangerError paths byte-identical; _parse_check_verdict(answer,
   evidence=False) wraps. 9 new tests (435 -> 444). 444 green,
   check exit 0, scan 9.44, MI all-A.
+
+- **Cycle 7 — loud schema-drift refusal (#32).** When a harness's
+  JSONL event format drifted, _scan_jsonl recognized zero parts and
+  ask() silently returned "" — the failure class this repo exists to
+  prevent. New overridable adapter hook _Backend.check_output_schema:
+  the opencode backend fires in stats mode when a successful run
+  (exit 0) produced NON-EMPTY stdout the parser recognized NOTHING
+  in (no text part AND no session id) — RangerHarnessError with the
+  clipped raw tail and honest "(schema drift?)" wording, retried as
+  a transport-class failure like nonzero exits. The lines drawn and
+  pinned: recognized-session-with-zero-parts is legal (a model may
+  answer nothing), empty stdout stays legal, text-passthrough
+  adapters never raise (base no-op), nonzero exit keeps its own
+  shape. Codex deliberately untouched — its pinned contract says
+  non-JSON noise is never fatal. 10 new tests (444 -> 454), incl.
+  the async twin. 454 green, check exit 0, scan 9.44, MI all-A.

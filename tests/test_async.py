@@ -245,6 +245,27 @@ class TestRunAsyncBehavior:
         with mock.patch(SPAWN, side_effect=flaky_then_good):
             assert run(agent.ask_async("hi")) == "done"
 
+    def test_schema_drift_is_refused_and_retried_async(self):
+        """Issue #32 async twin: non-empty-but-unrecognized JSONL raises
+        RangerHarnessError inside the async retry loop, then recovers."""
+        agent = Ranger(model="m", cwd=".", stats=True, retries=1,
+                       memory=False)
+        drift = ('{"kind":"session.begin","sid":"s"}\n').encode()
+        good = ('{"sessionID":"sess-7","part":{"type":"text",'
+                '"text":"done"}}\n').encode()
+        calls = []
+        good2, _ = make_exec_factory(stdout=good)
+
+        async def drift_then_good(*cmd, **kw):
+            calls.append(1)
+            if len(calls) == 1:
+                return FakeProc(stdout=drift)
+            return await good2(*cmd, **kw)
+
+        with mock.patch(SPAWN, side_effect=drift_then_good):
+            assert run(agent.ask_async("hi")) == "done"
+        assert len(calls) == 2                # 1 drift attempt + 1 retry
+
     def test_missing_cli_is_harness_error_with_install_hint(self):
         agent = Ranger(model="m", cwd=".", backend="claude")
 

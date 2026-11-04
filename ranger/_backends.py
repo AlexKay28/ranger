@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 from ._util import (RangerError, RangerTimeout, RangerHarnessError,
-                    MODELS_TIMEOUT_S)
+                    MODELS_TIMEOUT_S, _clip, UI_NOTE_CLIP)
 
 # ====================================================================== #
 # Harness backends (adapters)
@@ -135,6 +135,18 @@ class _Backend:
             "set the model in its config file or pass model= explicitly"
         )
 
+    def check_output_schema(self, stdout: str, want_stats: bool) -> None:
+        """Refuse silent schema drift (issue #32); no-op by default.
+
+        Called by the transports after a successful (exit 0) run, so a
+        structured-ouput adapter can raise when its parser recognized
+        NOTHING — without this guard, a harness event-format change
+        would silently turn every answer into "". Text-passthrough
+        adapters (stdout IS the answer) never raise here: their output
+        cannot be "unrecognized".
+        """
+        return None
+
 
 class _OpenCodeBackend(_Backend):
     """opencode CLI adapter: `opencode run`, JSONL parts when stats."""
@@ -214,6 +226,26 @@ class _OpenCodeBackend(_Backend):
             if t.get("end"):
                 ends.append(t["end"])
         return parts_text, session, starts, ends
+
+    def check_output_schema(self, stdout, want_stats):
+        """Raise on silent JSONL drift: stats mode expects event parts.
+
+        Only fires in the structured mode (--format json, stats=True)
+        when stdout is NON-EMPTY yet the parser recognized neither a
+        text part nor a session id — i.e. nothing in the harness's
+        output matched the known event shape. A recognized session
+        with zero parts stays legal (a model may legitimately answer
+        nothing), as does empty stdout (exit 0 with no output).
+        """
+        if not want_stats or not stdout.strip():
+            return None
+        parts, session, _starts, _ends = self._scan_jsonl(stdout)
+        if not parts and session is None:
+            raise RangerHarnessError(
+                f"{self.name} returned no parseable output events "
+                f"(schema drift?) — raw stdout tail:\n"
+                f"{_clip(stdout.strip(), UI_NOTE_CLIP)}"
+            )
 
     def list_models(self, match):
         """Model ids via `opencode models`, optionally filtered by match."""
