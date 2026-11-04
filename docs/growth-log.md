@@ -796,3 +796,21 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   collected-count gate also corrected the marker to the real 386.
   Docs synced (commands.md, API.md, SKILL.md rule row now names all
   three loops). 386 green, check exit 0, scan 9.56, MI all-A.
+
+- **fix() aligned with until()/resolve() — the loop trio is uniform.**
+  The user-sanctioned behavior change closing the review finding:
+  fix() now rides the shared `_bounded_rounds` skeleton via a new
+  `_fix_loop` (cc: fix 10 -> 6), gaining (1) cancellation evidence —
+  Ctrl+C raises KeyboardInterrupt whose message carries the
+  diagnosis, the in-flight round count (the frozen you-paid-for-it
+  convention, same as resolve) and the last mechanical verdict;
+  (2) rollback_on_fail=True — pre-loop git snapshot, red budget
+  restores the tree via _rollback_on_red (best-effort, honest
+  keys); (3) the existing token_budget wiring now checks inside the
+  shared skeleton. Test-authoring lesson recorded: exception
+  instances in a mock side_effect LIST are raised, but wrapped in a
+  lambda they are silently RETURNED — the KI-payload test caught the
+  difference. 2 new tests (388 total): interrupt payload preserves
+  evidence; rollback restores on red. commands.md/API.md/SKILL.md
+  synced (rollback rule row + fix sections). 388 green, check exit 0,
+  scan 9.56, MI all-A.

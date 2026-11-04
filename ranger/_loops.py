@@ -512,8 +512,60 @@ class LoopsMixin:
                                   ov, max_iter, progress, pre_gate,
                                   snap_tag, rollback_on_fail, may_continue)
 
+    def _fix_loop(self, problem, diagnosis, gate_cmd, condition, ov,
+                  max_iter, progress, snap_tag, rollback_on_fail,
+                  may_continue):
+        """Closures + bounded rounds for fix(); composes FAILED.
+
+        Same contract as until()/resolve(): rounds are bounded by
+        max_iter and token_budget; interruption preserves the partial
+        payload; a red budget may restore the tree; FAILED is honest.
+        """
+        clipped = _clip(diagnosis, DIAGNOSIS_CLIP)
+
+        def _interrupt_state():
+            return {"status": "FAILED", "problem": problem,
+                    "diagnosis": diagnosis,
+                    "iterations": progress["iterations"],
+                    "last_gate": progress["last_gate"]}
+
+        def _round(i):
+            progress["iterations"] = i
+            work = (
+                "Repair this problem until the mechanical verdict passes.\n\n"
+                f"Problem: {problem}\n\n"
+                "Diagnosis from a read-only pass:\n"
+                f"{clipped}\n\n"
+                "Make the smallest correct fix, then rerun only the "
+                "relevant checks before reporting."
+            )
+            self.do(work, **ov)
+            ok, last_gate = self._verdict(problem, gate_cmd, condition, **ov)
+            progress["last_gate"] = last_gate
+            _LOG.info("fix iteration %d/%d · gate(%s) → %s", i, max_iter,
+                      last_gate["kind"], "FIXED" if ok else "not yet")
+            if ok:
+                return {"status": "FIXED", "problem": problem,
+                        "diagnosis": diagnosis, "iterations": i,
+                        "last_gate": last_gate}
+            return None
+
+        done, fixed, iters, budget_exhausted = self._bounded_rounds(
+            "fix", max_iter, _round, _interrupt_state, may_continue)
+        if done:
+            return fixed
+        result = {"status": "FAILED", "problem": problem,
+                  "diagnosis": diagnosis, "iterations": iters,
+                  "last_gate": progress["last_gate"]}
+        if budget_exhausted:
+            result["budget_exhausted"] = True
+        if rollback_on_fail and snap_tag is not None:
+            self._rollback_on_red(result, snap_tag)
+        return result
+
     def fix(self, problem: str, gate_cmd: "str | list | None" = None,
             condition: str | None = None, max_iter: int = 3,
+            rollback_on_fail: bool = False,
             token_budget: "int | None" = None,
             **ov) -> dict:
         """Diagnose once, then bounded repair rounds — evidence-carrying.
@@ -529,7 +581,12 @@ class LoopsMixin:
         `token_budget=N` bounds the rounds by SPEND too (the
         `agent.costs` ledger, checked before every round, exactly like
         until()/resolve() — see there); a FAILED the budget stopped
-        carries `budget_exhausted: True`.
+        carries `budget_exhausted: True`. `rollback_on_fail=True`
+        snapshots before round 1 and restores the tree when the budget
+        ends red (`rolled_back: True` + `rollback: {"tag", "restored"}`),
+        best-effort and honest like until(); cancellation raises
+        KeyboardInterrupt with the partial payload — diagnosis and the
+        last verdict survive instead of evaporating.
 
             agent.fix("tests/test_parser.py::test_tokens fails",
                       gate_cmd="python -m pytest -q -k tokens")
@@ -545,33 +602,9 @@ class LoopsMixin:
             return {"status": "ALREADY_GREEN", "problem": problem,
                     "diagnosis": "", "iterations": 0, "last_gate": pre_gate}
         diagnosis = self.diagnose(problem, **ov)
-        clipped = _clip(diagnosis, DIAGNOSIS_CLIP)
-        last_gate: dict = pre_gate
-        rounds = 0
+        progress = {"iterations": 0, "last_gate": pre_gate}
+        snap_tag = self._pre_loop_snapshot("fix") if rollback_on_fail else None
         may_continue = self._budget_guard(token_budget)
-        budget_exhausted = False
-        for i in range(1, max_iter + 1):
-            if may_continue is not None and not may_continue():
-                budget_exhausted = True
-                break
-            rounds = i
-            work = (
-                "Repair this problem until the mechanical verdict passes.\n\n"
-                f"Problem: {problem}\n\n"
-                "Diagnosis from a read-only pass:\n"
-                f"{clipped}\n\n"
-                "Make the smallest correct fix, then rerun only the "
-                "relevant checks before reporting."
-            )
-            self.do(work, **ov)
-            ok, last_gate = self._verdict(problem, gate_cmd, condition, **ov)
-            if ok:
-                return {"status": "FIXED", "problem": problem,
-                        "diagnosis": diagnosis, "iterations": i,
-                        "last_gate": last_gate}
-        result = {"status": "FAILED", "problem": problem,
-                  "diagnosis": diagnosis, "iterations": rounds,
-                  "last_gate": last_gate}
-        if budget_exhausted:
-            result["budget_exhausted"] = True
-        return result
+        return self._fix_loop(problem, diagnosis, gate_cmd, condition, ov,
+                              max_iter, progress, snap_tag, rollback_on_fail,
+                              may_continue)

@@ -402,7 +402,7 @@ Bounded repair built OUT of the existing primitives (law 6) atop the #3
 rails: mechanical pre-verdicts, honest budgets, per-file isolation,
 no destructive git verbs anywhere.
 
-### `fix(problem, gate_cmd=None, condition=None, max_iter=3, token_budget=None) -> dict`
+### `fix(problem, gate_cmd=None, condition=None, max_iter=3, rollback_on_fail=False, token_budget=None) -> dict`
 Diagnose once (read-only), repair in bounded `do()` rounds with a
 mechanical verdict each — no sympathy pass. Returns
 `{"status": "ALREADY_GREEN"|"FIXED"|"FAILED", "problem", "diagnosis",
@@ -411,7 +411,12 @@ the diagnosis travels inside every repair prompt.
 `token_budget=N` bounds the repair rounds by spend as well (the
 `agent.costs` ledger, checked before every round, exactly like
 `until()`/`resolve()`); a `FAILED` the budget — not `max_iter` —
-stopped carries `budget_exhausted: True`.
+stopped carries `budget_exhausted: True`. `rollback_on_fail=True`
+snapshots before round 1 and restores the tree when the budget ends
+red (`rolled_back: True` + `rollback: {"tag", "restored"}`). Cancellation
+raises `KeyboardInterrupt` whose message carries the diagnosis, the
+in-flight round count and the last verdict — the same honest-contract
+trio as `until()`/`resolve()`.
 
 ### `transform(pattern, instruction, max_files=10) -> list[dict]`
 Batch `edit()` over the glob's matches (sorted, first `max_files`):

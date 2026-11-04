@@ -776,7 +776,7 @@ never after work has already run.
 Three bounded compositions over the existing primitives (law 6), shipped
 on top of the [safety rails](#safety-rails) and [snapshots](#snapshots--rollback):
 
-**`fix(problem, gate_cmd=None, condition=None, max_iter=3, token_budget=None) -> dict`** —
+**`fix(problem, gate_cmd=None, condition=None, max_iter=3, rollback_on_fail=False, token_budget=None) -> dict`** —
 the bounded repair loop: mechanical pre-verdict (green →
 `"ALREADY_GREEN"`, zero work — never invent work), ONE read-only
 `diagnose()` pass, then at most `max_iter` `do()` repair rounds, each
@@ -786,7 +786,11 @@ repair prompt. `status` is exactly `"ALREADY_GREEN" | "FIXED" |
 "last_gate"}` — budgets honest, no sympathy pass. `token_budget=N`
 bounds the rounds by spend too (the `agent.costs` ledger, checked
 before each round, as in `until()`/`resolve()`); a `FAILED` the budget
-stopped carries `budget_exhausted: True`. Rails mark the work
+stopped carries `budget_exhausted: True`. `rollback_on_fail=True`
+snapshots before round 1 and restores the tree on a red budget
+(`rolled_back: True` + `rollback: {"tag", "restored"}` — best effort,
+never a claimed restore); cancellation raises `KeyboardInterrupt`
+carrying the diagnosis and in-flight round. Rails mark the work
 rounds: with `deny`/`allow` set, an unverifiable (non-git) cwd refuses
 before any harness spawn.
 

@@ -109,6 +109,48 @@ class TestResolveTokenBudget:
 
 
 class TestFixTokenBudget:
+    def test_interrupt_payload_preserves_partial_evidence(self):
+        """Cancelled fix() keeps the diagnosis + verdict in the KI note."""
+        agent = Ranger()
+        with mock.patch.object(Ranger, "gate",
+                               side_effect=lambda c, **kw: False), \
+             mock.patch.object(Ranger, "diagnose",
+                               side_effect=lambda p, **ov: "root cause X"), \
+             mock.patch.object(Ranger, "do",
+                               side_effect=["repair 1", KeyboardInterrupt]):
+            with pytest.raises(KeyboardInterrupt) as ei:
+                agent.fix("broken thing", gate_cmd="pytest", max_iter=3)
+        msg = str(ei.value)
+        assert "fix() cancelled" in msg
+        assert "root cause X" in msg          # diagnosis survives
+        # iterations: 2 — the in-flight round counts (frozen convention,
+        # same as resolve): you paid for it, so you hear about it
+        assert "iterations': 2" in msg
+        assert "nothing claimed complete" in msg
+
+    def test_rollback_on_fail_restores_on_red(self):
+        agent = Ranger()
+        with mock.patch.object(Ranger, "gate",
+                               side_effect=lambda c, **kw: False), \
+             mock.patch.object(Ranger, "diagnose",
+                               side_effect=lambda p, **ov: "root cause X"), \
+             mock.patch.object(Ranger, "do",
+                               side_effect=lambda w, **ov: "nope"), \
+             mock.patch.object(Ranger, "snapshot",
+                               side_effect=lambda tag=None, **kw: {
+                                   "tag": "pre-fix-1", "sha": "0" * 40,
+                                   "restored": []}), \
+             mock.patch.object(Ranger, "rollback",
+                               side_effect=lambda tag=None, **kw: {
+                                   "tag": "pre-fix-1",
+                                   "sha": "0" * 40,
+                                   "restored": ["src/a.py"]}):
+            outcome = agent.fix("broken thing", gate_cmd="pytest",
+                                max_iter=1, rollback_on_fail=True)
+        assert outcome["status"] == "FAILED"
+        assert outcome["rolled_back"] is True
+        assert outcome["rollback"]["restored"] == ["src/a.py"]
+
     def test_budget_stops_repair_with_honest_flag(self):
         agent = Ranger()
 
