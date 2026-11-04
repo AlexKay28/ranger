@@ -225,7 +225,9 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
         # raw explicit choice; effective default is resolved per run so a
         # per-call backend switch never inherits the other backend's default
         self._model_explicit = model
-        self.model = _initial_model(model, backend)
+        # ctor-site default resolution: kept for its once-per-process
+        # staleness warning — the live value is the `model` property below
+        _initial_model(model, backend)
         self.cwd = str(Path(cwd).resolve()) if cwd else None
         self.timeout = timeout
         self.auto = auto
@@ -261,6 +263,21 @@ class Ranger(SafetyMixin, SnapshotMixin, LoopsMixin, MultiMixin,
             "calls": 0, "chars_in": 0, "chars_out": 0,
             "tokens_in": None, "tokens_out": None, "wall_s": 0.0,
         }
+
+    @property
+    def model(self) -> "str | None":
+        """Model the next run resolves to (never lies about fallbacks).
+
+        Assignment is the explicit ctor choice (issue #22): setting
+        `agent.model = "x"` behaves exactly like `Ranger(model="x")` —
+        explicit, so it wins over `RANGER_MODEL` and the backend default
+        and drives the `--model` the next spawned run passes.
+        """
+        return _initial_model(self._model_explicit, self.backend)
+
+    @model.setter
+    def model(self, value: "str | None") -> None:
+        self._model_explicit = value
 
     def __repr__(self) -> str:
         """Return a compact description of the core run settings."""

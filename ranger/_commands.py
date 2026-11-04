@@ -76,9 +76,19 @@ class CommandsMixin:
         cls = type(self)
         clone = cls.__new__(cls)  # was Ranger.__new__(Ranger): resolve via the instance
         clone.__dict__ = dict(self.__dict__)
-        # mutable state must not leak between configured copies
+        # mutable state must not leak between configured copies (issue #21):
+        # histories, the cost ledger, the snapshot registry and the mutable
+        # collection settings all get fresh containers from birth
         clone.context = [dict(m) for m in self.context]
         clone.last = dict(self.last)
+        clone._costs = dict(self._costs)
+        clone.snapshot_log = list(self.snapshot_log)
+        for key in ("allow", "deny"):
+            setattr(clone, key, list(getattr(self, key)) if getattr(self, key)
+                    else getattr(self, key))
+        clone.env = dict(self.env) if self.env else self.env
+        clone.skills = (list(self.skills)
+                        if isinstance(self.skills, (list, tuple)) else self.skills)
         for key, value in overrides.items():
             if key == "cwd" and value is not None:
                 value = str(Path(value).resolve())

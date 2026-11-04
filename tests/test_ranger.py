@@ -1168,6 +1168,77 @@ def test_with_config_copies_mutable_state():
     assert cmd[cmd.index("--model") + 1] == "fast/model"
 
 
+def test_with_config_ledgers_are_independent():
+    """issue #21: a configured copy gets its OWN cost ledger from birth."""
+    base = Ranger(model="m", cwd="/tmp/demo")
+    clone = base.with_config(agent="build")
+    assert clone._costs is not base._costs
+    base._record_costs(100, 50, {"input_tokens": 10, "output_tokens": 5}, 1.0)
+    assert clone.costs == {"calls": 0, "chars_in": 0, "chars_out": 0,
+                           "tokens_in": None, "tokens_out": None, "wall_s": 0.0}
+    clone._record_costs(1, 2, None, 0.5)
+    assert base.costs["calls"] == 1 and base.costs["chars_in"] == 100
+    assert clone.costs["calls"] == 1 and clone.costs["chars_in"] == 1
+    assert clone.costs["tokens_in"] is None        # no shared telemetry
+
+
+def test_with_config_snapshot_log_is_independent():
+    """issue #21: snapshot registry copies snapshot-at-birth, then diverges."""
+    base = Ranger(cwd="/tmp/demo")
+    base.snapshot_log.append({"tag": "snap-1", "sha": "abc", "time": "t"})
+    clone = base.with_config(model="m")
+    assert clone.snapshot_log == base.snapshot_log  # inherited snapshot
+    assert clone.snapshot_log is not base.snapshot_log
+    clone.snapshot_log.append({"tag": "snap-2", "sha": "def", "time": "t"})
+    base.snapshot_log.append({"tag": "snap-3", "sha": "ghi", "time": "t"})
+    assert [s["tag"] for s in clone.snapshot_log] == ["snap-1", "snap-2"]
+    assert [s["tag"] for s in base.snapshot_log] == ["snap-1", "snap-3"]
+
+
+def test_with_config_collection_settings_not_shared():
+    """issue #21: mutating a copy's allow/deny/env/skills never bleeds home."""
+    base = Ranger(cwd="/tmp/demo", allow=["src/*"], deny=["secret*"],
+                  env={"A": "1"}, skills=["haiku"])
+    clone = base.with_config(model="m")
+    for a, b in ((base.allow, clone.allow), (base.deny, clone.deny),
+                 (base.env, clone.env), (base.skills, clone.skills)):
+        assert a is not b
+    clone.allow.append("extra/*")
+    clone.deny.append("nope*")
+    clone.env["B"] = "2"
+    clone.skills.append("more")
+    assert base.allow == ["src/*"] and base.deny == ["secret*"]
+    assert base.env == {"A": "1"} and base.skills == ["haiku"]
+
+
+def test_model_assignment_is_the_explicit_choice(monkeypatch):
+    """issue #22: `agent.model = ...` drives the next run, no silent ignore."""
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    agent = Ranger(model="a/m", cwd="/tmp/demo")
+    assert agent.model == "a/m"
+    agent.model = "b/m"
+    with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+        agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "b/m"
+    # assignment behaves like Ranger(model=...): explicit beats RANGER_MODEL
+    with mock.patch.dict(os.environ, {"RANGER_MODEL": "env/m"}):
+        agent.model = "c/m"
+        with mock.patch("ranger.subprocess.run", return_value=fake_run("ok")) as m:
+            agent.ask("hi")
+    cmd = m.call_args.args[0]
+    assert cmd[cmd.index("--model") + 1] == "c/m"
+
+
+def test_model_attribute_shows_the_fallback(monkeypatch):
+    """The getter never lies: with nothing explicit it shows what runs use."""
+    monkeypatch.delenv("RANGER_MODEL", raising=False)
+    assert Ranger(cwd="/tmp/demo").model == DEFAULT_MODEL
+    assert Ranger(backend="codex", cwd="/tmp/demo").model is None
+    with mock.patch.dict(os.environ, {"RANGER_MODEL": "env/m"}):
+        assert Ranger(cwd="/tmp/demo").model == "env/m"
+
+
 def test_check_rejects_contradictory_and_unconfident():
     agent = Ranger()
     with mock.patch("ranger.subprocess.run",

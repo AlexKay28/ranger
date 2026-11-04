@@ -68,7 +68,7 @@ any harness you register) from plain Python. You write code, not chat.
 
 ## Quality posture
 
-- 388 tests <!-- tests:388 -->, well under the enforced 60-second suite
+- 393 tests <!-- tests:393 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before

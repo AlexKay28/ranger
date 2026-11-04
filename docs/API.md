@@ -146,6 +146,11 @@ immediately — typos fail loudly, never silently. Priority rules:
   without an explicit model uses its own `config.toml` default and passes
   no `-m` at all). Falling through to the baked `DEFAULT_MODEL` emits a
   one-time `ranger` logger staleness warning per process.
+- `agent.model` is a live view of that precedence, and assigning it
+  (`agent.model = "x"`) is the explicit-choice path — it behaves exactly
+  like `Ranger(model="x")` and drives every later run (the value is
+  resolved, not stored: reading it back shows what the next run would
+  actually use).
 - Agent selection: per-call `agent=` → per-call `mode=` → constructor
   `mode=` → constructor `agent=`.
 - `effort="high"` implies `--thinking` on that run unless nothing stronger
@@ -162,7 +167,10 @@ untouched). Accepts every constructor run-setting plus `cwd` (normalized to
 an absolute path; `cwd=None` restores the process-cwd default) and
 `memory_budget`. Unknown keys raise `TypeError`. The copy takes a
 **snapshot** of `context` and `last` — the two agents' histories diverge
-from the copy point on.
+from the copy point on. Per-agent mutable state is never shared either:
+the copy gets its own `costs` ledger, `snapshot_log`, and
+`allow`/`deny`/`env`/`skills` containers from birth, so billing or
+snapshotting one side never moves the other's numbers.
 
     smart = ranger.Ranger(model="…sonnet…")
     fast = smart.with_config(model="…flash…", mode="build")

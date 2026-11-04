@@ -831,3 +831,17 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   (dated, pasted outputs). No code change — the mocked contracts are
   truthful; one usage law demonstrated anew (the agent rewrote add()
   despite keep-it prose — gates assert contracts, prose does not).
+
+- **Review-driven cycle 1 — the two P0 silent-state bugs (#21, #22),
+  found by an independent model review and fixed with a subagent
+  implementer under the normal gate sweep.** (1) with_config() clones
+  shared the parent's _costs ledger and snapshot_log object (verified:
+  a._costs is b._costs was True) — clones now get fresh containers at
+  birth, including guarded copies of allow/deny/env/skills (None and
+  bare-str forms pass through unchanged). (2) The public agent.model
+  attribute was silently ignored by _effective_model — it is now a
+  property: the getter always shows the model the NEXT run resolves to
+  (never lies about fallbacks), and assignment is the explicit ctor
+  choice (Ranger(model="x") semantics; wins over env/default). 5 new
+  pinning tests (388 -> 393). 393 green, check exit 0, scan 9.52,
+  MI all-A.
