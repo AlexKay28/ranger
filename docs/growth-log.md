@@ -1075,3 +1075,9 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   validation paragraph no longer underclaims. 2 new tests
   (513 -> 515): bad-value-beats-the-auto-snapshot and the loop
   twin. 515 green, check exit 0, scan 9.41, MI all-A.
+
+- **Release 0.9.2 — the review-resolved release.** Version parity
+  bumped. Since 0.9.1: the one review-severity finding (value
+  validation before side effects, loops included) plus the API.md
+  None-semantics paragraph. 515 tests green, check exit 0,
+  scan 9.41, MI all-A.

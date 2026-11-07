@@ -81,14 +81,14 @@ Ranger is composed from six single-purpose mixins plus a slim core —
 
 ## Quality posture
 
-- 513 tests <!-- tests:513 -->, well under the enforced 60-second suite
+- 515 tests <!-- tests:515 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before
   shipping; the suite itself fully mocks subprocesses, so CI runs on
   any machine with no CLIs and no API keys.
 - `main` is the only branch; releases are tagged (current package version:
-  `0.9.1`), CI green on every push.
+  `0.9.2`), CI green on every push.
 
 One-liner for a stranger: *ranger turns the headless opencode/codex
 CLIs into a Python library — the agent is a function call, and the
