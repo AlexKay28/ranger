@@ -17,6 +17,15 @@ reviewed against.
 AI coding agents: start with [SKILL.md](SKILL.md) for the library's safe
 workflow, contracts, and repository contribution rules.
 
+**Documentation map:** [PARADIGM.md](docs/PARADIGM.md) (the seven
+design laws) · [ARCHITECTURE.md](docs/ARCHITECTURE.md) (codebase tour +
+repository map) · [system-analysis.md](docs/system-analysis.md) (as-is
+audit with flow/sequence diagrams) · [API.md](docs/API.md) (full
+reference) · [commands.md](docs/commands.md) (command catalog) ·
+[ENHANCEMENT-LOOP.md](docs/ENHANCEMENT-LOOP.md) ·
+[growth-log.md](docs/growth-log.md) · [live-verification.md](docs/live-verification.md)
+· [PUBLISHING.md](docs/PUBLISHING.md)
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/AlexKay28/ranger/main/docs/cheatsheet.png" alt="ranger command cheatsheet" width="760">
 </p>

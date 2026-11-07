@@ -1081,3 +1081,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   validation before side effects, loops included) plus the API.md
   None-semantics paragraph. 515 tests green, check exit 0,
   scan 9.41, MI all-A.
+
+- **Docs cycle — system-analysis re-audit + diagrams + repository map
+  (cycle 15).** docs/system-analysis.md re-audited at 473e02f
+  (release 0.9.2): the old cycle-18 record was stale on every census
+  number and still listed refactor issues #12–#17 as open — all six
+  resolved long ago; the record now says so. The audit gained four
+  Mermaid diagrams (component graph, the do() end-to-end sequence with
+  the 0.9.2 refuse-early validation and rails-baseline steps, the
+  loop flowchart with the evidence=None stamp, the snapshot
+  lifecycle), a corrected data-schema census (23-key _RUN_KEYS with
+  skills_budget/evidence/env_deny added, verdict-gate and baseline
+  schemas added), refreshed module matrix (fresh line counts,
+  post-refactor verdicts), and a "what remains and why it stays"
+  section separating reviewed budget pins (API-frozen signatures, law-5
+  raise budget, _Spinner mock seam) from stated limits (delta rule,
+  Windows kill). ARCHITECTURE.md gained the full annotated repository
+  map + a system-analysis cross-link; README gained a documentation
+  map. Hygiene: the stray one-byte `--` file (accidentally committed
+  in v0.5.0) removed. 515 green, check exit 0, scan 9.41, MI all-A.
