@@ -4,7 +4,7 @@ Complete reference for everything `ranger` ships. Every public name on this
 page is enforced by `tests/test_docs.py` — if a method or setting is added
 to the code but missing here, the suite fails.
 
-Version 0.9.1 · Module: `ranger` · Single class: `ranger.Ranger`
+Version 0.9.2 · Module: `ranger` · Single class: `ranger.Ranger`
 
 ---
 
@@ -152,9 +152,21 @@ Every command method (`ask`, `summarize`, `read`, `write`, `do`, `edit`, `search
 `until`) accepts any of the run settings above as a keyword, applying it to
 that single call only — **except `cwd`**, which is agent identity and is
 constructor/`with_config`-only. Unknown keywords raise `TypeError`
-immediately — typos fail loudly, never silently. Priority rules:
+immediately — typos fail loudly, never silently — and bad option
+values (`effort`, `evidence`, `skills_budget`, rail specs, `dry_run`)
+are refused just as early: the mutating commands and the loops
+(`do`/`write`/`edit`/`until`/`attempt`/`resolve`/`fix`) validate keys
+AND values before any git probe or auto-snapshot, so a doomed call
+never leaves a phantom snapshot ref behind. Priority rules:
 
 - Per-call value beats constructor value.
+- What an explicit per-call `None` means depends on the option:
+  `model=None` is "no override" (fall through to constructor/env/
+  default), while presence-checked options — `allow`, `deny`, `env`,
+  `skills`, `allow`-style lists — treat per-call `None` as a VALUE that
+  CLEARS the constructor setting for that call. There is no spelling
+  of "inherit `allow`/`deny` per-call" today; re-affirm the rails by
+  repeating them in the call.
 - Model: per-call `model=` → constructor `model=` → `RANGER_MODEL` env →
   package default **resolved per effective backend** (a per-call
   `backend=` switch never inherits the other backend's default; codex

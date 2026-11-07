@@ -105,6 +105,39 @@ class TestSpecValidation:
                 agent.do("goal", badkey=1)
         assert fake.runs == []     # no git probe, no snapshot, no spawn
 
+    def test_bad_value_beats_the_auto_snapshot(self):
+        # review follow-up to the unknown-keyword lift: bad VALUES
+        # (effort/evidence/skills_budget) still reached _run AFTER the
+        # pre-do auto-snapshot, so a snapshots=True agent could spend
+        # a git ref on a call that dies in validation. All pure value
+        # checks now ride the same early seam.
+        agent = Ranger(cwd=".", snapshots=True)
+        fake = FakeRunner()
+        with harness_and_git(fake):
+            for bad in ({"effort": "bogus"}, {"evidence": "yes"},
+                        {"skills_budget": 0}):
+                with pytest.raises((TypeError, ValueError)):
+                    agent.do("goal", **bad)
+        assert fake.runs == []           # no git probe, no spawn
+        assert agent.snapshot_log == []  # and no snapshot ref either
+
+    def test_loop_bad_option_beats_the_pre_loop_snapshot(self):
+        # the same refuse-early law for the loops: until()/fix() (and
+        # attempt()/resolve() on the same guard) validate BEFORE the
+        # _pre_loop_snapshot, so a typo kwarg or bad value never
+        # leaves a phantom rollback ref behind
+        agent = Ranger(cwd=".", snapshots=True)
+        fake = FakeRunner()
+        with harness_and_git(fake):
+            with pytest.raises(TypeError, match="unknown run option"):
+                agent.until("goal", gate_cmd="true", badkey=1,
+                            rollback_on_fail=True)
+            with pytest.raises(TypeError, match="low\\|medium\\|high"):
+                agent.fix("problem", gate_cmd="true", effort="bogus",
+                          rollback_on_fail=True)
+        assert fake.runs == []
+        assert agent.snapshot_log == []
+
 
 # --------------------------------------------------------------------- #
 # edit()/write(): known targets — pre-spawn path predicates

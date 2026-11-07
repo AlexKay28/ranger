@@ -214,6 +214,33 @@ class EngineMixin:
         if unknown:
             raise TypeError(f"unknown run option(s): {', '.join(sorted(unknown))}")
 
+    def _validate_ov(self, ov: dict) -> None:
+        """Validate per-call options — PURE, no world touched.
+
+        The full pure slice of `_resolve_run_options`, lifted out so the
+        mutating commands and the loops can run it BEFORE any git
+        probe, auto-snapshot or pre-loop snapshot: the seam's own law
+        says ALL validation — unknown keys AND bad values alike —
+        comes BEFORE any outside world is touched. Everything checked
+        here needs no backend knowledge; backend resolution stays on
+        the shared seam.
+        """
+        self._validate_ov_keys(ov)
+        opts = self._merged_run_options(
+            {k: getattr(self, k) for k in _RUN_KEYS}, ov)
+        self._validate_skills_budget(opts.get("skills_budget"))
+        self._validate_evidence(opts.get("evidence"))
+        # the env_deny rail validates here too, so even a mutating
+        # command refuses a malformed spec before any snapshot
+        _normalize_env_names("env_deny", opts.get("env_deny"))
+        # safety-rail specs and dry_run's type too — pure checks only
+        self._resolve_safety(ov)
+        # effort's lowercasing rule lives here as well, so a bad value
+        # dies before a pre-loop snapshot can leave a phantom ref
+        effort = (opts.get("effort") or "medium").lower()
+        if effort not in ("low", "medium", "high"):
+            raise TypeError(f"effort must be low|medium|high, got {effort!r}")
+
     def _resolve_run_options(self, label: str, ov: dict) -> tuple:
         """Merge ctor + per-call run options into `o`; validate everything.
 
@@ -221,17 +248,9 @@ class EngineMixin:
         unknown keywords / unknown backends / bad effort, and validates
         the safety-rail specs — all BEFORE any outside world is touched.
         """
+        self._validate_ov(ov)
         opts = self._merged_run_options(
             {k: getattr(self, k) for k in _RUN_KEYS}, ov)
-        self._validate_ov_keys(ov)
-        self._validate_skills_budget(opts.get("skills_budget"))
-        self._validate_evidence(opts.get("evidence"))
-        # the env_deny rail validates on the shared seam too, so even a
-        # read-only command refuses a malformed spec before any spawn
-        _normalize_env_names("env_deny", opts.get("env_deny"))
-        # safety-rail specs are validated on the shared seam too, so even
-        # read-only commands reject a malformed spec before any spawn
-        self._resolve_safety(ov)
 
         backend_name = opts["backend"]
         try:
@@ -250,9 +269,9 @@ class EngineMixin:
             o["session"] = None
         o["agent"] = self._effective_agent_mode(opts, ov)
         o["mode"] = None
+        # effort already passed _validate_ov's low|medium|high gate; the
+        # lowering here only feeds the thinking rule below
         effort = (o["effort"] or "medium").lower()
-        if effort not in ("low", "medium", "high"):
-            raise TypeError(f"effort must be low|medium|high, got {effort!r}")
         # high effort implies thinking blocks / reasoning effort
         o["thinking"] = bool(o["thinking"] or effort == "high")
         return opts, o, adapter, backend_name

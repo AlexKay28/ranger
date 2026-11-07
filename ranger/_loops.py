@@ -351,6 +351,9 @@ class LoopsMixin:
         """
         self._validate_max_iter(max_iter)
         self._validate_token_budget(token_budget)
+        # keys AND values refuse-early too (bad effort/typo kwarg must
+        # never leave a phantom pre-loop snapshot ref behind)
+        self._validate_ov(ov)
         # -- gate sanity pre-check: vacuous-green detection ------------ #
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
@@ -395,6 +398,7 @@ class LoopsMixin:
             agent.attempt("add __repr__ to Parser",
                           gate_cmd="python -m pytest -q tests/test_parser.py")
         """
+        self._validate_ov(ov)  # keys AND values refuse-early — see until()
         # -- gate sanity pre-check: vacuous-green detection -------------- #
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
@@ -514,6 +518,7 @@ class LoopsMixin:
         """
         self._validate_max_iter(max_iter)
         self._validate_token_budget(token_budget)
+        self._validate_ov(ov)  # keys AND values refuse-early — see until()
         pre_ok, pre_gate = self._verdict(goal, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("resolve pre-check · gate(%s) already green — no work needed",
@@ -621,6 +626,7 @@ class LoopsMixin:
         """
         self._validate_max_iter(max_iter, minimum=1)
         self._validate_token_budget(token_budget)
+        self._validate_ov(ov)  # keys AND values refuse-early — see until()
         pre_ok, pre_gate = self._verdict(problem, gate_cmd, condition, **ov)
         if pre_ok:
             _LOG.info("fix pre-check · already green — no work needed")

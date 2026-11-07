@@ -1056,3 +1056,22 @@ pcina check clean/baselined, radon MI ≥ B and the backlog is empty.
   guard, validation before side effects, honest Windows kill
   degradation, and the doc-drift batch with new docs gates.
   513 tests green, check exit 0, scan 9.41, MI all-A.
+
+- **Cycle 14 — review findings resolved (validation truth, take two).**
+  A follow-up review of the 0.9.1 range found the unknown-KEYWORD
+  lift incomplete on two axes: (1) bad option VALUES (effort/
+  evidence/skills_budget/env_deny/rail specs/dry_run) still reached
+  _run AFTER the pre-do auto-snapshot — a snapshots=True agent could
+  spend a real git ref on a call that dies in validation;
+  (2) the loops (until/attempt/resolve/fix) never got the early
+  check at all — a typo kwarg could leave a phantom pre-loop
+  snapshot ref behind. Fix: _validate_ov — the full pure slice of
+  _resolve_run_options (keys AND values, backend resolution stays
+  on the shared seam) — now runs at the top of do/write/edit (sync
+  and async twins) and of every loop entry, before any git probe or
+  snapshot. Plus two doc truths: API.md now states the None-override
+  semantics per option (model=None inherits; presence-checked
+  options treat per-call None as a CLEAR), and the docs'
+  validation paragraph no longer underclaims. 2 new tests
+  (513 -> 515): bad-value-beats-the-auto-snapshot and the loop
+  twin. 515 green, check exit 0, scan 9.41, MI all-A.
