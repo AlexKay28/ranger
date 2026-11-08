@@ -78,6 +78,31 @@ Python control flow**. No DSL, no graph JSON, no hidden runtime.
    untouched. See `register_backend()` and the Backends section of
    [API.md](API.md).
 
+## Is this functional programming?
+
+In spirit, yes; in the textbook sense, no — and the mix is deliberate.
+
+- **Functional discipline where it matters:** frozen prompt templates
+  (changing one is a breaking change, pinned by tests), pure-Python
+  path predicates for the safety rails, pure option validation
+  (`_validate_ov` — refuses before any world is touched), verdicts
+  parsed from grammars instead of trusted prose, and purity of facts:
+  `check`/`critique`/`diagnose`/`read`/`search`/`summarize`/`test`/
+  `trace` are deterministic functions of their arguments, not of chat.
+- **Imperative OO where it is honest:** `Ranger` is one class composed
+  from mixins, and its state (`agent.context`, the `costs` ledger,
+  `snapshot_log`) is mutable — but explicit, visible, and Python-side
+  (law 4). A library that drives subprocesses and audits git trees
+  cannot be a pure function; what it *can* do is keep every side
+  effect explicit and every boundary typed, which is the part of the
+  functional paradigm worth keeping.
+
+A developer coming from FP should read ranger as: **functions for the
+contract, an object for the session**. The method surface behaves like
+a pure function of `(prompt, options)` returning a typed value or
+raising; the instance is just the visible home of the history and the
+ledger.
+
 ## What this rules out (and why)
 
 - **The chat paradigm.** State in a transcript, implied control flow,
