@@ -7,7 +7,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest: ubuntu-latest now resolves to Ubuntu 26.04,
+    # where setup-python no longer offers Python 3.9. pyproject requires >=3.9,
+    # so pin the runner image instead of dropping 3.9. Revisit if requires-python changes.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +56,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install package + gate tools
-        run: python3 -m pip install -e .[dev] pcina radon
+        # pcina==0.9.0: the pcina.toml budgets are the user-reviewed cycle-12 maxima
+        # measured under pcina 0.9.0 budgets-only semantics; pcina >=0.9.3 default-fails
+        # `pcina check` on ANY warn finding, not just budget violations.
+        run: python3 -m pip install -e .[dev] pcina==0.9.0 radon
       - name: Budget gate — pcina check must pass
         run: pcina check ranger/
       - name: Quality-score floor — pcina scan rated >= 9.0
