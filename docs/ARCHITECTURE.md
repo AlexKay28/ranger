@@ -134,7 +134,7 @@ ranger/
 
 ## Quality posture
 
-- 515 tests <!-- tests:515 -->, well under the enforced 60-second suite
+- 517 tests <!-- tests:517 -->, well under the enforced 60-second suite
   budget, including introspection-based docs gates (an undocumented method
   reddens CI; a `<!-- tests:N -->` marker keeps the counted claim honest).
 - Every feature is live-verified against real harnesses before

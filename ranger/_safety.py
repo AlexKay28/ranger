@@ -48,9 +48,15 @@ class SafetyMixin:
         if not dry and (allow or deny):
             root = self._git("rev-parse", "--show-toplevel").strip() or None
             if root:
+                # audit fix (issue #34): plain porcelain collapses a
+                # fully-untracked directory to ONE record `?? dir\0` —
+                # `-uall` lists the files individually, so a brand-new
+                # `secrets/` under a `deny=["secrets/**"]` rail lands
+                # in the baseline as a matchable path, not the bare
+                # directory name that the glob never matches.
                 baseline = _porcelain_changed_z(
                     self._git("-c", "core.quotepath=false",
-                              "status", "--porcelain", "-z"))
+                              "status", "--porcelain", "-z", "-uall"))
         return allow, deny, dry, root, baseline
 
     def _path_violations(self, allow, deny, root,
@@ -71,8 +77,14 @@ class SafetyMixin:
         vs the baseline. Pre-existing dirt outside the rails must
         never be blamed on the agent.
         """
+        # audit fix (issue #34): same `-uall` as `_guard_do` — without
+        # it a brand-new untracked directory arrives as ONE collapsed
+        # `?? dir\0` record, so the rails saw the bare name `src` (which
+        # an `allow=["src/**"]` glob does not match → false violation)
+        # or `secrets` (which a `deny=["secrets/**"]` glob does not
+        # match → silent deny bypass).
         porcelain = self._git("-c", "core.quotepath=false",
-                              "status", "--porcelain", "-z")
+                              "status", "--porcelain", "-z", "-uall")
         changed = _porcelain_changed_z(porcelain)
         if baseline is not None:
             changed = {p: xy for p, xy in changed.items()

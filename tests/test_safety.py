@@ -6,7 +6,10 @@ overrides win over the constructor; default (allow=None, deny=None)
 adds ZERO subprocess calls on any path (backward compat).
 """
 
+import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -577,3 +580,69 @@ class TestPorcelainZRecords:
         with harness_and_git(fake):
             with pytest.raises(RangerError, match="ünïcode.py"):
                 agent.do("goal")
+
+
+# --------------------------------------------------------------------- #
+# audit fix (issue #34): collapsed `?? dir/` records made the rails
+# blind to brand-new untracked directories — plain
+# `git status --porcelain -z` reports a fully-untracked directory as
+# ONE record `?? dir\0`, so a deny=["secrets/**"] rail saw only the
+# bare name `secrets` (glob never matches → silent deny bypass) and an
+# allow=["src/**"] rail saw only `src` (glob never matches → false
+# violation for explicitly allowed work). `-uall` on BOTH porcelain
+# captures (baseline + post-run, `_guard_do` / `_path_violations`)
+# lists untracked FILES individually, which the existing -z parser
+# and glob matcher already handle. Pinned against REAL git — the
+# mocked replies above cannot regress this because the defect was in
+# the argv we send, not the records we parse.
+
+def _real_repo() -> str:
+    """A real throwaway git repo with one committed file — issue #34's
+    repro lives in real git's porcelain collapsing, not in our mocks."""
+    path = tempfile.mkdtemp(prefix="ranger-issue34-")
+    def git(*args):
+        subprocess.run(["git", "-C", path, *args], check=True,
+                       capture_output=True)
+    git("-c", "user.email=t@example.com", "-c", "user.name=T",
+        "init", "-q")
+    (Path(path) / "tracked.txt").write_text("committed\n")
+    git("-c", "user.email=t@example.com", "-c", "user.name=T",
+        "add", "-A", "--")
+    git("-c", "user.email=t@example.com", "-c", "user.name=T",
+        "commit", "-q", "-m", "seed")
+    return path
+
+
+class TestRealGitBrandNewUntrackedDirs:
+    """issue #34: `?? dir/` collapsing — pinned on a real git repo.
+
+    `_guard_do`/`_path_violations` run real git here (no harness
+    processes are spawned, so no seams need faking)."""
+
+    def test_deny_rail_catches_a_brand_new_untracked_dir(self):
+        repo = _real_repo()
+        try:
+            # a brand-new secrets/ holding key.pem: pre-fix, porcelain
+            # said only `?? secrets/` and deny=["secrets/**"] missed it
+            agent = Ranger(cwd=repo, model="m", deny=["secrets/**"])
+            allow, deny, dry, root, baseline = agent._guard_do({})
+            (Path(repo) / "secrets").mkdir()
+            (Path(repo) / "secrets" / "key.pem").write_text("KEY\n")
+            violations = agent._path_violations(allow, deny, root, baseline)
+            assert "secrets/key.pem" in violations  # non-empty: caught
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_allow_rail_admits_a_brand_new_untracked_dir(self):
+        repo = _real_repo()
+        try:
+            # a brand-new src/new.py under allow=["src/**"]: pre-fix,
+            # porcelain said only `?? src/` and the bare name `src`
+            # was flagged as outside the rails — a false positive
+            agent = Ranger(cwd=repo, model="m", allow=["src/**"])
+            allow, deny, dry, root, baseline = agent._guard_do({})
+            (Path(repo) / "src").mkdir()
+            (Path(repo) / "src" / "new.py").write_text("x = 1\n")
+            assert agent._path_violations(allow, deny, root, baseline) == []
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
