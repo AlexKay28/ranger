@@ -311,9 +311,17 @@ class SnapshotMixin:
             "deny", deny if deny is not None else self.deny)
         root = self._repo_root("commit()")
         # NUL-delimited porcelain (#25): spaces, renames and non-ASCII
-        # quote-needing paths keep their exact bytes
+        # quote-needing paths keep their exact bytes.
+        # audit fix (issue #36): same `-uall` as the #34 guards in
+        # _safety.py — plain porcelain collapses a fully-untracked
+        # directory to ONE record `?? dir\0`, so a brand-new
+        # `secrets/key.pem` under a `deny=["secrets/**"]` rail is
+        # judged as the bare name `secrets`, which the glob never
+        # matches → a silent deny bypass of the "deny wins" contract.
+        # `-uall` lists the files individually so each path is
+        # checked against the rails as-is.
         porcelain = self._git("-c", "core.quotepath=false",
-                              "status", "--porcelain", "-z")
+                              "status", "--porcelain", "-z", "-uall")
         if not porcelain.strip():
             raise RangerError(
                 "commit(): nothing to commit — the working tree is clean")
