@@ -605,6 +605,13 @@ def _real_repo() -> str:
                        capture_output=True)
     git("-c", "user.email=t@example.com", "-c", "user.name=T",
         "init", "-q")
+    # repo-LOCAL identity (issue #36 attempt 2): CI runners have no
+    # global git identity, and commit() (unlike the per-command seed
+    # below) runs a bare `git commit -m` — without this, CI fails with
+    # "Author identity unknown" (exit 128). The redundant -c flags on
+    # the seed commands stay as belt-and-braces.
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "T")
     (Path(path) / "tracked.txt").write_text("committed\n")
     git("-c", "user.email=t@example.com", "-c", "user.name=T",
         "add", "-A", "--")
