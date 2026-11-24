@@ -646,3 +646,53 @@ class TestRealGitBrandNewUntrackedDirs:
             assert agent._path_violations(allow, deny, root, baseline) == []
         finally:
             shutil.rmtree(repo, ignore_errors=True)
+
+
+class TestRealGitCommitBrandNewUntrackedDirs:
+    """issue #36: the same `?? dir/` blindness at the commit() call
+    site, pinned on a real git repo.
+
+    A sibling of the #34 audit fix: commit() captured plain
+    `git status --porcelain -z`, so a brand-new fully-untracked
+    directory arrived as ONE collapsed `?? dir\0` record and
+    `_assert_path_allowed` judged the bare directory name — which the
+    `secrets/**` / `src/**` globs never match. A denied `secrets/`
+    directory was silently COMMITTED (a deny bypass); an allowed
+    `src/` directory was a false violation. `-uall` on the commit-path
+    porcelain lists the files individually so each real path hits the
+    rails, honoring the documented "deny wins" contract."""
+
+    def test_commit_denies_a_brand_new_untracked_dir(self):
+        repo = _real_repo()
+        try:
+            agent = Ranger(cwd=repo, model="m", deny=["secrets/**"])
+            (Path(repo) / "secrets").mkdir()
+            (Path(repo) / "secrets" / "key.pem").write_text("KEY\n")
+            with pytest.raises(RangerError, match=r"secrets"):
+                agent.commit("oops")
+            # nothing was committed: HEAD is still the seed commit
+            head = subprocess.run(
+                ["git", "-C", repo, "log", "--format=%h", "-1"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            seed = subprocess.run(
+                ["git", "-C", repo, "log", "--format=%h", "-1", "--",
+                 "tracked.txt"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            assert head == seed
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_commit_admits_a_brand_new_untracked_dir(self):
+        repo = _real_repo()
+        try:
+            agent = Ranger(cwd=repo, model="m", allow=["src/**"])
+            (Path(repo) / "src").mkdir()
+            (Path(repo) / "src" / "new.py").write_text("x = 1\n")
+            sha = agent.commit("allowed work")
+            named = subprocess.run(
+                ["git", "-C", repo, "log", "--name-only",
+                 "--format=%h", "-1"],
+                check=True, capture_output=True, text=True).stdout
+            assert sha[:7] in named and "src/new.py" in named
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)

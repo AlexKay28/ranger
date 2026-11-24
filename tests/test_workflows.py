@@ -222,9 +222,10 @@ class TestCommit:
             sha = agent.commit("my fix", allow=["src/**"])
         argvs = [c for c in fake.runs]
         assert argvs[0] == ["git", "rev-parse", "--show-toplevel"]
-        # issue #25: literal, NUL-delimited status records
+        # issue #25: literal, NUL-delimited status records; issue #36:
+        # -uall so brand-new untracked dirs are not collapsed to `?? dir/`
         assert argvs[1] == ["git", "-c", "core.quotepath=false",
-                            "status", "--porcelain", "-z"]
+                            "status", "--porcelain", "-z", "-uall"]
         assert argvs[2] == ["git", "add", "-A", "--"]
         assert argvs[3] == ["git", "commit", "-m", "my fix"]
         assert argvs[4] == ["git", "rev-parse", "HEAD"]
@@ -242,7 +243,8 @@ class TestCommit:
             with pytest.raises(RangerError, match="nothing to commit"):
                 agent.commit()
         assert fake.runs[-1] == ["git", "-c", "core.quotepath=false",
-                                 "status", "--porcelain", "-z"]  # no add
+                                 "status", "--porcelain", "-z",
+                                 "-uall"]  # no add
 
     def test_non_repo_is_refused(self):
         agent = Ranger(cwd="/somewhere")
